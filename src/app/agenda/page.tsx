@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useAuth } from "@/components/auth/auth-provider";
 import { AgendaBlocksModal } from "@/components/agenda/agenda-blocks-modal";
 import { AgendaCalendar } from "@/components/agenda/agenda-calendar";
 import { AgendaFilters } from "@/components/agenda/agenda-filters";
@@ -27,16 +28,17 @@ import { PageTopbar } from "@/components/layout/page-topbar";
 import { Modal } from "@/components/ui/modal";
 import { getMeetingsSnapshot, setMeetingsSnapshot } from "@/lib/crm-data-store";
 import { useResponsaveis } from "@/lib/responsaveis-store";
+import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
 import { Meeting } from "@/types/crm";
 
-function createEmptyMeeting(date = ""): Meeting {
+function createEmptyMeeting(date = "", owner = ""): Meeting {
   return {
     id: `M-${Date.now()}`,
     personName: "",
     date,
     callTime: "09:00",
     reason: "apresentacao",
-    owner: "",
+    owner,
     notes: "",
   };
 }
@@ -73,6 +75,7 @@ function getMeetingSearchableText(meeting: Meeting) {
 }
 
 export default function AgendaPage() {
+  const { currentUser } = useAuth();
   const [displayMode, setDisplayMode] = useState<AgendaDisplayMode>("calendario");
   const [periodMode, setPeriodMode] = useState<AgendaPeriodMode>("mes");
   const [selectedDate, setSelectedDate] = useState<Date>(startOfDay(getCurrentReferenceDate()));
@@ -90,6 +93,8 @@ export default function AgendaPage() {
     reason: string;
     extraDetail?: string;
   } | null>(null);
+  const [resolvedOwnerName, setResolvedOwnerName] = useState("");
+  const [resolvedOwnerError, setResolvedOwnerError] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<AgendaBlocks>(() => {
     if (typeof window === "undefined") return emptyAgendaBlocks;
     try {
@@ -115,6 +120,27 @@ export default function AgendaPage() {
   const hasActiveSearch = normalizeSearchText(searchTerm).length > 0;
   const [nowRef, setNowRef] = useState<Date>(() => getCurrentReferenceDate());
   const today = startOfDay(nowRef);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadOwner = async () => {
+      const resolved = await resolveResponsavelFromUserAsync(currentUser);
+      if (!mounted) return;
+      if (!resolved.linked || !resolved.responsavel) {
+        setResolvedOwnerName("");
+        setResolvedOwnerError(
+          "Seu usuario autenticado ainda nao esta vinculado a um responsavel no CRM. Cadastre o e-mail em Configuracoes > Responsaveis.",
+        );
+        return;
+      }
+      setResolvedOwnerName(resolved.responsavel.nome);
+      setResolvedOwnerError(null);
+    };
+    void loadOwner();
+    return () => {
+      mounted = false;
+    };
+  }, [currentUser]);
 
   const monthOptions = useMemo(() => {
     const selectedYear = selectedDate.getFullYear();
@@ -211,7 +237,15 @@ export default function AgendaPage() {
   };
 
   const openNew = () => {
-    setSelected(createEmptyMeeting(toIsoDate(selectedDate)));
+    if (!resolvedOwnerName) {
+      setBlockingAlert({
+        message: "Nao foi possivel criar agendamento sem responsavel vinculado.",
+        category: "Responsavel nao vinculado",
+        reason: resolvedOwnerError || "Vincule seu e-mail em Configuracoes > Responsaveis.",
+      });
+      return;
+    }
+    setSelected(createEmptyMeeting(toIsoDate(selectedDate), resolvedOwnerName));
     setIsNew(true);
     setOpen(true);
   };
@@ -230,7 +264,15 @@ export default function AgendaPage() {
       showBlockingAlert(blockInfo);
       return;
     }
-    setSelected({ ...createEmptyMeeting(date), callTime: time || "09:00" });
+    if (!resolvedOwnerName) {
+      setBlockingAlert({
+        message: "Nao foi possivel criar agendamento sem responsavel vinculado.",
+        category: "Responsavel nao vinculado",
+        reason: resolvedOwnerError || "Vincule seu e-mail em Configuracoes > Responsaveis.",
+      });
+      return;
+    }
+    setSelected({ ...createEmptyMeeting(date, resolvedOwnerName), callTime: time || "09:00" });
     setIsNew(true);
     setOpen(true);
   };
@@ -244,6 +286,14 @@ export default function AgendaPage() {
   const saveMeeting = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected) return;
+    if (!resolvedOwnerName) {
+      setBlockingAlert({
+        message: "Nao foi possivel salvar agendamento sem responsavel vinculado.",
+        category: "Responsavel nao vinculado",
+        reason: resolvedOwnerError || "Vincule seu e-mail em Configuracoes > Responsaveis.",
+      });
+      return;
+    }
     if (isPastDateTime(selected.date, selected.callTime, nowRef)) {
       setBlockingAlert({
         message: "Nao e possivel agendar em data ou horario que ja passou.",
@@ -258,9 +308,14 @@ export default function AgendaPage() {
       return;
     }
 
+    const normalizedSelected = {
+      ...selected,
+      owner: resolvedOwnerName,
+    };
+
     setMeetings((prev) => {
-      if (isNew) return [...prev, selected];
-      return prev.map((meeting) => (meeting.id === selected.id ? selected : meeting));
+      if (isNew) return [...prev, normalizedSelected];
+      return prev.map((meeting) => (meeting.id === selected.id ? normalizedSelected : meeting));
     });
 
     setOpen(false);

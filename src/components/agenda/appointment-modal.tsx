@@ -2,7 +2,6 @@
 
 import { FormEvent } from "react";
 import { Modal } from "@/components/ui/modal";
-import { useResponsaveis } from "@/lib/responsaveis-store";
 import { CallReason, Meeting } from "@/types/crm";
 
 type AppointmentModalProps = {
@@ -24,14 +23,12 @@ export function AppointmentModal({
   onChange,
   onSubmit,
 }: AppointmentModalProps) {
-  const responsaveis = useResponsaveis();
-
   return (
     <Modal title={isNew ? "Novo Agendamento" : "Detalhes do Agendamento"} open={open} onClose={onClose}>
       {meeting ? (
         <form className="space-y-4" onSubmit={onSubmit}>
           <label className="block text-sm">
-            Nome da pessoa
+            Nome do cliente
             <input
               className="field mt-1"
               value={meeting.personName}
@@ -77,19 +74,7 @@ export function AppointmentModal({
           </label>
           <label className="block text-sm">
             Responsavel
-            <select
-              className="field mt-1"
-              value={meeting.owner}
-              onChange={(e) => onChange({ ...meeting, owner: e.target.value })}
-              required
-            >
-              <option value="">Selecione...</option>
-              {responsaveis.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
+            <input className="field mt-1" value={meeting.owner} readOnly />
           </label>
           <label className="block text-sm">
             Observacoes
