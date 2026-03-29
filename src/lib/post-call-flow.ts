@@ -52,6 +52,9 @@ export type PostCallWrapup = {
   spokeWithPerson?: "sim" | "nao";
   rightPerson?: "sim" | "nao";
   result: PostCallResultOption;
+  connected?: boolean;
+  finalizacaoTipo?: "NAO_CONECTOU" | "PROBLEMA_BASE" | "CONECTOU";
+  finalizacaoResultado?: "POSITIVO" | "NEGATIVO" | "NEUTRO";
   reason?: string;
   observations: string;
   nextAction: string;

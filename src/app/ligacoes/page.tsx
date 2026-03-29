@@ -12,6 +12,7 @@ import {
 } from "@/lib/crm-data-store";
 import { useResponsaveisRecords } from "@/lib/responsaveis-store";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
+import { getFinalizacaoClassification } from "@/lib/finalizacao-classification";
 import {
   ActiveCallSession,
   PostCallWrapup,
@@ -486,19 +487,6 @@ function normalizeFinalizacaoKey(value: string) {
     .trim();
 }
 
-function classifyFinalizacao(value: string): "positivo" | "negativo" | "neutro" {
-  const normalized = normalizeFinalizacaoKey(value);
-  if (!normalized || normalized === "-") return "neutro";
-
-  const positiveTokens = ["falou com cliente", "avancou negociacao", "pediu proposta", "proposta"];
-  if (positiveTokens.some((token) => normalized.includes(token))) return "positivo";
-
-  const negativeTokens = ["sem interesse", "recusou", "numero invalido", "pessoa nao conhece"];
-  if (negativeTokens.some((token) => normalized.includes(token))) return "negativo";
-
-  return "neutro";
-}
-
 function finalizacaoBarColor(label: string) {
   const normalized = normalizeFinalizacaoKey(label);
   if (normalized.includes("falou com cliente")) return "bg-emerald-400";
@@ -774,7 +762,9 @@ export default function LigacoesPage() {
     for (const call of filteredCalls) {
       const duration = Number(call.durationSeconds || 0);
       if ((call.startedAt || "").slice(0, 10) === today) todayCalls += 1;
-      if (isTechnicalAnswered(call.status, duration)) {
+      const classification = getFinalizacaoClassification(call.finalizacao);
+      const connected = classification ? classification.conectado : isTechnicalAnswered(call.status, duration);
+      if (connected) {
         answered += 1;
         totalAnsweredSeconds += duration;
       }
@@ -802,7 +792,10 @@ export default function LigacoesPage() {
   );
 
   const cpc = useMemo(() => {
-    const productive = filteredCalls.filter((call) => classifyFinalizacao(call.finalizacao) === "positivo").length;
+    const productive = filteredCalls.filter((call) => {
+      const normalized = normalizeFinalizacaoKey(call.finalizacao);
+      return normalized === "falou com cliente";
+    }).length;
     const total = filteredCalls.length;
     const rate = total > 0 ? Math.round((productive / total) * 100) : 0;
     return { productive, total, rate };
@@ -1090,6 +1083,9 @@ export default function LigacoesPage() {
         responsavelId: ownerId,
         atendenteNome: ownerName,
         result: postCallForm.result,
+        connected: getFinalizacaoClassification(postCallForm.result)?.conectado,
+        finalizacaoTipo: getFinalizacaoClassification(postCallForm.result)?.tipo,
+        finalizacaoResultado: getFinalizacaoClassification(postCallForm.result)?.resultado,
         reason: postCallForm.reason || undefined,
         observations: postCallForm.observations.trim(),
         nextAction: postCallForm.nextAction.trim(),
