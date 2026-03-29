@@ -1062,11 +1062,21 @@ export default function LigacoesPage() {
 
   const finalizacaoOptions = baseFinalizacaoOptions;
   const atendenteOptions = useMemo(() => {
-    const dynamic = Array.from(new Set(calls.map((call) => call.atendente).filter(Boolean))).sort((a, b) =>
-      a.localeCompare(b),
-    );
+    const dynamic = Array.from(
+      new Set(
+        responsaveisRecords
+          .map((record) => String(record.nome || "").trim())
+          .filter((name) => name.length > 0),
+      ),
+    ).sort((a, b) => a.localeCompare(b));
     return ["Todos", ...dynamic];
-  }, [calls]);
+  }, [responsaveisRecords]);
+
+  useEffect(() => {
+    if (atendenteFilter === "Todos") return;
+    if (atendenteOptions.includes(atendenteFilter)) return;
+    setAtendenteFilter("Todos");
+  }, [atendenteFilter, atendenteOptions]);
 
   const filteredCalls = useMemo(() => {
     return calls.filter((call) => {
