@@ -748,6 +748,12 @@ export default function LigacoesPage() {
     };
   }, [filteredCalls]);
 
+  const atendimentoRate = useMemo(() => {
+    const total = filteredCalls.length;
+    if (total <= 0) return 0;
+    return Math.round((summary.answered / total) * 100);
+  }, [filteredCalls.length, summary.answered]);
+
   const applyWrapupToLead = (
     session: ActiveCallSession,
     formState: PostCallFormState,
@@ -1044,16 +1050,16 @@ export default function LigacoesPage() {
   return (
     <section className="space-y-6">
       <div className="panel p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-lg font-semibold text-slate-100">Ligacoes</h1>
-            <p className="mt-1 text-sm text-slate-400">Acompanhe o histórico de chamadas realizadas no CRM.</p>
+            <p className="mt-1 text-sm text-slate-400">Acompanhe o historico de chamadas realizadas no CRM.</p>
           </div>
-          <div className="flex flex-col gap-2 sm:items-end">
+          <div className="flex w-full flex-wrap items-end justify-start gap-2 lg:w-auto lg:justify-end">
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
               Atendente
               <select
-                className="field mt-1 h-9 min-w-[200px] px-2.5 py-1.5 text-xs"
+                className="field mt-1 h-9 min-w-[190px] px-2.5 py-1.5 text-xs"
                 value={atendenteFilter}
                 onChange={(event) => setAtendenteFilter(event.target.value)}
               >
@@ -1067,7 +1073,7 @@ export default function LigacoesPage() {
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
               Finalizacao
               <select
-                className="field mt-1 h-9 min-w-[200px] px-2.5 py-1.5 text-xs"
+                className="field mt-1 h-9 min-w-[190px] px-2.5 py-1.5 text-xs"
                 value={finalizacaoFilter}
                 onChange={(event) => setFinalizacaoFilter(event.target.value)}
               >
@@ -1093,23 +1099,54 @@ export default function LigacoesPage() {
         {wrapupMessage ? <p className="mt-2 text-xs text-emerald-300">{wrapupMessage}</p> : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <article className="panel p-4">
-          <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Ligacoes hoje</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-100">{summary.todayCalls}</p>
+      <div className="space-y-3">
+        <article className="panel border-sky-400/40 bg-sky-500/10 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.12em] text-sky-200">Ligacoes Hoje</p>
+              <p className="mt-2 text-4xl font-semibold leading-none text-slate-100">{summary.todayCalls}</p>
+              <p className="mt-2 text-xs text-sky-100/80">Volume total de chamadas do dia</p>
+            </div>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 text-sm text-sky-100">?</span>
+          </div>
         </article>
-        <article className="panel p-4">
-          <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Ligacoes atendidas</p>
-          <p className="mt-2 text-2xl font-semibold text-emerald-300">{summary.answered}</p>
-        </article>
-        <article className="panel p-4">
-          <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Ligacoes nao atendidas</p>
-          <p className="mt-2 text-2xl font-semibold text-amber-300">{summary.missed}</p>
-        </article>
-        <article className="panel p-4">
-          <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Tempo total em chamadas</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-100">{summary.totalTime}</p>
-        </article>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <article className="panel border-emerald-500/40 bg-emerald-500/10 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-emerald-200">Ligacoes Atendidas</p>
+                <p className="mt-2 text-3xl font-semibold leading-none text-emerald-100">{summary.answered}</p>
+                <p className="mt-2 text-xs text-emerald-200/90">
+                  Taxa de atendimento: {summary.answered} de {filteredCalls.length} ({atendimentoRate}%)
+                </p>
+              </div>
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/20 text-sm text-emerald-100">?</span>
+            </div>
+          </article>
+
+          <article className="panel border-amber-500/40 bg-amber-500/10 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-amber-200">Ligacoes Nao Atendidas</p>
+                <p className="mt-2 text-3xl font-semibold leading-none text-amber-100">{summary.missed}</p>
+                <p className="mt-2 text-xs text-amber-200/90">Chamadas sem atendimento efetivo</p>
+              </div>
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-amber-500/20 text-sm text-amber-100">?</span>
+            </div>
+          </article>
+
+          <article className="panel border-slate-500/40 bg-slate-800/60 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-slate-300">Tempo Total em Chamadas</p>
+                <p className="mt-2 text-3xl font-semibold leading-none text-slate-100">{summary.totalTime}</p>
+                <p className="mt-2 text-xs text-slate-400">Soma de duracao das chamadas atendidas</p>
+              </div>
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-sm text-slate-200">?</span>
+            </div>
+          </article>
+        </div>
       </div>
 
       <div className="panel overflow-hidden">
