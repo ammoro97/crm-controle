@@ -111,6 +111,11 @@ function historyEvent(owner: string, eventType: string, description: string): Le
   };
 }
 
+function buildLeadCreatedDescription(channel: LeadChannel, source: string) {
+  const origem = source?.trim() || (channel === "inbound" ? "Formulario" : "Cadastro manual");
+  return `Lead criado. Origem de entrada: ${origem}. Canal: ${channel}.`;
+}
+
 function createEmptyLead(filter: LeadFilter): Lead {
   return {
     id: `L-${Date.now()}`,
@@ -453,27 +458,10 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       prev.map((lead) => {
         if (lead.id !== workingLead.id) return lead;
 
-        const events: LeadHistoryEvent[] = [];
-        if (lead.status !== workingLead.status) {
-          events.push(historyEvent(workingLead.owner || "Time Comercial", "mudanca de status", `Status alterado para ${workingLead.status}.`));
-        }
-        if (lead.owner !== workingLead.owner) {
-          events.push(
-            historyEvent(
-              workingLead.owner || "Time Comercial",
-              "responsavel alterado",
-              `Responsavel alterado para ${workingLead.owner}.`,
-            ),
-          );
-        }
-        if (events.length === 0) {
-          events.push(historyEvent(workingLead.owner || "Time Comercial", "lead atualizado", "Dados do lead foram atualizados."));
-        }
-
         return {
           ...workingLead,
-          history: [...lead.history, ...events],
-          lastInteraction: nowStamp().datetime,
+          history: lead.history,
+          lastInteraction: lead.lastInteraction,
         };
       }),
     );
@@ -490,8 +478,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           id: `H-${draftLead.id}-1`,
           date: stamp.date,
           time: stamp.time,
-          eventType: "lead criado",
-          description: "Lead criado manualmente pelo time comercial.",
+          eventType: "LEAD_CRIADO",
+          description: buildLeadCreatedDescription(draftLead.channel, draftLead.source),
           owner: draftLead.owner || "Time Comercial",
         },
       ],
@@ -596,8 +584,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             id: `H-${id}-1`,
             date: stamp.date,
             time: stamp.time,
-            eventType: "lead importado",
-            description: `Lead importado para ${importDestination}.`,
+            eventType: "LEAD_CRIADO",
+            description: buildLeadCreatedDescription(importDestination, row.source || "Importacao de lista"),
             owner: owner || "Time Comercial",
           },
         ],

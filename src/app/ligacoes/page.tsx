@@ -808,8 +808,7 @@ export default function LigacoesPage() {
       content: structuredLines.join("\n"),
     };
 
-    const historyEventDescription =
-      `Ligacao com o lead registrada. Duracao: ${durationText}. Resultado: ${resultLabel}.`;
+    const historyEventDescription = `Ligacao realizada com o lead. Finalizacao: ${resultLabel}.`;
 
     const nextLead: Lead = {
       ...lead,
@@ -819,11 +818,9 @@ export default function LigacoesPage() {
           id: `H-CALL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           date: now.date,
           time: now.time,
-          eventType: "ligacao finalizada",
+          eventType: "LIGACAO",
           description: historyEventDescription,
           owner: ownerName,
-          linkedObservationId: observationId,
-          linkedTab: "observacoes",
         },
       ],
       observationLog: [...lead.observationLog, observation],
@@ -890,6 +887,42 @@ export default function LigacoesPage() {
     };
 
     setMeetingsSnapshot([...meetings, meeting]);
+
+    if (!lead) return;
+
+    const agendamentoDescricao = (() => {
+      const acao = String(formState.nextAction || "").trim().toLowerCase();
+      if (acao.includes("reuniao")) return "Reuniao agendada com o lead.";
+      if (acao.includes("ligar")) return "Ligacao agendada com o lead.";
+      if (acao.includes("retorno")) return "Retorno agendado com o lead.";
+      return "Follow-up agendado para o lead.";
+    })();
+
+    const now = nowDateAndTime();
+    const refreshedLeads = getLeadsSnapshot();
+    const refreshedLeadIndex = refreshedLeads.findIndex((item) => item.id === lead.id);
+    if (refreshedLeadIndex === -1) return;
+
+    const refreshedLead = refreshedLeads[refreshedLeadIndex];
+    const leadComAgendamento: Lead = {
+      ...refreshedLead,
+      history: [
+        ...refreshedLead.history,
+        {
+          id: `H-AGD-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          date: now.date,
+          time: now.time,
+          eventType: "AGENDAMENTO",
+          description: agendamentoDescricao,
+          owner: ownerName,
+        },
+      ],
+    };
+
+    const nextLeads = [...refreshedLeads];
+    nextLeads[refreshedLeadIndex] = leadComAgendamento;
+    setLeadsSnapshot(nextLeads);
+    setLeadsSnapshotState(nextLeads);
   };
 
   const handleSaveWrapup = async (event: FormEvent<HTMLFormElement>) => {

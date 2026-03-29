@@ -38,7 +38,21 @@ const tabs: { id: DetailTab; label: string }[] = [
 
 function LeadHistoryTab({ draftLead }: { draftLead: Lead }) {
   const timelineItems = useMemo<TimelineItem[]>(() => {
-    const historyItems = draftLead.history.map((event) => ({
+    const historyItems = draftLead.history
+      .filter((event) => {
+        const type = String(event.eventType || "").trim().toUpperCase();
+        return (
+          type === "LEAD_CRIADO" ||
+          type === "LEAD CRIADO" ||
+          type === "LEAD IMPORTADO" ||
+          type === "LIGACAO" ||
+          type === "LIGACAO FINALIZADA" ||
+          type === "LIGACAO REALIZADA" ||
+          type === "AGENDAMENTO" ||
+          type === "REUNIAO AGENDADA"
+        );
+      })
+      .map((event) => ({
       id: `hist-${event.id}`,
       date: event.date,
       time: event.time,
@@ -47,17 +61,8 @@ function LeadHistoryTab({ draftLead }: { draftLead: Lead }) {
       owner: event.owner,
     }));
 
-    const observationItems = draftLead.observationLog.map((observation) => ({
-      id: `obs-${observation.id}`,
-      date: observation.date,
-      time: observation.time,
-      eventType: "Observacao interna",
-      description: `[${observation.type}] ${observation.content}`,
-      owner: observation.owner,
-    }));
-
-    return [...historyItems, ...observationItems].sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
-  }, [draftLead.history, draftLead.observationLog]);
+    return historyItems.sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
+  }, [draftLead.history]);
 
   return (
     <div className="space-y-4">
@@ -119,17 +124,7 @@ function LeadObservationsTab({ draftLead, onDraftChange, onPersist }: LeadObserv
           content,
         },
       ],
-      history: [
-        ...draftLead.history,
-        {
-          id: `H-OBS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          date,
-          time,
-          eventType: "OBSERVACAO_INTERNA",
-          description: content,
-          owner,
-        },
-      ],
+      history: draftLead.history,
     };
 
     onDraftChange(nextLead);

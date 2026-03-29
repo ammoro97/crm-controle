@@ -46,6 +46,9 @@ export function ChannelBadge({ channel }: { channel: Lead["channel"] }) {
 export function normalizeEventTypeLabel(value: string) {
   const normalized = (value || "").trim().toLowerCase();
   if (!normalized) return "Evento";
+  if (normalized === "lead_criado") return "Lead criado";
+  if (normalized === "ligacao") return "Ligacao";
+  if (normalized === "agendamento") return "Agendamento";
   if (normalized === "mudanca de status") return "Status";
   if (normalized === "responsavel alterado") return "Responsavel";
   if (normalized === "proxima acao atualizada") return "Proxima acao";
