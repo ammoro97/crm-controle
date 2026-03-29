@@ -113,6 +113,7 @@ type WrapupsIndexes = {
   byExternalCallId: Map<string, PostCallWrapup>;
   bySessionId: Map<string, PostCallWrapup>;
   byPhone: Map<string, PostCallWrapup[]>;
+  byPhoneAndMinute: Map<string, PostCallWrapup[]>;
 };
 
 type ResponsavelByIdIndex = Map<string, string>;
@@ -158,6 +159,7 @@ const secondaryOptionsByFinalizacao: Record<"Falou com cliente" | "Falou com sec
 };
 
 const OFFICIAL_FINALIZACOES = new Set(baseFinalizacaoOptions.filter((value) => value !== "Todas"));
+const HIDDEN_CALL_IDS_STORAGE_KEY = "crm:ligacoes:hidden-call-ids";
 
 function normalizeDigits(value?: string | null) {
   return String(value || "").replace(/\D/g, "");
@@ -269,6 +271,7 @@ function buildWrapupsIndexes(wrapups: PostCallWrapup[]): WrapupsIndexes {
   const byExternalCallId = new Map<string, PostCallWrapup>();
   const bySessionId = new Map<string, PostCallWrapup>();
   const byPhone = new Map<string, PostCallWrapup[]>();
+  const byPhoneAndMinute = new Map<string, PostCallWrapup[]>();
 
   const ordered = [...wrapups].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   for (const wrapup of ordered) {
@@ -286,10 +289,18 @@ function buildWrapupsIndexes(wrapups: PostCallWrapup[]): WrapupsIndexes {
       const current = byPhone.get(digits) || [];
       current.push(wrapup);
       byPhone.set(digits, current);
+
+      const minute = toMinuteKey(wrapup.createdAt);
+      if (minute) {
+        const key = `${digits}|${minute}`;
+        const byMinute = byPhoneAndMinute.get(key) || [];
+        byMinute.push(wrapup);
+        byPhoneAndMinute.set(key, byMinute);
+      }
     }
   }
 
-  return { byCallId, byExternalCallId, bySessionId, byPhone };
+  return { byCallId, byExternalCallId, bySessionId, byPhone, byPhoneAndMinute };
 }
 
 function isTechnicalAnswered(status: string, durationSeconds: number) {
@@ -372,12 +383,20 @@ function parseDateMaybe(value: unknown): string | null {
   return value.trim();
 }
 
-function isWrapupTemporallyCompatible(wrapup: PostCallWrapup | undefined, callStartedAt: string | null) {
-  if (!wrapup || !callStartedAt) return true;
-  const wrapupTs = Date.parse(String(wrapup.createdAt || "").trim());
-  const callTs = Date.parse(String(callStartedAt || "").trim());
-  if (Number.isNaN(wrapupTs) || Number.isNaN(callTs)) return true;
-  return Math.abs(wrapupTs - callTs) <= 1000 * 60 * 3;
+function readHiddenCallIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(HIDDEN_CALL_IDS_STORAGE_KEY) || "[]");
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.map((item) => String(item || "").trim()).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeHiddenCallIds(ids: Set<string>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(HIDDEN_CALL_IDS_STORAGE_KEY, JSON.stringify(Array.from(ids)));
 }
 
 function humanizeHangupCause(value: string): string {
@@ -472,6 +491,15 @@ function mapApiCallToRow(
   if (!matchedWrapup) {
     const phoneDigits = normalizeDigits(resolvedTelefone || metadataTelefone || item.telefone || item.to || "");
     const minute = toMinuteKey(resolvedStartedAt || startedAt || "");
+    const byPhoneAndMinute = phoneDigits && minute ? context.wrapupsIndexes.byPhoneAndMinute.get(`${phoneDigits}|${minute}`) : [];
+    if (byPhoneAndMinute && byPhoneAndMinute.length === 1) {
+      matchedWrapup = byPhoneAndMinute[0];
+      matchSource = "fallbackMinute";
+    }
+  }
+  if (!matchedWrapup) {
+    const phoneDigits = normalizeDigits(resolvedTelefone || metadataTelefone || item.telefone || item.to || "");
+    const minute = toMinuteKey(resolvedStartedAt || startedAt || "");
     const key = phoneDigits && minute ? `${phoneDigits}|${minute}` : "";
     const candidates = key ? context.internalIndexes.byPhoneAndMinute.get(key) || [] : [];
     if (candidates.length === 1) {
@@ -484,15 +512,6 @@ function mapApiCallToRow(
         (internalCandidate.sessionId ? context.wrapupsIndexes.bySessionId.get(internalCandidate.sessionId) : undefined);
       if (matchedWrapup) matchSource = "fallbackMinute";
     }
-  }
-  if (
-    matchedWrapup &&
-    (matchSource === "callId" || matchSource === "externalCallId" || matchSource === "metadataExternalCallId") &&
-    !metadataSessionId &&
-    !internal?.sessionId &&
-    !isWrapupTemporallyCompatible(matchedWrapup, resolvedStartedAt || startedAt)
-  ) {
-    matchedWrapup = undefined;
   }
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
   const subfinalizacao = matchedWrapup?.nextAction?.trim() ? matchedWrapup.nextAction.trim() : "-";
@@ -507,7 +526,9 @@ function mapApiCallToRow(
     "Responsavel nao vinculado";
 
   return {
-    id: rawId || `api4com-${index}-${Date.now()}`,
+    id:
+      rawId ||
+      `api4com-${normalizeDigits(resolvedTelefone || metadataTelefone || item.telefone || item.to || "semfone")}-${(resolvedStartedAt || startedAt || String(index)).replace(/[^0-9A-Za-z_-]/g, "")}`,
     leadId: linkedLead?.id || internal?.leadId || metadataLeadId || null,
     nome: resolvedNome,
     empresa: resolvedEmpresa,
@@ -635,6 +656,8 @@ export default function LigacoesPage() {
   const [wrapups, setWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
   const [finalizacaoFilter, setFinalizacaoFilter] = useState("Todas");
   const [atendenteFilter, setAtendenteFilter] = useState("Todos");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const hiddenCallIdsRef = useRef<Set<string>>(new Set());
 
   const [activeSession, setActiveSession] = useState<ActiveCallSession | null>(null);
   const [wrapupOpen, setWrapupOpen] = useState(false);
@@ -720,7 +743,8 @@ export default function LigacoesPage() {
         const second = b.startedAt || "";
         return second.localeCompare(first);
       });
-      setCalls(rows);
+      const visibleRows = rows.filter((row) => !hiddenCallIdsRef.current.has(row.id));
+      setCalls(visibleRows);
     } catch (requestError) {
       if (requestError instanceof DOMException && requestError.name === "AbortError") return;
       setError("Nao foi possivel carregar ligacoes.");
@@ -782,6 +806,7 @@ export default function LigacoesPage() {
   }, [activeSession]);
 
   useEffect(() => {
+    hiddenCallIdsRef.current = readHiddenCallIds();
     const controller = new AbortController();
     void loadCalls(controller.signal);
     void runWrapupReconciliation();
@@ -897,6 +922,47 @@ export default function LigacoesPage() {
       return matchesFinalizacao && matchesAtendente;
     });
   }, [atendenteFilter, calls, finalizacaoFilter]);
+
+  useEffect(() => {
+    if (!selectedIds.length) return;
+    const currentIds = new Set(filteredCalls.map((call) => call.id));
+    setSelectedIds((prev) => prev.filter((id) => currentIds.has(id)));
+  }, [filteredCalls, selectedIds.length]);
+
+  const allFilteredSelected = filteredCalls.length > 0 && filteredCalls.every((call) => selectedIds.includes(call.id));
+
+  const toggleSelectAllFiltered = () => {
+    if (allFilteredSelected) {
+      setSelectedIds([]);
+      return;
+    }
+    setSelectedIds(filteredCalls.map((call) => call.id));
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  };
+
+  const deleteSelectedCalls = () => {
+    if (selectedIds.length === 0) return;
+    const ok = window.confirm(
+      selectedIds.length === 1
+        ? "Deseja excluir a ligacao selecionada?"
+        : `Deseja excluir ${selectedIds.length} ligacoes selecionadas?`,
+    );
+    if (!ok) return;
+
+    const nextHidden = new Set(hiddenCallIdsRef.current);
+    for (const id of selectedIds) nextHidden.add(id);
+    hiddenCallIdsRef.current = nextHidden;
+    writeHiddenCallIds(nextHidden);
+
+    setCalls((prev) => prev.filter((call) => !nextHidden.has(call.id)));
+    if (selectedCallId && nextHidden.has(selectedCallId)) {
+      setSelectedCallId(null);
+    }
+    setSelectedIds([]);
+  };
 
   const summary = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -1397,6 +1463,14 @@ export default function LigacoesPage() {
             >
               {loading ? "Atualizando..." : "Atualizar"}
             </button>
+            <button
+              type="button"
+              className="h-9 rounded-md border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={deleteSelectedCalls}
+              disabled={selectedIds.length === 0}
+            >
+              Excluir selecionadas
+            </button>
           </div>
         </div>
         {wrapupMessage ? <p className="mt-2 text-xs text-emerald-300">{wrapupMessage}</p> : null}
@@ -1535,6 +1609,15 @@ export default function LigacoesPage() {
             <table className="min-w-[1260px] w-full text-left">
               <thead className="border-b border-border bg-slate-900/60 text-[11px] uppercase tracking-[0.08em] text-muted">
                 <tr>
+                  <th className="whitespace-nowrap px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      aria-label={allFilteredSelected ? "Desmarcar todas" : "Selecionar todas"}
+                      className="h-4 w-4 accent-cyan-400"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAllFiltered}
+                    />
+                  </th>
                   <th className="whitespace-nowrap px-3 py-2.5">Nome</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Empresa</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Telefone</th>
@@ -1553,16 +1636,26 @@ export default function LigacoesPage() {
               <tbody>
                 {filteredCalls.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-sm text-slate-400" colSpan={13}>
+                    <td className="px-3 py-4 text-sm text-slate-400" colSpan={14}>
                       Nenhuma ligacao encontrada.
                     </td>
                   </tr>
                 ) : (
                   filteredCalls.map((call) => {
                     const isOpen = selectedCallId === call.id;
+                    const isSelected = selectedIds.includes(call.id);
                     return (
                       <Fragment key={call.id}>
                         <tr className="border-b border-border/70 text-sm text-slate-200 transition hover:bg-slate-900/40">
+                          <td className="whitespace-nowrap px-3 py-3">
+                            <input
+                              type="checkbox"
+                              aria-label={`Selecionar ligacao ${call.id}`}
+                              className="h-4 w-4 accent-cyan-400"
+                              checked={isSelected}
+                              onChange={() => toggleSelectOne(call.id)}
+                            />
+                          </td>
                           <td className="whitespace-nowrap px-3 py-3">{call.nome}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.empresa}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.telefone}</td>
@@ -1599,7 +1692,7 @@ export default function LigacoesPage() {
                         </tr>
                         {isOpen ? (
                           <tr className="border-b border-border/70 bg-slate-950/40">
-                            <td colSpan={13} className="px-3 py-3">
+                            <td colSpan={14} className="px-3 py-3">
                               <div className="grid gap-3 rounded-lg border border-border bg-slate-900/50 p-4 md:grid-cols-2 xl:grid-cols-4">
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Nome</p>
