@@ -818,23 +818,6 @@ export default function LigacoesPage() {
     [summary.answered, summary.totalAnsweredSeconds],
   );
 
-  const callsPerHour = useMemo(() => {
-    if (filteredCalls.length === 0) return 0;
-    const startedMs = filteredCalls
-      .map((call) => Date.parse(call.startedAt || ""))
-      .filter((value) => Number.isFinite(value)) as number[];
-    if (startedMs.length <= 1) return filteredCalls.length;
-    const min = Math.min(...startedMs);
-    const max = Math.max(...startedMs);
-    const hours = Math.max(1, (max - min) / (1000 * 60 * 60));
-    return Number((filteredCalls.length / hours).toFixed(1));
-  }, [filteredCalls]);
-
-  const productivePercent = useMemo(() => {
-    if (summary.totalCallSeconds <= 0) return 0;
-    return Math.round((summary.totalAnsweredSeconds / summary.totalCallSeconds) * 100);
-  }, [summary.totalAnsweredSeconds, summary.totalCallSeconds]);
-
   const contactQuality = useMemo(() => {
     const cpc = filteredCalls.filter((call) => {
       const normalized = normalizeFinalizacaoKey(call.finalizacao);
@@ -1313,31 +1296,19 @@ export default function LigacoesPage() {
 
         <div className="panel p-3">
           <p className="text-[10px] uppercase tracking-[0.12em] text-slate-300">Eficiencia</p>
-          <div className="mt-2 grid gap-2 lg:grid-cols-12">
-            <article className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 lg:col-span-6">
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <article className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200">Taxa de Atendimento</p>
               <p className="mt-1 text-4xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
               <p className="mt-1 text-[11px] text-emerald-200/90">
                 {summary.answered}/{filteredCalls.length} atendidas
               </p>
             </article>
-            <div className="grid gap-2 md:grid-cols-3 lg:col-span-6">
-              <article className="rounded-md border border-cyan-500/40 bg-cyan-500/10 p-3">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-cyan-200">Chamadas por hora</p>
-                <p className="mt-1 text-3xl font-semibold leading-none text-cyan-100">{callsPerHour}</p>
-                <p className="mt-1 text-[11px] text-cyan-200/90">Ritmo operacional</p>
-              </article>
-              <article className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-amber-200">Tempo Produtivo</p>
-                <p className="mt-1 text-3xl font-semibold leading-none text-amber-100">{productivePercent}%</p>
-                <p className="mt-1 text-[11px] text-amber-200/90">Conectado/total</p>
-              </article>
-              <article className="rounded-md border border-blue-500/40 bg-blue-500/10 p-3">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-blue-200">TMA</p>
-                <p className="mt-1 text-3xl font-semibold leading-none text-blue-100">{tmaValue}</p>
-                <p className="mt-1 text-[11px] text-blue-200/90">Tempo medio</p>
-              </article>
-            </div>
+            <article className="rounded-md border border-blue-500/40 bg-blue-500/10 p-3">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-blue-200">TMA</p>
+              <p className="mt-1 text-4xl font-semibold leading-none text-blue-100">{tmaValue}</p>
+              <p className="mt-1 text-[11px] text-blue-200/90">Tempo medio de atendimento</p>
+            </article>
           </div>
         </div>
 
@@ -1346,22 +1317,36 @@ export default function LigacoesPage() {
           <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
             <article className="rounded-md border border-violet-500/40 bg-violet-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-violet-200">CPC Total</p>
-              <p className="mt-1 text-3xl font-semibold leading-none text-violet-100">{contactQuality.cpc}</p>
-              <p className="mt-1 text-[11px] text-violet-200/90">Contato com cliente ({contactQuality.cpcRate}%)</p>
+              <div className="mt-1 flex items-end gap-2">
+                <p className="text-3xl font-semibold leading-none text-violet-100">{contactQuality.cpc}</p>
+                <p className="text-lg font-semibold leading-none text-violet-200">{contactQuality.cpcRate}%</p>
+              </div>
+              <p className="mt-1 text-[11px] text-violet-200/90">Contato com cliente</p>
             </article>
             <article className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200">CPC Positivo</p>
-              <p className="mt-1 text-3xl font-semibold leading-none text-emerald-100">{contactQuality.cpcPositive}</p>
-              <p className="mt-1 text-[11px] text-emerald-200/90">Falou + retorno ({contactQuality.cpcPositiveRate}%)</p>
+              <div className="mt-1 flex items-end gap-2">
+                <p className="text-3xl font-semibold leading-none text-emerald-100">{contactQuality.cpcPositive}</p>
+                <p className="text-lg font-semibold leading-none text-emerald-200">{contactQuality.cpcPositiveRate}%</p>
+              </div>
+              <p className="mt-1 text-[11px] text-emerald-200/90">Falou + retorno</p>
             </article>
             <article className="rounded-md border border-rose-500/40 bg-rose-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-rose-200">CPC Negativo</p>
-              <p className="mt-1 text-3xl font-semibold leading-none text-rose-100">{contactQuality.cpcNegative}</p>
-              <p className="mt-1 text-[11px] text-rose-200/90">Sem interesse ({contactQuality.cpcNegativeRate}%)</p>
+              <div className="mt-1 flex items-end gap-2">
+                <p className="text-3xl font-semibold leading-none text-rose-100">{contactQuality.cpcNegative}</p>
+                <p className="text-lg font-semibold leading-none text-rose-200">{contactQuality.cpcNegativeRate}%</p>
+              </div>
+              <p className="mt-1 text-[11px] text-rose-200/90">Sem interesse</p>
             </article>
             <article className="rounded-md border border-orange-500/40 bg-orange-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-orange-200">Ligacoes Improdutivas</p>
-              <p className="mt-1 text-3xl font-semibold leading-none text-orange-100">{contactQuality.improdutivas}</p>
+              <div className="mt-1 flex items-end gap-2">
+                <p className="text-3xl font-semibold leading-none text-orange-100">{contactQuality.improdutivas}</p>
+                <p className="text-lg font-semibold leading-none text-orange-200">
+                  {filteredCalls.length > 0 ? Math.round((contactQuality.improdutivas / filteredCalls.length) * 100) : 0}%
+                </p>
+              </div>
               <p className="mt-1 text-[11px] text-orange-200/90">Sem conexao/base</p>
             </article>
           </div>
@@ -1373,7 +1358,7 @@ export default function LigacoesPage() {
             <article className="rounded-md border border-teal-500/40 bg-teal-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-teal-200">Agendamentos de Follow-up</p>
               <p className="mt-1 text-3xl font-semibold leading-none text-teal-100">{conversion.agendamentos}</p>
-              <p className="mt-1 text-[11px] text-teal-200/90">Vinculados ao funil</p>
+              <p className="mt-1 text-[11px] text-teal-200/90">Baseado em eventos de follow-up</p>
             </article>
             <article className="rounded-md border border-fuchsia-500/40 bg-fuchsia-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-fuchsia-200">Conversao</p>
@@ -1381,6 +1366,7 @@ export default function LigacoesPage() {
               <p className="mt-1 text-[11px] text-fuchsia-200/90">
                 {conversion.leadsAvancaram} de {conversion.baseContatada}
               </p>
+              <p className="mt-0.5 text-[11px] text-fuchsia-200/80">Baseado nos contatos realizados</p>
             </article>
           </div>
         </div>
