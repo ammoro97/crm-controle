@@ -122,10 +122,12 @@ export default function ConfiguracoesPage() {
   const [integracoesOpen, setIntegracoesOpen] = useState(false);
   const [novoResponsavel, setNovoResponsavel] = useState("");
   const [novoResponsavelTipo, setNovoResponsavelTipo] = useState<ResponsavelTipo>("vendedor");
+  const [novoResponsavelEmail, setNovoResponsavelEmail] = useState("");
   const [responsavelErro, setResponsavelErro] = useState<string | null>(null);
   const [editingResponsavelId, setEditingResponsavelId] = useState<string | null>(null);
   const [editingNome, setEditingNome] = useState("");
   const [editingTipo, setEditingTipo] = useState<ResponsavelTipo>("vendedor");
+  const [editingEmail, setEditingEmail] = useState("");
 
   const [deleteTarget, setDeleteTarget] = useState<ResponsavelRecord | null>(null);
   const [transferTo, setTransferTo] = useState("");
@@ -229,6 +231,7 @@ export default function ConfiguracoesPage() {
 
   const onAddResponsavel = () => {
     const next = novoResponsavel.trim();
+    const nextEmail = novoResponsavelEmail.trim().toLowerCase();
     if (!next) {
       setResponsavelErro("Informe um nome para continuar.");
       return;
@@ -240,9 +243,18 @@ export default function ConfiguracoesPage() {
       return;
     }
 
-    addResponsavel({ nome: next, tipo: novoResponsavelTipo });
+    if (nextEmail) {
+      const duplicatedEmail = responsaveisRecords.some((item) => (item.email || "").toLowerCase() === nextEmail);
+      if (duplicatedEmail) {
+        setResponsavelErro("Ja existe um responsavel com este e-mail.");
+        return;
+      }
+    }
+
+    addResponsavel({ nome: next, tipo: novoResponsavelTipo, email: nextEmail });
     setNovoResponsavel("");
     setNovoResponsavelTipo("vendedor");
+    setNovoResponsavelEmail("");
     setResponsavelErro(null);
   };
 
@@ -256,6 +268,7 @@ export default function ConfiguracoesPage() {
     setEditingResponsavelId(record.id);
     setEditingNome(record.nome);
     setEditingTipo(record.tipo);
+    setEditingEmail(record.email || "");
     setResponsavelErro(null);
   };
 
@@ -263,12 +276,14 @@ export default function ConfiguracoesPage() {
     setEditingResponsavelId(null);
     setEditingNome("");
     setEditingTipo("vendedor");
+    setEditingEmail("");
     setResponsavelErro(null);
   };
 
   const saveEditResponsavel = () => {
     if (!editingResponsavelId) return;
     const nextNome = editingNome.trim();
+    const nextEmail = editingEmail.trim().toLowerCase();
     if (!nextNome) {
       setResponsavelErro("Informe um nome para continuar.");
       return;
@@ -280,7 +295,18 @@ export default function ConfiguracoesPage() {
       setResponsavelErro("Ja existe um responsavel com este nome.");
       return;
     }
-    updateResponsavel(editingResponsavelId, { nome: nextNome, tipo: editingTipo });
+
+    if (nextEmail) {
+      const duplicatedEmail = responsaveisRecords.some(
+        (item) => item.id !== editingResponsavelId && (item.email || "").toLowerCase() === nextEmail,
+      );
+      if (duplicatedEmail) {
+        setResponsavelErro("Ja existe um responsavel com este e-mail.");
+        return;
+      }
+    }
+
+    updateResponsavel(editingResponsavelId, { nome: nextNome, tipo: editingTipo, email: nextEmail });
     cancelEditResponsavel();
   };
 
@@ -762,6 +788,13 @@ export default function ConfiguracoesPage() {
                 value={novoResponsavel}
                 onChange={(event) => setNovoResponsavel(event.target.value)}
               />
+              <input
+                className="field"
+                type="email"
+                placeholder="E-mail do login (opcional)"
+                value={novoResponsavelEmail}
+                onChange={(event) => setNovoResponsavelEmail(event.target.value)}
+              />
               <select
                 className="field sm:max-w-[180px]"
                 value={novoResponsavelTipo}
@@ -799,6 +832,13 @@ export default function ConfiguracoesPage() {
                           value={editingNome}
                           onChange={(event) => setEditingNome(event.target.value)}
                         />
+                        <input
+                          className="field"
+                          type="email"
+                          placeholder="E-mail do login (opcional)"
+                          value={editingEmail}
+                          onChange={(event) => setEditingEmail(event.target.value)}
+                        />
                         <select
                           className="field sm:max-w-[180px]"
                           value={editingTipo}
@@ -817,7 +857,10 @@ export default function ConfiguracoesPage() {
                     ) : (
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-100">{record.nome}</span>
+                          <div>
+                            <span className="text-sm text-slate-100">{record.nome}</span>
+                            {record.email ? <p className="text-xs text-slate-400">{record.email}</p> : null}
+                          </div>
                           <span className="rounded-md border border-slate-600 bg-slate-800/70 px-2 py-0.5 text-[11px] font-semibold text-slate-200">
                             {record.tipo === "gestor" ? "Gestor" : "Vendedor"}
                           </span>

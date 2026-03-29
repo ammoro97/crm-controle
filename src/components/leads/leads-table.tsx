@@ -172,6 +172,9 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
           leadId: lead.id,
           nome: lead.name,
           empresa: lead.company,
+          userId: currentUser?.id,
+          responsavelId: currentUser?.responsavelId,
+          atendenteNome: currentUser?.nome,
         }),
       });
 

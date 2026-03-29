@@ -3,6 +3,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase-client";
+import { getResponsavelByEmailSnapshot } from "@/lib/responsaveis-store";
 import { PublicUser } from "@/types/auth";
 
 type AuthContextValue = {
@@ -34,12 +35,15 @@ function toDefaultName(email: string) {
 
 function toPublicUserFromSupabase(user: User): PublicUser {
   const email = user.email || "";
+  const mappedResponsavel = getResponsavelByEmailSnapshot(email);
   const metadata = (user.user_metadata || {}) as Record<string, unknown>;
   const nome =
+    mappedResponsavel?.nome ||
     String(metadata.nome || "").trim() ||
     String(metadata.name || "").trim() ||
     toDefaultName(email);
   const responsavelId =
+    mappedResponsavel?.id ||
     String(metadata.responsavelId || "").trim() || toResponsavelId(nome || email || user.id);
 
   return {

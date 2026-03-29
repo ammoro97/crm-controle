@@ -13,6 +13,7 @@ export type ResponsavelRecord = {
   id: string;
   nome: string;
   tipo: ResponsavelTipo;
+  email?: string;
 };
 
 function normalizeNome(value: string): string {
@@ -27,6 +28,10 @@ function normalizeTipo(value?: string): ResponsavelTipo {
   return value === "gestor" ? "gestor" : "vendedor";
 }
 
+function normalizeEmail(value?: string): string {
+  return String(value || "").trim().toLowerCase();
+}
+
 function slugify(value: string): string {
   return normalizeNome(value)
     .normalize("NFD")
@@ -38,15 +43,21 @@ function slugify(value: string): string {
 
 function uniqueResponsaveis(records: ResponsavelRecord[]): ResponsavelRecord[] {
   const byName = new Map<string, ResponsavelRecord>();
+  const usedEmails = new Set<string>();
   for (const item of records) {
     const nome = normalizeNome(item.nome);
     if (!nome) continue;
     const key = normalizeNomeKey(nome);
     if (byName.has(key)) continue;
+    const normalizedEmail = normalizeEmail(item.email);
+    const safeEmail =
+      normalizedEmail && !usedEmails.has(normalizedEmail) ? normalizedEmail : undefined;
+    if (safeEmail) usedEmails.add(safeEmail);
     byName.set(key, {
       id: item.id || `resp-${slugify(nome)}-${Math.random().toString(36).slice(2, 6)}`,
       nome,
       tipo: normalizeTipo(item.tipo),
+      email: safeEmail,
     });
   }
   return Array.from(byName.values()).sort((a, b) => a.nome.localeCompare(b.nome));
@@ -92,10 +103,11 @@ function parseStoredResponsaveis(raw: string | null): ResponsavelRecord[] | null
       const nome = normalizeNome(String(record.nome || record.name || ""));
       return {
         id: String(record.id || `resp-${index + 1}-${slugify(nome || `item-${index + 1}`)}`),
-        nome,
-        tipo: normalizeTipo(record.tipo),
-      };
-    });
+      nome,
+      tipo: normalizeTipo(record.tipo),
+      email: normalizeEmail((record as { email?: string }).email),
+    };
+  });
 
     return uniqueResponsaveis(mapped);
   } catch {
@@ -133,23 +145,31 @@ export function setResponsaveis(next: string[]) {
     id: `resp-set-${index + 1}-${slugify(nome)}`,
     nome: normalizeNome(nome),
     tipo: "vendedor",
+    email: "",
   }));
   persistRecords(normalized);
 }
 
-export function addResponsavel(input: string | { nome: string; tipo?: ResponsavelTipo }) {
+export function addResponsavel(
+  input: string | { nome: string; tipo?: ResponsavelTipo; email?: string },
+) {
   const current = getResponsaveisRecordsSnapshot();
   const nome = typeof input === "string" ? input : input.nome;
   const tipo = typeof input === "string" ? "vendedor" : normalizeTipo(input.tipo);
+  const email = typeof input === "string" ? "" : normalizeEmail(input.email);
   const next: ResponsavelRecord = {
     id: `resp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     nome: normalizeNome(nome),
     tipo,
+    email,
   };
   persistRecords([...current, next]);
 }
 
-export function updateResponsavel(id: string, input: { nome: string; tipo: ResponsavelTipo }) {
+export function updateResponsavel(
+  id: string,
+  input: { nome: string; tipo: ResponsavelTipo; email?: string },
+) {
   const current = getResponsaveisRecordsSnapshot();
   const next = current.map((item) =>
     item.id === id
@@ -157,6 +177,7 @@ export function updateResponsavel(id: string, input: { nome: string; tipo: Respo
           ...item,
           nome: normalizeNome(input.nome),
           tipo: normalizeTipo(input.tipo),
+          email: normalizeEmail(input.email),
         }
       : item,
   );
@@ -217,4 +238,11 @@ export function useResponsaveisRecords() {
   }, []);
 
   return records;
+}
+
+export function getResponsavelByEmailSnapshot(email?: string | null): ResponsavelRecord | null {
+  const normalized = normalizeEmail(email || "");
+  if (!normalized) return null;
+  const records = getResponsaveisRecordsSnapshot();
+  return records.find((item) => normalizeEmail(item.email) === normalized) || null;
 }

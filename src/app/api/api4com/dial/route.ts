@@ -8,6 +8,9 @@ type DialRequestBody = {
   name?: string;
   empresa?: string;
   company?: string;
+  userId?: string;
+  responsavelId?: string;
+  atendenteNome?: string;
 };
 
 function normalizePhone(input: string) {
@@ -57,6 +60,9 @@ export async function POST(request: Request) {
     const leadId = (body.leadId || "").trim();
     const nome = (body.nome || body.name || "").trim();
     const empresa = (body.empresa || body.company || "").trim();
+    const userId = (body.userId || "").trim();
+    const responsavelId = (body.responsavelId || "").trim();
+    const atendenteNome = (body.atendenteNome || "").trim();
 
     console.log("PHONE NORMALIZADO:", normalizedPhone);
 
@@ -85,6 +91,9 @@ export async function POST(request: Request) {
         nome,
         empresa,
         telefone: normalizedPhone,
+        userId,
+        responsavelId,
+        atendenteNome,
       },
     };
 

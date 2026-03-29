@@ -2,7 +2,14 @@
 
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/ui/modal";
-import { getLeadsSnapshot, setLeadsSnapshot, subscribeLeadsSnapshot } from "@/lib/crm-data-store";
+import { useAuth } from "@/components/auth/auth-provider";
+import {
+  getLeadsSnapshot,
+  getMeetingsSnapshot,
+  setLeadsSnapshot,
+  setMeetingsSnapshot,
+  subscribeLeadsSnapshot,
+} from "@/lib/crm-data-store";
 import {
   ActiveCallSession,
   PostCallWrapup,
@@ -18,7 +25,7 @@ import {
   savePostCallWrapup,
   subscribePostCallFlow,
 } from "@/lib/post-call-flow";
-import { CallLog, Lead, LeadObservation } from "@/types/crm";
+import { CallLog, Lead, LeadObservation, Meeting } from "@/types/crm";
 
 type Api4ComCallItem = {
   id?: string | number;
@@ -142,6 +149,7 @@ const nextActionComFollowUp = new Set([
   "Ligar novamente",
   "Aguardar retorno",
   "Retornar em data combinada",
+  "Agendar reuniao",
 ]);
 
 const OFFICIAL_FINALIZACOES = new Set(baseFinalizacaoOptions.filter((value) => value !== "Todas"));
@@ -367,6 +375,7 @@ function mapApiCallToRow(
   const metadataNome = String(metadata?.nome ?? "").trim();
   const metadataEmpresa = String(metadata?.empresa ?? "").trim();
   const metadataTelefone = String(metadata?.telefone ?? "").trim();
+  const metadataAtendenteNome = String(metadata?.atendenteNome ?? metadata?.atendente ?? "").trim();
 
   const internal = rawId ? context.internalById.get(rawId) : undefined;
   const leadFromId =
@@ -419,7 +428,7 @@ function mapApiCallToRow(
     }
   }
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
-  const atendente = matchedWrapup?.atendenteNome?.trim() || "Nao definido";
+  const atendente = matchedWrapup?.atendenteNome?.trim() || metadataAtendenteNome || "Nao definido";
 
   return {
     id: rawId || `api4com-${index}-${Date.now()}`,
@@ -447,6 +456,17 @@ function formatTotalTime(totalSeconds: number) {
   return `${seconds}s`;
 }
 
+function normalizeMeetingPersonName(value?: string) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getMeetingReasonFromNextAction(nextAction?: string): Meeting["reason"] {
+  const normalized = normalizeText(nextAction || "");
+  if (normalized.includes("proposta") || normalized.includes("encerrar")) return "fechamento";
+  if (normalized.includes("reuniao")) return "apresentacao";
+  return "acompanhamento";
+}
+
 function statusBadgeClass(status?: string) {
   const normalized = (status || "").toLowerCase();
   if (normalized === "atendida") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
@@ -456,6 +476,7 @@ function statusBadgeClass(status?: string) {
 }
 
 export default function LigacoesPage() {
+  const { currentUser } = useAuth();
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [calls, setCalls] = useState<MappedCall[]>([]);
   const [loading, setLoading] = useState(true);
@@ -800,6 +821,62 @@ export default function LigacoesPage() {
     setLeadsSnapshotState(nextLeads);
   };
 
+  const createFollowUpMeetingIfNeeded = (session: ActiveCallSession, formState: PostCallFormState) => {
+    if (!formState.followUpDate || !formState.followUpTime) return;
+
+    const leads = getLeadsSnapshot();
+    const sessionPhone = normalizeDigits(session.telefone);
+    const lead =
+      leads.find((item) => item.id === session.leadId) ||
+      leads.find((item) => {
+        const leadPhone = normalizeDigits(item.phone);
+        return Boolean(sessionPhone && leadPhone && (leadPhone.endsWith(sessionPhone) || sessionPhone.endsWith(leadPhone)));
+      }) ||
+      null;
+
+    const ownerName =
+      session.atendenteNome?.trim() ||
+      currentUser?.nome?.trim() ||
+      lead?.owner ||
+      "Time Comercial";
+
+    const sessionMarker = `[POSTCALL:${session.sessionId}]`;
+    const meetings = getMeetingsSnapshot();
+    const normalizedLeadName = normalizeMeetingPersonName(lead?.name || session.nome || "");
+    const hasExistingMeeting = meetings.some((meeting) => {
+      if ((meeting.notes || "").includes(sessionMarker)) return true;
+      if (meeting.date !== formState.followUpDate || meeting.callTime !== formState.followUpTime) return false;
+      if (normalizeMeetingPersonName(meeting.owner) !== normalizeMeetingPersonName(ownerName)) return false;
+      return normalizedLeadName && normalizeMeetingPersonName(meeting.personName) === normalizedLeadName;
+    });
+
+    if (hasExistingMeeting) return;
+
+    const meetingReason = getMeetingReasonFromNextAction(formState.nextAction);
+    const notes = [
+      "Origem: Ligacao",
+      `Finalizacao: ${normalizeFinalizacaoLabel(formState.result)}`,
+      `Proxima acao: ${formState.nextAction || "-"}`,
+      `Telefone: ${lead?.phone || session.telefone}`,
+      sessionMarker,
+    ];
+    if (formState.observations.trim()) {
+      notes.push(`Observacoes: ${formState.observations.trim()}`);
+    }
+
+    const meeting: Meeting = {
+      id: `MEET-CALL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      personName: lead?.name || session.nome || "Lead sem nome",
+      date: formState.followUpDate,
+      callTime: formState.followUpTime,
+      reason: meetingReason,
+      owner: ownerName,
+      notes: notes.join("\n"),
+    };
+
+    setMeetingsSnapshot([...meetings, meeting]);
+  };
+
   const handleSaveWrapup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!activeSession) {
@@ -812,6 +889,14 @@ export default function LigacoesPage() {
     }
     if (postCallForm.result === "Cliente sem interesse" && !postCallForm.reason) {
       setWrapupError("Selecione o motivo para cliente sem interesse.");
+      return;
+    }
+    if (showNextActionField && !postCallForm.nextAction.trim()) {
+      setWrapupError("Selecione a proxima acao para continuar.");
+      return;
+    }
+    if (showFollowUpFields && (!postCallForm.followUpDate || !postCallForm.followUpTime)) {
+      setWrapupError("Preencha data e horario do follow-up para continuar.");
       return;
     }
 
@@ -865,6 +950,7 @@ export default function LigacoesPage() {
         conciliationStatus: activeSession.matchedCallId ? "conciliated" : "pending_conciliation",
       });
       applyWrapupToLead(activeSession, postCallForm, currentCallEvidence);
+      createFollowUpMeetingIfNeeded(activeSession, postCallForm);
 
       markCallSessionWrapped(activeSession.sessionId);
       console.log("[POSTCALL_DEBUG] Wrapup salvo e sessao marcada como wrapped", {
