@@ -118,7 +118,6 @@ const postCallResultOptions: Array<{ value: PostCallResultOption; label: string 
   { value: "Pessoa nao conhece", label: "Pessoa nao conhece" },
   { value: "Falou com cliente", label: "Falou com cliente" },
   { value: "Falou com secretaria", label: "Falou com secretaria" },
-  { value: "Pediu retorno", label: "Pediu retorno" },
   { value: "Cliente sem interesse", label: "Cliente sem interesse" },
 ];
 
@@ -131,33 +130,24 @@ const baseFinalizacaoOptions = [
   "Pessoa nao conhece",
   "Falou com cliente",
   "Falou com secretaria",
-  "Pediu retorno",
   "Cliente sem interesse",
-];
-
-const nextActionOptions = [
-  "Ligar novamente",
-  "Enviar WhatsApp",
-  "Enviar proposta",
-  "Agendar reuniao",
-  "Aguardar retorno",
-  "Retornar em data combinada",
-  "Encerrar lead",
 ];
 
 const finalizacaoComProximaAcao = new Set<PostCallResultOption>([
   "Falou com cliente",
   "Falou com secretaria",
-  "Pediu retorno",
-  "Cliente sem interesse",
 ]);
 
 const nextActionComFollowUp = new Set([
-  "Ligar novamente",
-  "Aguardar retorno",
-  "Retornar em data combinada",
-  "Agendar reuniao",
+  "Agendar Video Chamada",
+  "Agendar Ligacao",
+  "Agendar WhatsApp",
 ]);
+
+const secondaryOptionsByFinalizacao: Record<"Falou com cliente" | "Falou com secretaria", string[]> = {
+  "Falou com cliente": ["Agendar Video Chamada", "Agendar Ligacao", "Agendar WhatsApp"],
+  "Falou com secretaria": ["Confirmou possibilidade de contato", "Nao houve confirmacao"],
+};
 
 const OFFICIAL_FINALIZACOES = new Set(baseFinalizacaoOptions.filter((value) => value !== "Todas"));
 
@@ -292,12 +282,8 @@ function createDefaultPostCallForm(): PostCallFormState {
 }
 
 function getSuggestedNextActionByFinalizacao(result: PostCallResultOption): string {
-  if (result === "Falou com cliente") return "Enviar proposta";
-  if (result === "Pediu retorno") return "Retornar em data combinada";
-  if (result === "Cliente sem interesse") return "Encerrar lead";
-  if (result === "Ligacao caiu" || result === "Caixa postal" || result === "Ligacao muda") {
-    return "Ligar novamente";
-  }
+  if (result === "Falou com cliente") return "Agendar Video Chamada";
+  if (result === "Falou com secretaria") return "Confirmou possibilidade de contato";
   return "";
 }
 
@@ -549,6 +535,11 @@ export default function LigacoesPage() {
   const checkingCallEndRef = useRef(false);
   const showReasonField = postCallForm.result === "Cliente sem interesse";
   const showNextActionField = finalizacaoComProximaAcao.has(postCallForm.result);
+  const currentSecondaryOptions =
+    postCallForm.result === "Falou com cliente" || postCallForm.result === "Falou com secretaria"
+      ? secondaryOptionsByFinalizacao[postCallForm.result]
+      : [];
+  const secondaryFieldLabel = "Subfinalizacao";
   const showFollowUpFields = showNextActionField && nextActionComFollowUp.has(postCallForm.nextAction);
   const responsavelById = useMemo(() => {
     const map: ResponsavelByIdIndex = new Map();
@@ -1088,6 +1079,8 @@ export default function LigacoesPage() {
 
     const agendamentoDescricao = (() => {
       const acao = String(formState.nextAction || "").trim().toLowerCase();
+      if (acao.includes("video")) return "Reuniao agendada com o lead.";
+      if (acao.includes("whatsapp")) return "Retorno agendado com o lead.";
       if (acao.includes("reuniao")) return "Reuniao agendada com o lead.";
       if (acao.includes("ligar")) return "Ligacao agendada com o lead.";
       if (acao.includes("retorno")) return "Retorno agendado com o lead.";
@@ -1600,9 +1593,7 @@ export default function LigacoesPage() {
                     ...prev,
                     result: value,
                     reason: value === "Cliente sem interesse" ? prev.reason : "",
-                    nextAction: finalizacaoComProximaAcao.has(value)
-                      ? suggestedNextAction || prev.nextAction
-                      : "",
+                    nextAction: finalizacaoComProximaAcao.has(value) ? suggestedNextAction : "",
                   }));
                 }}
               >
@@ -1642,14 +1633,14 @@ export default function LigacoesPage() {
             </label>
             {showNextActionField ? (
               <label className="text-sm md:col-span-2">
-                Proxima acao
+                {secondaryFieldLabel}
                 <select
                   className="field mt-1"
                   value={postCallForm.nextAction}
                   onChange={(event) => setPostCallForm((prev) => ({ ...prev, nextAction: event.target.value }))}
                 >
                   <option value="">Selecione...</option>
-                  {nextActionOptions.map((option) => (
+                  {currentSecondaryOptions.map((option) => (
                     <option key={option} value={option}>
                       {option}
                     </option>
