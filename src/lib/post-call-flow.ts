@@ -223,6 +223,7 @@ function findMatchingApi4ComHistoryCall(
 ): { id?: string } | null {
   const sessionPhone = normalizePhoneDigits(session.telefone);
   const sessionStart = Date.parse(session.startedAt);
+  const MAX_EXTERNAL_MATCH_DISTANCE_MS = 1000 * 60 * 60 * 12; // 12h (tolerancia para timezone/formatos diferentes)
   debugLog("Iniciando matching com historico externo API4Com", {
     sessionId: session.sessionId,
     leadId: session.leadId,
@@ -259,6 +260,31 @@ function findMatchingApi4ComHistoryCall(
       (token) => state.includes(token) || disposition.includes(token),
     );
     return Boolean(endedAt || hangup || (Number.isFinite(duration) && duration > 0) || hasTerminalState);
+  };
+
+  const getExternalReferenceDate = (item: Record<string, unknown>) => {
+    const candidates = [
+      item.started_at,
+      item.startedAt,
+      item.ended_at,
+      item.endedAt,
+      item.created_at,
+      item.createdAt,
+      item.updated_at,
+      item.updatedAt,
+      item.timestamp,
+      item.datetime,
+      item.date_time,
+      item.date,
+    ];
+
+    for (const candidate of candidates) {
+      const raw = String(candidate || "").trim();
+      if (!raw) continue;
+      const ts = Date.parse(raw);
+      if (!Number.isNaN(ts)) return { raw, ts };
+    }
+    return { raw: "", ts: Number.NaN };
   };
 
   for (const item of items) {
@@ -308,33 +334,32 @@ function findMatchingApi4ComHistoryCall(
 
     const startedAt = String(item.started_at || item.startedAt || "");
     const endedAt = String(item.ended_at || item.endedAt || "");
-    if (startedAt && !Number.isNaN(sessionStart)) {
-      const startedTs = Date.parse(startedAt);
-      if (!Number.isNaN(startedTs)) {
-        const distance = Math.abs(startedTs - sessionStart);
-        if (distance > 1000 * 60 * 120) {
-          debugLog("Registro externo rejeitado por janela de tempo", {
-            itemId: String(item.id || item.uniqueid || item.call_id || ""),
-            startedAt,
-            distanceMs: distance,
-          });
-          continue;
-        }
-        if (startedTs >= sessionStart - 1000 * 60 * 5) {
-          recentCandidates.push(item);
-          if (isExternallyEnded(item)) {
-            recentEndedCandidates.push(item);
-          }
-        }
+    const reference = getExternalReferenceDate(item);
+    if (!Number.isNaN(reference.ts) && !Number.isNaN(sessionStart)) {
+      const distance = Math.abs(reference.ts - sessionStart);
+      if (distance > MAX_EXTERNAL_MATCH_DISTANCE_MS) {
+        debugLog("Registro externo rejeitado por janela de tempo", {
+          itemId: String(item.id || item.uniqueid || item.call_id || ""),
+          referenceAt: reference.raw,
+          distanceMs: distance,
+        });
+        continue;
+      }
 
-        // Fallback global: chamada encerrada em janela proxima da sessao, mesmo sem metadados/telefone confiaveis.
-        if (
-          isExternallyEnded(item) &&
-          startedTs >= sessionStart - 1000 * 60 * 3 &&
-          startedTs <= sessionStart + 1000 * 60 * 20
-        ) {
-          recentGlobalEndedCandidates.push(item);
+      if (reference.ts >= sessionStart - 1000 * 60 * 10) {
+        recentCandidates.push(item);
+        if (isExternallyEnded(item)) {
+          recentEndedCandidates.push(item);
         }
+      }
+
+      // Fallback global: chamada encerrada em janela proxima da sessao, mesmo sem metadados/telefone confiaveis.
+      if (
+        isExternallyEnded(item) &&
+        reference.ts >= sessionStart - 1000 * 60 * 10 &&
+        reference.ts <= sessionStart + 1000 * 60 * 120
+      ) {
+        recentGlobalEndedCandidates.push(item);
       }
     }
 
