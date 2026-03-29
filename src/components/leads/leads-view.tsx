@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { PageTopbar } from "@/components/layout/page-topbar";
 import { Modal } from "@/components/ui/modal";
 import { getLeadsSnapshot, setLeadsSnapshot } from "@/lib/crm-data-store";
-import { getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
+import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { detectCallEnd, getActiveCallSession, markCallSessionEnded } from "@/lib/post-call-flow";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { Lead, LeadChannel, LeadHistoryEvent, LeadStatus } from "@/types/crm";
@@ -49,12 +49,14 @@ const statusOptions: LeadStatus[] = [
 
 function normalizeLead(lead: Lead): Lead {
   const names = getLeadNames(lead);
+  const contacts = getLeadContacts(lead);
   const phones = getLeadPhones(lead);
   const emails = getLeadEmails(lead);
   return {
     ...lead,
     name: names[0] || "",
     names,
+    contacts,
     phone: phones[0] || "",
     phones,
     email: emails[0] || "",

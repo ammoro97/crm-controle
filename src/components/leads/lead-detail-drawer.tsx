@@ -221,6 +221,7 @@ export function LeadDetailDrawer({ lead, open, onSave, onClose }: LeadDetailDraw
         draftLead={draftLead}
         isEditing={isEditing}
         onActivateEdit={() => setIsEditing(true)}
+        onEditingStateChange={setIsEditing}
         onDraftChange={setDraftLead}
       />
     ) : activeTab === "historico" ? (

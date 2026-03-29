@@ -93,6 +93,10 @@ export type Lead = {
   id: string;
   name: string;
   names?: string[];
+  contacts?: Array<{
+    nome: string;
+    cargo: string;
+  }>;
   company: string;
   phone: string;
   phones?: string[];
