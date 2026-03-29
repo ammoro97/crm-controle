@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { Meeting } from "@/types/crm";
 import { AgendaPeriodMode } from "./agenda-types";
 import { getPeriodBounds, meetingsInRange, toIsoDate } from "./agenda-utils";
+import { getMeetingReasonStyle } from "./reason-style";
 
 type AgendaListProps = {
   meetings: Meeting[];
@@ -22,7 +23,9 @@ export function AgendaList({ meetings, selectedDate, periodMode, onSelectMeeting
       {rows.length === 0 ? (
         <p className="px-4 py-6 text-sm text-slate-500">Nenhum agendamento encontrado para este periodo.</p>
       ) : (
-        rows.map((meeting, index) => (
+        rows.map((meeting, index) => {
+          const reasonStyle = getMeetingReasonStyle(meeting.reason);
+          return (
           <button
             key={meeting.id}
             type="button"
@@ -33,7 +36,9 @@ export function AgendaList({ meetings, selectedDate, periodMode, onSelectMeeting
           >
             <div>
               <p className="text-sm font-semibold text-slate-800">{meeting.personName}</p>
-              <p className="text-xs uppercase tracking-wide text-slate-500">{meeting.reason}</p>
+              <p className={`inline-flex rounded-md px-2 py-0.5 text-xs uppercase tracking-wide ${reasonStyle.badgeClass}`}>
+                {reasonStyle.label}
+              </p>
             </div>
             <p className="text-sm text-slate-700">
               {new Date(`${meeting.date}T00:00:00`).toLocaleDateString("pt-BR")}
@@ -42,7 +47,8 @@ export function AgendaList({ meetings, selectedDate, periodMode, onSelectMeeting
             <p className="text-sm text-slate-700">{meeting.owner}</p>
             <p className="truncate text-sm text-slate-500">{meeting.notes || "-"}</p>
           </button>
-        ))
+          );
+        })
       )}
     </div>
   );

@@ -8,6 +8,7 @@ import { AgendaAllList } from "@/components/agenda/agenda-all-list";
 import { AgendaList } from "@/components/agenda/agenda-list";
 import { AgendaPeriodNavigator } from "@/components/agenda/agenda-period-navigator";
 import { AppointmentModal } from "@/components/agenda/appointment-modal";
+import { getMeetingReasonStyle } from "@/components/agenda/reason-style";
 import { AgendaBlocks, AgendaDisplayMode, AgendaPeriodMode, emptyAgendaBlocks } from "@/components/agenda/agenda-types";
 import {
   clampDateToPresent,
@@ -371,7 +372,9 @@ export default function AgendaPage() {
               <p className="px-4 py-5 text-sm text-slate-500">Nenhum agendamento encontrado.</p>
             ) : (
               <div className="max-h-72 space-y-2 overflow-y-auto p-3">
-                {searchResults.map((meeting) => (
+                {searchResults.map((meeting) => {
+                  const reasonStyle = getMeetingReasonStyle(meeting.reason);
+                  return (
                   <button
                     key={`search-${meeting.id}`}
                     type="button"
@@ -384,7 +387,9 @@ export default function AgendaPage() {
                     <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                       <div>
                         <p className="text-sm font-semibold text-slate-800">{meeting.personName}</p>
-                        <p className="text-xs uppercase tracking-wide text-slate-500">{meeting.reason}</p>
+                        <p className={`inline-flex rounded-md px-2 py-0.5 text-xs uppercase tracking-wide ${reasonStyle.badgeClass}`}>
+                          {reasonStyle.label}
+                        </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                         <span className="rounded-md bg-slate-100 px-2 py-1">
@@ -396,7 +401,8 @@ export default function AgendaPage() {
                     </div>
                     <p className="mt-2 truncate text-xs text-slate-500">{meeting.notes || "-"}</p>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

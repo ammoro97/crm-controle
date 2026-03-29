@@ -14,7 +14,7 @@ type AppointmentModalProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
-const reasonOptions: CallReason[] = ["apresentacao", "acompanhamento", "fechamento"];
+const reasonOptions: CallReason[] = ["apresentacao", "acompanhamento", "fechamento", "follow-up"];
 
 export function AppointmentModal({
   open,

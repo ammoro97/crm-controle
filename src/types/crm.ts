@@ -116,7 +116,7 @@ export type Lead = {
   observationLog: LeadObservation[];
 };
 
-export type CallReason = "apresentacao" | "acompanhamento" | "fechamento";
+export type CallReason = "apresentacao" | "acompanhamento" | "fechamento" | "follow-up";
 
 export type Meeting = {
   id: string;

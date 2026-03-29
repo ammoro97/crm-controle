@@ -473,13 +473,6 @@ function normalizeMeetingPersonName(value?: string) {
   return String(value || "").trim().toLowerCase();
 }
 
-function getMeetingReasonFromNextAction(nextAction?: string): Meeting["reason"] {
-  const normalized = normalizeText(nextAction || "");
-  if (normalized.includes("proposta") || normalized.includes("encerrar")) return "fechamento";
-  if (normalized.includes("reuniao")) return "apresentacao";
-  return "acompanhamento";
-}
-
 function statusBadgeClass(status?: string) {
   const normalized = (status || "").toLowerCase();
   if (normalized === "atendida") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
@@ -875,7 +868,6 @@ export default function LigacoesPage() {
 
     if (hasExistingMeeting) return;
 
-    const meetingReason = getMeetingReasonFromNextAction(formState.nextAction);
     const notes = [
       "Origem: Ligacao",
       `Finalizacao: ${normalizeFinalizacaoLabel(formState.result)}`,
@@ -892,7 +884,7 @@ export default function LigacoesPage() {
       personName: lead?.name || session.nome || "Lead sem nome",
       date: formState.followUpDate,
       callTime: formState.followUpTime,
-      reason: meetingReason,
+      reason: "follow-up",
       owner: ownerName,
       notes: notes.join("\n"),
     };
