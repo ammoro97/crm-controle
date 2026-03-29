@@ -159,11 +159,13 @@ export async function upsertCallLog(
   const current = logs[index];
   const merged = normalizeCallLog({
     ...current,
-      ...input,
-      id: current.id,
-      createdAt: current.createdAt,
-      updatedAt: now,
-    });
+    ...input,
+    id: current.id,
+    externalCallId: input.externalCallId ?? current.externalCallId ?? null,
+    sessionId: input.sessionId ?? current.sessionId ?? null,
+    createdAt: current.createdAt,
+    updatedAt: now,
+  });
   logs[index] = merged;
   sortCallLogsInPlace(logs);
   scheduleCallLogsFlush();

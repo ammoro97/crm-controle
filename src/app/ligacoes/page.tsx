@@ -87,6 +87,10 @@ type LeadsIndexes = {
   byPhoneDigits: Map<string, Lead>;
 };
 
+type InternalCallIndexes = {
+  byPhoneAndMinute: Map<string, CallLog[]>;
+};
+
 type PostCallFormState = {
   result: PostCallResultOption;
   reason: "Ja possui CRM e nao tem interesse" | "Outros" | "";
@@ -170,6 +174,31 @@ function buildLeadsIndexes(leads: Lead[]): LeadsIndexes {
   }
 
   return { byId, byPhoneDigits };
+}
+
+function toMinuteKey(value?: string | null) {
+  if (!value || typeof value !== "string") return "";
+  const raw = value.trim();
+  if (!raw) return "";
+  const [datePartRaw, timePartRaw = ""] = raw.split("T");
+  const dateOnly = (datePartRaw || "").split(" ")[0] || "";
+  const timeClean = timePartRaw.replace("Z", "").trim();
+  if (!dateOnly || timeClean.length < 5) return "";
+  return `${dateOnly}T${timeClean.slice(0, 5)}`;
+}
+
+function buildInternalCallIndexes(calls: CallLog[]): InternalCallIndexes {
+  const byPhoneAndMinute = new Map<string, CallLog[]>();
+  for (const item of calls) {
+    const phoneDigits = normalizeDigits(item.telefone || item.called || item.caller || "");
+    const minute = toMinuteKey(item.startedAt || item.createdAt || "");
+    if (!phoneDigits || !minute) continue;
+    const key = `${phoneDigits}|${minute}`;
+    const current = byPhoneAndMinute.get(key) || [];
+    current.push(item);
+    byPhoneAndMinute.set(key, current);
+  }
+  return { byPhoneAndMinute };
 }
 
 function findLeadByPhone(indexes: LeadsIndexes, phoneRaw?: string | null) {
@@ -365,6 +394,7 @@ function mapApiCallToRow(
   context: {
     leadsIndexes: LeadsIndexes;
     internalById: Map<string, CallLog>;
+    internalIndexes: InternalCallIndexes;
     wrapupsIndexes: WrapupsIndexes;
     responsavelById: ResponsavelByIdIndex;
   },
@@ -424,6 +454,21 @@ function mapApiCallToRow(
     const sessionIdCandidate = metadataSessionId || internal?.sessionId || "";
     if (sessionIdCandidate) {
       matchedWrapup = context.wrapupsIndexes.bySessionId.get(sessionIdCandidate);
+    }
+  }
+  if (!matchedWrapup) {
+    const phoneDigits = normalizeDigits(resolvedTelefone || metadataTelefone || item.telefone || item.to || "");
+    const minute = toMinuteKey(resolvedStartedAt || startedAt || "");
+    const key = phoneDigits && minute ? `${phoneDigits}|${minute}` : "";
+    const candidates = key ? context.internalIndexes.byPhoneAndMinute.get(key) || [] : [];
+    if (candidates.length === 1) {
+      const internalCandidate = candidates[0];
+      matchedWrapup =
+        context.wrapupsIndexes.byCallId.get(internalCandidate.id) ||
+        (internalCandidate.externalCallId
+          ? context.wrapupsIndexes.byExternalCallId.get(internalCandidate.externalCallId)
+          : undefined) ||
+        (internalCandidate.sessionId ? context.wrapupsIndexes.bySessionId.get(internalCandidate.sessionId) : undefined);
     }
   }
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
@@ -622,13 +667,20 @@ export default function LigacoesPage() {
       setInternalById(internalMap);
 
       const leadsIndexes = buildLeadsIndexes(leadsSnapshot);
+      const internalIndexes = buildInternalCallIndexes(Array.from(internalMap.values()));
       const wrapupsIndexes = buildWrapupsIndexes(wrapups);
       const externalItems = externalResponse.ok && externalData.ok && Array.isArray(externalData.items) ? externalData.items : [];
 
       const rows =
         externalItems.length > 0
           ? externalItems.map((item, index) =>
-              mapApiCallToRow(item, index, { leadsIndexes, internalById: internalMap, wrapupsIndexes, responsavelById }),
+              mapApiCallToRow(item, index, {
+                leadsIndexes,
+                internalById: internalMap,
+                internalIndexes,
+                wrapupsIndexes,
+                responsavelById,
+              }),
             )
           : Array.from(internalMap.values()).map((item) =>
               mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),
