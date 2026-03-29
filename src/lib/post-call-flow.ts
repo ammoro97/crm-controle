@@ -29,14 +29,15 @@ export type ActiveCallSession = {
 };
 
 export type PostCallResultOption =
-  | "Ligação caiu"
+  | "Ligacao caiu"
   | "Caixa postal"
-  | "Ligação muda"
-  | "Número inválido"
-  | "Pessoa não conhece"
+  | "Ligacao muda"
+  | "Numero invalido"
+  | "Pessoa nao conhece"
   | "Falou com cliente"
-  | "Falou com secretária"
-  | "Pediu retorno";
+  | "Falou com secretaria"
+  | "Pediu retorno"
+  | "Cliente sem interesse";
 
 export type PostCallWrapup = {
   id: string;
@@ -48,12 +49,14 @@ export type PostCallWrapup = {
   userId?: string;
   responsavelId?: string;
   atendenteNome?: string;
-  spokeWithPerson: "sim" | "nao";
-  rightPerson: "sim" | "nao";
+  spokeWithPerson?: "sim" | "nao";
+  rightPerson?: "sim" | "nao";
   result: PostCallResultOption;
+  reason?: string;
   observations: string;
   nextAction: string;
   followUpDate?: string;
+  followUpTime?: string;
   callId?: string;
   conciliationStatus: "pending_conciliation" | "conciliated";
   createdAt: string;

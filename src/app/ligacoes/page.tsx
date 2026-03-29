@@ -75,12 +75,12 @@ type LeadsIndexes = {
 };
 
 type PostCallFormState = {
-  spokeWithPerson: "sim" | "nao";
-  rightPerson: "sim" | "nao";
   result: PostCallResultOption;
+  reason: "Ja possui CRM e nao tem interesse" | "Outros" | "";
   observations: string;
   nextAction: string;
   followUpDate: string;
+  followUpTime: string;
 };
 
 type CurrentCallEvidence = {
@@ -97,27 +97,52 @@ type WrapupsIndexes = {
 };
 
 const postCallResultOptions: Array<{ value: PostCallResultOption; label: string }> = [
-  { value: "Ligação caiu", label: "Ligação caiu" },
+  { value: "Ligacao caiu", label: "Ligacao caiu" },
   { value: "Caixa postal", label: "Caixa postal" },
-  { value: "Ligação muda", label: "Ligação muda" },
-  { value: "Número inválido", label: "Número inválido" },
-  { value: "Pessoa não conhece", label: "Pessoa não conhece" },
+  { value: "Ligacao muda", label: "Ligacao muda" },
+  { value: "Numero invalido", label: "Numero invalido" },
+  { value: "Pessoa nao conhece", label: "Pessoa nao conhece" },
   { value: "Falou com cliente", label: "Falou com cliente" },
-  { value: "Falou com secretária", label: "Falou com secretária" },
+  { value: "Falou com secretaria", label: "Falou com secretaria" },
   { value: "Pediu retorno", label: "Pediu retorno" },
+  { value: "Cliente sem interesse", label: "Cliente sem interesse" },
 ];
 
 const baseFinalizacaoOptions = [
   "Todas",
-  "Ligação caiu",
+  "Ligacao caiu",
   "Caixa postal",
-  "Ligação muda",
-  "Número inválido",
-  "Pessoa não conhece",
+  "Ligacao muda",
+  "Numero invalido",
+  "Pessoa nao conhece",
   "Falou com cliente",
-  "Falou com secretária",
+  "Falou com secretaria",
   "Pediu retorno",
+  "Cliente sem interesse",
 ];
+
+const nextActionOptions = [
+  "Ligar novamente",
+  "Enviar WhatsApp",
+  "Enviar proposta",
+  "Agendar reuniao",
+  "Aguardar retorno",
+  "Retornar em data combinada",
+  "Encerrar lead",
+];
+
+const finalizacaoComProximaAcao = new Set<PostCallResultOption>([
+  "Falou com cliente",
+  "Falou com secretaria",
+  "Pediu retorno",
+  "Cliente sem interesse",
+]);
+
+const nextActionComFollowUp = new Set([
+  "Ligar novamente",
+  "Aguardar retorno",
+  "Retornar em data combinada",
+]);
 
 const OFFICIAL_FINALIZACOES = new Set(baseFinalizacaoOptions.filter((value) => value !== "Todas"));
 
@@ -174,26 +199,28 @@ function normalizeFinalizacaoLabel(value: string) {
 
   const legacyMap: Record<string, string> = {
     "falou com a pessoa": "Falou com cliente",
-    "era a pessoa errada": "Pessoa não conhece",
-    "pessoa errada": "Pessoa não conhece",
+    "era a pessoa errada": "Pessoa nao conhece",
+    "pessoa errada": "Pessoa nao conhece",
     "nao atendeu": "Caixa postal",
     "não atendeu": "Caixa postal",
     "caixa postal": "Caixa postal",
-    "numero invalido": "Número inválido",
-    "número inválido": "Número inválido",
-    "ligacao caiu": "Ligação caiu",
-    "ligação caiu": "Ligação caiu",
+    "numero invalido": "Numero invalido",
+    "número inválido": "Numero invalido",
+    "ligacao caiu": "Ligacao caiu",
+    "ligação caiu": "Ligacao caiu",
     "pediu retorno": "Pediu retorno",
-    "deixou recado": "Falou com secretária",
+    "deixou recado": "Falou com secretaria",
     outro: "Pediu retorno",
     falou_com_pessoa: "Falou com cliente",
-    pessoa_errada: "Pessoa não conhece",
+    pessoa_errada: "Pessoa nao conhece",
     nao_atendeu: "Caixa postal",
     caixa_postal: "Caixa postal",
-    numero_invalido: "Número inválido",
-    ligacao_caiu: "Ligação caiu",
+    numero_invalido: "Numero invalido",
+    ligacao_caiu: "Ligacao caiu",
     pediu_retorno: "Pediu retorno",
-    deixou_recado: "Falou com secretária",
+    deixou_recado: "Falou com secretaria",
+    "cliente sem interesse": "Cliente sem interesse",
+    cliente_sem_interesse: "Cliente sem interesse",
   };
 
   return legacyMap[normalized] || "-";
@@ -240,13 +267,23 @@ function nowDateAndTime() {
 
 function createDefaultPostCallForm(): PostCallFormState {
   return {
-    spokeWithPerson: "nao",
-    rightPerson: "nao",
+    reason: "",
     result: "Caixa postal",
     observations: "",
     nextAction: "",
     followUpDate: "",
+    followUpTime: "",
   };
+}
+
+function getSuggestedNextActionByFinalizacao(result: PostCallResultOption): string {
+  if (result === "Falou com cliente") return "Enviar proposta";
+  if (result === "Pediu retorno") return "Retornar em data combinada";
+  if (result === "Cliente sem interesse") return "Encerrar lead";
+  if (result === "Ligacao caiu" || result === "Caixa postal" || result === "Ligacao muda") {
+    return "Ligar novamente";
+  }
+  return "";
 }
 
 function formatDate(value?: string | null) {
@@ -437,6 +474,9 @@ export default function LigacoesPage() {
   const [postCallForm, setPostCallForm] = useState<PostCallFormState>(createDefaultPostCallForm());
 
   const checkingCallEndRef = useRef(false);
+  const showReasonField = postCallForm.result === "Cliente sem interesse";
+  const showNextActionField = finalizacaoComProximaAcao.has(postCallForm.result);
+  const showFollowUpFields = showNextActionField && nextActionComFollowUp.has(postCallForm.nextAction);
 
   const loadCalls = async (signal?: AbortSignal) => {
     setLoading(true);
@@ -607,6 +647,31 @@ export default function LigacoesPage() {
     markSessionPrompted(activeSession.sessionId);
   }, [activeSession]);
 
+  useEffect(() => {
+    setPostCallForm((prev) => {
+      if (showNextActionField) return prev;
+      if (!prev.nextAction && !prev.followUpDate && !prev.followUpTime) return prev;
+      return {
+        ...prev,
+        nextAction: "",
+        followUpDate: "",
+        followUpTime: "",
+      };
+    });
+  }, [showNextActionField]);
+
+  useEffect(() => {
+    setPostCallForm((prev) => {
+      if (showFollowUpFields) return prev;
+      if (!prev.followUpDate && !prev.followUpTime) return prev;
+      return {
+        ...prev,
+        followUpDate: "",
+        followUpTime: "",
+      };
+    });
+  }, [showFollowUpFields]);
+
   const finalizacaoOptions = baseFinalizacaoOptions;
   const atendenteOptions = useMemo(() => {
     const dynamic = Array.from(new Set(calls.map((call) => call.atendente).filter(Boolean))).sort((a, b) =>
@@ -675,12 +740,16 @@ export default function LigacoesPage() {
     const durationText = formatDurationHuman(callEvidence?.durationSeconds);
     const callDate = formatDate(callEvidence?.startedAt || now.date);
     const callTime = formatTime(callEvidence?.startedAt || `${now.date}T${now.time}:00`);
-    const followUpText = formState.followUpDate ? formatDate(formState.followUpDate) : "-";
+    const followUpDateText = formState.followUpDate ? formatDate(formState.followUpDate) : "-";
+    const followUpTimeText = formState.followUpTime || "-";
+    const followUpText =
+      followUpDateText !== "-" || followUpTimeText !== "-"
+        ? `${followUpDateText}${followUpTimeText !== "-" ? ` ${followUpTimeText}` : ""}`.trim()
+        : "-";
 
     const structuredLines = [
-      `Resultado: ${resultLabel}`,
-      `Falou com a pessoa: ${formState.spokeWithPerson}`,
-      `Era a pessoa certa: ${formState.rightPerson}`,
+      `Finalizacao: ${resultLabel}`,
+      `Motivo: ${formState.reason || "-"}`,
       `Proxima acao: ${formState.nextAction.trim() || "-"}`,
       `Follow-up: ${followUpText}`,
       `Duracao: ${durationText}`,
@@ -721,7 +790,7 @@ export default function LigacoesPage() {
       observationLog: [...lead.observationLog, observation],
       lastInteraction: `${now.date} ${now.time}`,
       nextAction: formState.nextAction.trim() || lead.nextAction,
-      nextActionDate: formState.followUpDate || lead.nextActionDate,
+      nextActionDate: formState.followUpDate ? formState.followUpDate : lead.nextActionDate,
       firstContactDate: lead.firstContactDate || now.date,
     };
 
@@ -739,6 +808,10 @@ export default function LigacoesPage() {
     }
     if (!postCallForm.result) {
       setWrapupError("Selecione o resultado da ligacao.");
+      return;
+    }
+    if (postCallForm.result === "Cliente sem interesse" && !postCallForm.reason) {
+      setWrapupError("Selecione o motivo para cliente sem interesse.");
       return;
     }
 
@@ -782,12 +855,12 @@ export default function LigacoesPage() {
         userId: activeSession.userId,
         responsavelId: activeSession.responsavelId,
         atendenteNome: activeSession.atendenteNome,
-        spokeWithPerson: postCallForm.spokeWithPerson,
-        rightPerson: postCallForm.rightPerson,
         result: postCallForm.result,
+        reason: postCallForm.reason || undefined,
         observations: postCallForm.observations.trim(),
         nextAction: postCallForm.nextAction.trim(),
         followUpDate: postCallForm.followUpDate || undefined,
+        followUpTime: postCallForm.followUpTime || undefined,
         callId: activeSession.matchedCallId,
         conciliationStatus: activeSession.matchedCallId ? "conciliated" : "pending_conciliation",
       });
@@ -1067,34 +1140,23 @@ export default function LigacoesPage() {
               Nome do lead
               <input className="field mt-1" value={activeSession?.nome || "-"} readOnly />
             </label>
-            <label className="text-sm">
-              Falou com a pessoa?
-              <select
-                className="field mt-1"
-                value={postCallForm.spokeWithPerson}
-                onChange={(event) => setPostCallForm((prev) => ({ ...prev, spokeWithPerson: event.target.value as "sim" | "nao" }))}
-              >
-                <option value="sim">Sim</option>
-                <option value="nao">Nao</option>
-              </select>
-            </label>
-            <label className="text-sm">
-              Era a pessoa certa?
-              <select
-                className="field mt-1"
-                value={postCallForm.rightPerson}
-                onChange={(event) => setPostCallForm((prev) => ({ ...prev, rightPerson: event.target.value as "sim" | "nao" }))}
-              >
-                <option value="sim">Sim</option>
-                <option value="nao">Nao</option>
-              </select>
-            </label>
             <label className="text-sm md:col-span-2">
-              Resultado da ligacao
+              Finalizacao
               <select
                 className="field mt-1"
                 value={postCallForm.result}
-                onChange={(event) => setPostCallForm((prev) => ({ ...prev, result: event.target.value as PostCallResultOption }))}
+                onChange={(event) => {
+                  const value = event.target.value as PostCallResultOption;
+                  const suggestedNextAction = getSuggestedNextActionByFinalizacao(value);
+                  setPostCallForm((prev) => ({
+                    ...prev,
+                    result: value,
+                    reason: value === "Cliente sem interesse" ? prev.reason : "",
+                    nextAction: finalizacaoComProximaAcao.has(value)
+                      ? suggestedNextAction || prev.nextAction
+                      : "",
+                  }));
+                }}
               >
                 {postCallResultOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -1103,6 +1165,25 @@ export default function LigacoesPage() {
                 ))}
               </select>
             </label>
+            {showReasonField ? (
+              <label className="text-sm md:col-span-2">
+                Motivo
+                <select
+                  className="field mt-1"
+                  value={postCallForm.reason}
+                  onChange={(event) =>
+                    setPostCallForm((prev) => ({
+                      ...prev,
+                      reason: event.target.value as "Ja possui CRM e nao tem interesse" | "Outros" | "",
+                    }))
+                  }
+                >
+                  <option value="">Selecione...</option>
+                  <option value="Ja possui CRM e nao tem interesse">Ja possui CRM e nao tem interesse</option>
+                  <option value="Outros">Outros</option>
+                </select>
+              </label>
+            ) : null}
             <label className="text-sm md:col-span-2">
               Observacoes
               <textarea
@@ -1111,23 +1192,45 @@ export default function LigacoesPage() {
                 onChange={(event) => setPostCallForm((prev) => ({ ...prev, observations: event.target.value }))}
               />
             </label>
-            <label className="text-sm md:col-span-2">
-              Proxima acao
-              <input
-                className="field mt-1"
-                value={postCallForm.nextAction}
-                onChange={(event) => setPostCallForm((prev) => ({ ...prev, nextAction: event.target.value }))}
-              />
-            </label>
-            <label className="text-sm">
-              Data de follow-up (opcional)
-              <input
-                type="date"
-                className="field mt-1"
-                value={postCallForm.followUpDate}
-                onChange={(event) => setPostCallForm((prev) => ({ ...prev, followUpDate: event.target.value }))}
-              />
-            </label>
+            {showNextActionField ? (
+              <label className="text-sm md:col-span-2">
+                Proxima acao
+                <select
+                  className="field mt-1"
+                  value={postCallForm.nextAction}
+                  onChange={(event) => setPostCallForm((prev) => ({ ...prev, nextAction: event.target.value }))}
+                >
+                  <option value="">Selecione...</option>
+                  {nextActionOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {showFollowUpFields ? (
+              <>
+                <label className="text-sm">
+                  Data de follow-up
+                  <input
+                    type="date"
+                    className="field mt-1"
+                    value={postCallForm.followUpDate}
+                    onChange={(event) => setPostCallForm((prev) => ({ ...prev, followUpDate: event.target.value }))}
+                  />
+                </label>
+                <label className="text-sm">
+                  Horario de follow-up
+                  <input
+                    type="time"
+                    className="field mt-1"
+                    value={postCallForm.followUpTime}
+                    onChange={(event) => setPostCallForm((prev) => ({ ...prev, followUpTime: event.target.value }))}
+                  />
+                </label>
+              </>
+            ) : null}
           </div>
 
           {activeSession && !activeSession.matchedCallId ? (
@@ -1151,3 +1254,6 @@ export default function LigacoesPage() {
     </section>
   );
 }
+
+
+
