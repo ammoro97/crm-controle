@@ -6,7 +6,7 @@ import { Modal } from "@/components/ui/modal";
 import { getLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
-import { createDialSession, generateCallSessionId, getBlockingCallSessionForNewDial } from "@/lib/post-call-flow";
+import { createDialSession, generateCallSessionId, resolveBlockingStateBeforeNewDial } from "@/lib/post-call-flow";
 import { Lead } from "@/types/crm";
 
 type LeadsTableProps = {
@@ -163,23 +163,28 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
       return;
     }
 
-    const blockingSession = getBlockingCallSessionForNewDial();
-    if (blockingSession) {
+    const sessionController = new AbortController();
+    const blocking = await resolveBlockingStateBeforeNewDial(sessionController.signal);
+    if (blocking.blocked && blocking.session) {
       const blockingMessage =
-        blockingSession.status === "ended_detected"
+        blocking.reason === "pending_wrapup"
           ? "Existe uma ligacao encerrada aguardando finalizacao obrigatoria. Finalize antes de iniciar outra."
           : "Existe uma ligacao em andamento. Conclua essa chamada antes de iniciar outra.";
       setCallFeedback(lead.id, { type: "error", message: blockingMessage });
-      console.log("[POSTCALL_DEBUG] Nova ligacao bloqueada por sessao pendente", {
+      console.log("[POSTCALL_DEBUG] NEW CALL BLOCKED", {
         leadId: lead.id,
-        blockingSessionId: blockingSession.sessionId,
-        blockingStatus: blockingSession.status,
+        reason: blocking.reason,
+        blockingSessionId: blocking.session.sessionId,
+        blockingStatus: blocking.session.status,
       });
-      if (typeof window !== "undefined" && blockingSession.status === "ended_detected") {
+      if (typeof window !== "undefined" && blocking.reason === "pending_wrapup") {
         window.location.assign("/ligacoes?postCall=1");
       }
       return;
     }
+    console.log("[POSTCALL_DEBUG] NEW CALL ALLOWED", {
+      leadId: lead.id,
+    });
 
     const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);
     if (!currentUser || !resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {

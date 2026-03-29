@@ -72,6 +72,8 @@ type CallEndDetectionResult = {
   detectionSource?: EndDetectionSource;
 };
 
+export type NewCallBlockReason = "active_call" | "pending_wrapup";
+
 const POST_CALL_DEBUG_PREFIX = "[POSTCALL_DEBUG]";
 
 function debugLog(message: string, payload?: unknown) {
@@ -337,7 +339,11 @@ function findUniqueRecentApi4ComHistoryCallByPhone(
     const endedAt = String(item.ended_at || item.endedAt || "").trim();
     const hangup = String(item.hangup_cause || item.hangupCause || "").trim();
     const duration = Number(item.duration);
-    return Boolean(endedAt || hangup || (Number.isFinite(duration) && duration > 0));
+    const state = String(item.state || item.call_state || item.callStatus || item.status || "").toLowerCase().trim();
+    const disposition = String(item.disposition || item.call_disposition || "").toLowerCase().trim();
+    const terminalTokens = ["hangup", "finished", "completed", "cancel", "busy", "failed", "no answer", "no-answer", "answered"];
+    const hasTerminalState = terminalTokens.some((token) => state.includes(token) || disposition.includes(token));
+    return Boolean(endedAt || hangup || (Number.isFinite(duration) && duration > 0) || hasTerminalState);
   };
 
   const getReferenceTs = (item: Record<string, unknown>) => {
@@ -417,6 +423,62 @@ export function getBlockingCallSessionForNewDial() {
   return current;
 }
 
+export function clearActiveCallSession(input?: { expectedSessionId?: string; reason?: string }) {
+  const current = readActiveSession();
+  if (!current) return false;
+  if (input?.expectedSessionId && current.sessionId !== input.expectedSessionId) {
+    debugLog("ACTIVE CALL CLEAR SKIPPED: expectedSessionId mismatch", {
+      expectedSessionId: input.expectedSessionId,
+      currentSessionId: current.sessionId,
+      reason: input.reason || null,
+    });
+    return false;
+  }
+  writeActiveSession(null);
+  debugLog("ACTIVE CALL CLEARED", {
+    sessionId: current.sessionId,
+    previousStatus: current.status,
+    reason: input?.reason || "manual",
+  });
+  return true;
+}
+
+export async function resolveBlockingStateBeforeNewDial(signal?: AbortSignal): Promise<{
+  blocked: boolean;
+  reason?: NewCallBlockReason;
+  session?: ActiveCallSession | null;
+}> {
+  const current = getBlockingCallSessionForNewDial();
+  if (!current) {
+    debugLog("NEW CALL ALLOWED", { reason: "no_blocking_session" });
+    return { blocked: false, session: null };
+  }
+
+  if (current.status === "ended_detected") {
+    debugLog("NEW CALL BLOCKED", { reason: "pending_wrapup", sessionId: current.sessionId });
+    return { blocked: true, reason: "pending_wrapup", session: current };
+  }
+
+  const detection = await detectCallEnd(current, signal);
+  if (detection.matched && detection.detectionSource) {
+    const updated = markCallSessionEnded({
+      sessionId: current.sessionId,
+      callId: detection.callId,
+      detectionSource: detection.detectionSource,
+    });
+    debugLog("WRAPUP REQUIRED", {
+      sessionId: current.sessionId,
+      callId: detection.callId || null,
+      source: detection.detectionSource,
+    });
+    debugLog("NEW CALL BLOCKED", { reason: "pending_wrapup", sessionId: current.sessionId });
+    return { blocked: true, reason: "pending_wrapup", session: updated || current };
+  }
+
+  debugLog("NEW CALL BLOCKED", { reason: "active_call", sessionId: current.sessionId });
+  return { blocked: true, reason: "active_call", session: current };
+}
+
 export function generateCallSessionId() {
   return `SESSION-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -448,6 +510,13 @@ export function createDialSession(input: {
     status: "dialing",
   };
   writeActiveSession(session);
+  debugLog("CALL STARTED", {
+    sessionId: session.sessionId,
+    externalCallId: session.externalCallId || null,
+    leadId: session.leadId || null,
+    telefone: session.telefone,
+    status: session.status,
+  });
   debugLog("Sessao de discagem criada", {
     sessionId: session.sessionId,
     leadId: session.leadId,
@@ -486,6 +555,11 @@ export function markCallSessionEnded(input: {
     detectionSource: input.detectionSource,
   };
   writeActiveSession(updated);
+  debugLog("CALL ENDED DETECTED", {
+    sessionId: input.sessionId,
+    callId: input.callId || null,
+    source: input.detectionSource,
+  });
   debugLog("Sessao marcada como encerrada", {
     sessionId: input.sessionId,
     callId: input.callId,
@@ -502,6 +576,7 @@ export function markCallSessionWrapped(sessionId: string) {
     status: "wrapped",
   };
   writeActiveSession(updated);
+  debugLog("FINALIZATION SAVED", { sessionId });
   debugLog("Sessao marcada como finalizada (wrap concluido)", { sessionId });
   return updated;
 }

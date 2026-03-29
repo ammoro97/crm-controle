@@ -18,6 +18,7 @@ import {
   ActiveCallSession,
   PostCallWrapup,
   PostCallResultOption,
+  clearActiveCallSession,
   detectCallEnd,
   getActiveCallSession,
   getPendingPostCallWrapupsCount,
@@ -1445,6 +1446,11 @@ export default function LigacoesPage() {
       createFollowUpMeetingIfNeeded(activeSession, postCallForm, ownerName);
 
       markCallSessionWrapped(activeSession.sessionId);
+      clearActiveCallSession({
+        expectedSessionId: activeSession.sessionId,
+        reason: "wrapup_saved",
+      });
+      setActiveSession(null);
       console.log("[POSTCALL_DEBUG] Wrapup salvo e sessao marcada como wrapped", {
         sessionId: activeSession.sessionId,
       });
