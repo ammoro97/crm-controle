@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Modal } from "@/components/ui/modal";
+import { getLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
 import { createDialSession } from "@/lib/post-call-flow";
@@ -94,6 +95,8 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null);
   const [callFeedbackByLead, setCallFeedbackByLead] = useState<Record<string, CallFeedback>>({});
   const [responsavelMissingModalOpen, setResponsavelMissingModalOpen] = useState(false);
+  const [phonePickerLead, setPhonePickerLead] = useState<Lead | null>(null);
+  const [selectedDialPhone, setSelectedDialPhone] = useState("");
 
   const statusOptions = useMemo(
     () => ["Novo", "Contato iniciado", "Qualificado", "Reuniao marcada", "Proposta enviada", "Perdido", "Fechado"],
@@ -147,15 +150,15 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
     }, 6000);
   };
 
-  const callLead = async (lead: Lead) => {
+  const callLead = async (lead: Lead, phoneToDial: string) => {
     console.log("[POSTCALL_DEBUG] Clique no botao Ligar", {
       leadId: lead.id,
       nome: lead.name,
-      telefone: lead.phone,
+      telefone: phoneToDial,
       timestamp: new Date().toISOString(),
     });
 
-    if (!lead.phone) {
+    if (!phoneToDial) {
       setCallFeedback(lead.id, { type: "error", message: "Lead sem telefone para discagem." });
       return;
     }
@@ -184,7 +187,7 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          phone: lead.phone,
+          phone: phoneToDial,
           leadId: lead.id,
           nome: lead.name,
           empresa: lead.company,
@@ -224,7 +227,7 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
         leadId: lead.id,
         nome: lead.name,
         empresa: lead.company,
-        telefone: lead.phone,
+        telefone: phoneToDial,
         externalCallId,
         userId: currentUser?.id,
         responsavelId: resolvedResponsavel.responsavel.id,
@@ -240,6 +243,21 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
     } finally {
       setCallingLeadId(null);
     }
+  };
+
+  const requestDial = (lead: Lead) => {
+    const phones = getLeadPhones(lead);
+    if (phones.length === 0) {
+      setCallFeedback(lead.id, { type: "error", message: "Lead sem telefone para discagem." });
+      return;
+    }
+    if (phones.length === 1) {
+      void callLead(lead, phones[0]);
+      return;
+    }
+
+    setPhonePickerLead(lead);
+    setSelectedDialPhone(phones[0]);
   };
 
   useEffect(() => {
@@ -379,7 +397,14 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.name}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.company}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.niche || "-"}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.phone}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    {(() => {
+                      const phones = getLeadPhones(lead);
+                      if (phones.length === 0) return "-";
+                      if (phones.length === 1) return phones[0];
+                      return `${phones[0]} (+${phones.length - 1})`;
+                    })()}
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.email}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.city}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.state}</td>
@@ -400,10 +425,10 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
                       <button
                         type="button"
                         className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={callingLeadId === lead.id || !lead.phone}
+                        disabled={callingLeadId === lead.id || getLeadPhones(lead).length === 0}
                         onClick={(event) => {
                           event.stopPropagation();
-                          void callLead(lead);
+                          requestDial(lead);
                         }}
                       >
                         {callingLeadId === lead.id ? "Ligando..." : "📞 Ligar"}
@@ -551,6 +576,62 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
             </button>
           </div>
         </div>
+      </Modal>
+      <Modal
+        title="Selecionar telefone"
+        open={Boolean(phonePickerLead)}
+        onClose={() => {
+          setPhonePickerLead(null);
+          setSelectedDialPhone("");
+        }}
+      >
+        {phonePickerLead ? (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-200">
+              Escolha o numero para ligar para <span className="font-semibold">{phonePickerLead.name}</span>.
+            </p>
+            <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
+              Telefones disponiveis
+              <select
+                className="field mt-1 h-9 px-2.5 py-1.5 text-xs"
+                value={selectedDialPhone}
+                onChange={(event) => setSelectedDialPhone(event.target.value)}
+              >
+                {getLeadPhones(phonePickerLead).map((phone) => (
+                  <option key={phone} value={phone}>
+                    {phone}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="btn-ghost h-9 px-3 py-1.5 text-xs"
+                onClick={() => {
+                  setPhonePickerLead(null);
+                  setSelectedDialPhone("");
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-primary h-9 px-3 py-1.5 text-xs"
+                onClick={() => {
+                  if (!phonePickerLead || !selectedDialPhone) return;
+                  const lead = phonePickerLead;
+                  const phone = selectedDialPhone;
+                  setPhonePickerLead(null);
+                  setSelectedDialPhone("");
+                  void callLead(lead, phone);
+                }}
+              >
+                Iniciar ligacao
+              </button>
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </div>
   );

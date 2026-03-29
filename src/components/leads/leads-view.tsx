@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { PageTopbar } from "@/components/layout/page-topbar";
 import { Modal } from "@/components/ui/modal";
 import { getLeadsSnapshot, setLeadsSnapshot } from "@/lib/crm-data-store";
+import { getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { detectCallEnd, getActiveCallSession, markCallSessionEnded } from "@/lib/post-call-flow";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { Lead, LeadChannel, LeadHistoryEvent, LeadStatus } from "@/types/crm";
@@ -47,8 +48,17 @@ const statusOptions: LeadStatus[] = [
 ];
 
 function normalizeLead(lead: Lead): Lead {
+  const names = getLeadNames(lead);
+  const phones = getLeadPhones(lead);
+  const emails = getLeadEmails(lead);
   return {
     ...lead,
+    name: names[0] || "",
+    names,
+    phone: phones[0] || "",
+    phones,
+    email: emails[0] || "",
+    emails,
     firstContactDate: lead.firstContactDate ?? "",
     observationLog: lead.observationLog ?? [],
     internalNotes: lead.internalNotes ?? [],
@@ -103,12 +113,15 @@ function createEmptyLead(filter: LeadFilter): Lead {
   return {
     id: `L-${Date.now()}`,
     name: "",
+    names: [],
     company: "",
     phone: "",
+    phones: [],
+    email: "",
+    emails: [],
     status: "Novo",
     source: "",
     owner: "",
-    email: "",
     notes: "",
     channel: filter === "all" ? "inbound" : filter,
     city: "",
@@ -387,9 +400,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     return sorted.filter((lead) => {
       const haystack = [
         normalizeQueryText(lead.name),
+        ...getLeadNames(lead).map((name) => normalizeQueryText(name)),
         normalizeQueryText(lead.company),
         normalizeQueryText(lead.phone),
+        ...getLeadPhones(lead).map((phone) => normalizeQueryText(phone)),
         normalizeQueryText(lead.email),
+        ...getLeadEmails(lead).map((email) => normalizeQueryText(email)),
       ];
       return haystack.some((value) => value.includes(normalizedSearch));
     });

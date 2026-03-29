@@ -92,12 +92,15 @@ export type OutboundQualification = {
 export type Lead = {
   id: string;
   name: string;
+  names?: string[];
   company: string;
   phone: string;
+  phones?: string[];
+  email: string;
+  emails?: string[];
   status: LeadStatus;
   source: string;
   owner: string;
-  email: string;
   notes: string;
   channel: LeadChannel;
   city: string;
