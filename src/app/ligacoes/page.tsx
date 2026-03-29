@@ -87,10 +87,6 @@ type LeadsIndexes = {
   byPhoneDigits: Map<string, Lead>;
 };
 
-type InternalCallIndexes = {
-  byPhoneAndMinute: Map<string, CallLog[]>;
-};
-
 type PostCallFormState = {
   result: PostCallResultOption;
   reason: "Ja possui CRM e nao tem interesse" | "Outros" | "";
@@ -109,11 +105,9 @@ type CurrentCallEvidence = {
 };
 
 type WrapupsIndexes = {
-  byCallId: Map<string, PostCallWrapup>;
-  byExternalCallId: Map<string, PostCallWrapup>;
-  bySessionId: Map<string, PostCallWrapup>;
-  byPhone: Map<string, PostCallWrapup[]>;
-  byPhoneAndMinute: Map<string, PostCallWrapup[]>;
+  byCallId: Map<string, PostCallWrapup[]>;
+  byExternalCallId: Map<string, PostCallWrapup[]>;
+  bySessionId: Map<string, PostCallWrapup[]>;
 };
 
 type ResponsavelByIdIndex = Map<string, string>;
@@ -176,31 +170,6 @@ function buildLeadsIndexes(leads: Lead[]): LeadsIndexes {
   }
 
   return { byId, byPhoneDigits };
-}
-
-function toMinuteKey(value?: string | null) {
-  if (!value || typeof value !== "string") return "";
-  const raw = value.trim();
-  if (!raw) return "";
-  const [datePartRaw, timePartRaw = ""] = raw.split("T");
-  const dateOnly = (datePartRaw || "").split(" ")[0] || "";
-  const timeClean = timePartRaw.replace("Z", "").trim();
-  if (!dateOnly || timeClean.length < 5) return "";
-  return `${dateOnly}T${timeClean.slice(0, 5)}`;
-}
-
-function buildInternalCallIndexes(calls: CallLog[]): InternalCallIndexes {
-  const byPhoneAndMinute = new Map<string, CallLog[]>();
-  for (const item of calls) {
-    const phoneDigits = normalizeDigits(item.telefone || item.called || item.caller || "");
-    const minute = toMinuteKey(item.startedAt || item.createdAt || "");
-    if (!phoneDigits || !minute) continue;
-    const key = `${phoneDigits}|${minute}`;
-    const current = byPhoneAndMinute.get(key) || [];
-    current.push(item);
-    byPhoneAndMinute.set(key, current);
-  }
-  return { byPhoneAndMinute };
 }
 
 function findLeadByPhone(indexes: LeadsIndexes, phoneRaw?: string | null) {
@@ -266,41 +235,34 @@ function normalizeFinalizacaoLabel(value: string) {
   return legacyMap[normalized] || "-";
 }
 
+function pushIndexedWrapup(index: Map<string, PostCallWrapup[]>, key: string, wrapup: PostCallWrapup) {
+  if (!key) return;
+  const current = index.get(key) || [];
+  current.push(wrapup);
+  index.set(key, current);
+}
+
 function buildWrapupsIndexes(wrapups: PostCallWrapup[]): WrapupsIndexes {
-  const byCallId = new Map<string, PostCallWrapup>();
-  const byExternalCallId = new Map<string, PostCallWrapup>();
-  const bySessionId = new Map<string, PostCallWrapup>();
-  const byPhone = new Map<string, PostCallWrapup[]>();
-  const byPhoneAndMinute = new Map<string, PostCallWrapup[]>();
+  const byCallId = new Map<string, PostCallWrapup[]>();
+  const byExternalCallId = new Map<string, PostCallWrapup[]>();
+  const bySessionId = new Map<string, PostCallWrapup[]>();
 
   const ordered = [...wrapups].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   for (const wrapup of ordered) {
-    if (wrapup.callId && !byCallId.has(wrapup.callId)) {
-      byCallId.set(wrapup.callId, wrapup);
-    }
-    if (wrapup.externalCallId && !byExternalCallId.has(wrapup.externalCallId)) {
-      byExternalCallId.set(wrapup.externalCallId, wrapup);
-    }
-    if (wrapup.sessionId && !bySessionId.has(wrapup.sessionId)) {
-      bySessionId.set(wrapup.sessionId, wrapup);
-    }
-    const digits = normalizeDigits(wrapup.telefone);
-    if (digits) {
-      const current = byPhone.get(digits) || [];
-      current.push(wrapup);
-      byPhone.set(digits, current);
-
-      const minute = toMinuteKey(wrapup.createdAt);
-      if (minute) {
-        const key = `${digits}|${minute}`;
-        const byMinute = byPhoneAndMinute.get(key) || [];
-        byMinute.push(wrapup);
-        byPhoneAndMinute.set(key, byMinute);
-      }
-    }
+    pushIndexedWrapup(byCallId, String(wrapup.callId || "").trim(), wrapup);
+    pushIndexedWrapup(byExternalCallId, String(wrapup.externalCallId || "").trim(), wrapup);
+    pushIndexedWrapup(bySessionId, String(wrapup.sessionId || "").trim(), wrapup);
   }
 
-  return { byCallId, byExternalCallId, bySessionId, byPhone, byPhoneAndMinute };
+  return { byCallId, byExternalCallId, bySessionId };
+}
+
+function getUniqueWrapup(index: Map<string, PostCallWrapup[]>, key?: string | null): PostCallWrapup | undefined {
+  const normalized = String(key || "").trim();
+  if (!normalized) return undefined;
+  const matches = index.get(normalized) || [];
+  if (matches.length !== 1) return undefined;
+  return matches[0];
 }
 
 function isTechnicalAnswered(status: string, durationSeconds: number) {
@@ -421,7 +383,6 @@ function mapApiCallToRow(
   context: {
     leadsIndexes: LeadsIndexes;
     internalById: Map<string, CallLog>;
-    internalIndexes: InternalCallIndexes;
     wrapupsIndexes: WrapupsIndexes;
     responsavelById: ResponsavelByIdIndex;
   },
@@ -468,51 +429,48 @@ function mapApiCallToRow(
   const resolvedStatus = internal?.status || status;
   const resolvedStartedAt = internal?.startedAt || startedAt;
 
-  let matchSource: "callId" | "externalCallId" | "metadataExternalCallId" | "sessionId" | "fallbackMinute" | null = null;
-  let matchedWrapup: PostCallWrapup | undefined = rawId ? context.wrapupsIndexes.byCallId.get(rawId) : undefined;
-  if (matchedWrapup) matchSource = "callId";
+  let matchSource: "sessionId" | "externalCallId" | "callId" | null = null;
+  let matchedWrapup: PostCallWrapup | undefined;
+
+  const sessionIdCandidate = metadataSessionId || internal?.sessionId || "";
+  if (sessionIdCandidate) {
+    matchedWrapup = getUniqueWrapup(context.wrapupsIndexes.bySessionId, sessionIdCandidate);
+    if (matchedWrapup) matchSource = "sessionId";
+  }
+
   if (!matchedWrapup && rawId) {
-    matchedWrapup = context.wrapupsIndexes.byExternalCallId.get(rawId);
+    matchedWrapup = getUniqueWrapup(context.wrapupsIndexes.byExternalCallId, rawId);
     if (matchedWrapup) matchSource = "externalCallId";
   }
+
   if (!matchedWrapup && metadataExternalCallId) {
     matchedWrapup =
-      context.wrapupsIndexes.byExternalCallId.get(metadataExternalCallId) ||
-      context.wrapupsIndexes.byCallId.get(metadataExternalCallId);
-    if (matchedWrapup) matchSource = "metadataExternalCallId";
+      getUniqueWrapup(context.wrapupsIndexes.byExternalCallId, metadataExternalCallId) ||
+      getUniqueWrapup(context.wrapupsIndexes.byCallId, metadataExternalCallId);
+    if (matchedWrapup) matchSource = "externalCallId";
   }
-  if (!matchedWrapup) {
-    const sessionIdCandidate = metadataSessionId || internal?.sessionId || "";
-    if (sessionIdCandidate) {
-      matchedWrapup = context.wrapupsIndexes.bySessionId.get(sessionIdCandidate);
-      if (matchedWrapup) matchSource = "sessionId";
-    }
+
+  if (!matchedWrapup && rawId) {
+    matchedWrapup = getUniqueWrapup(context.wrapupsIndexes.byCallId, rawId);
+    if (matchedWrapup) matchSource = "callId";
   }
-  if (!matchedWrapup) {
-    const phoneDigits = normalizeDigits(resolvedTelefone || metadataTelefone || item.telefone || item.to || "");
-    const minute = toMinuteKey(resolvedStartedAt || startedAt || "");
-    const byPhoneAndMinute = phoneDigits && minute ? context.wrapupsIndexes.byPhoneAndMinute.get(`${phoneDigits}|${minute}`) : [];
-    if (byPhoneAndMinute && byPhoneAndMinute.length === 1) {
-      matchedWrapup = byPhoneAndMinute[0];
-      matchSource = "fallbackMinute";
-    }
+
+  if (!matchedWrapup && internal?.id) {
+    matchedWrapup = getUniqueWrapup(context.wrapupsIndexes.byCallId, internal.id);
+    if (matchedWrapup) matchSource = "callId";
   }
-  if (!matchedWrapup) {
-    const phoneDigits = normalizeDigits(resolvedTelefone || metadataTelefone || item.telefone || item.to || "");
-    const minute = toMinuteKey(resolvedStartedAt || startedAt || "");
-    const key = phoneDigits && minute ? `${phoneDigits}|${minute}` : "";
-    const candidates = key ? context.internalIndexes.byPhoneAndMinute.get(key) || [] : [];
-    if (candidates.length === 1) {
-      const internalCandidate = candidates[0];
-      matchedWrapup =
-        context.wrapupsIndexes.byCallId.get(internalCandidate.id) ||
-        (internalCandidate.externalCallId
-          ? context.wrapupsIndexes.byExternalCallId.get(internalCandidate.externalCallId)
-          : undefined) ||
-        (internalCandidate.sessionId ? context.wrapupsIndexes.bySessionId.get(internalCandidate.sessionId) : undefined);
-      if (matchedWrapup) matchSource = "fallbackMinute";
-    }
+
+  if (matchedWrapup) {
+    console.log("[POSTCALL_DEBUG][LIGACOES] Finalizacao correlacionada", {
+      tableCallId: rawId || internal?.id || null,
+      sessionIdCandidate: sessionIdCandidate || null,
+      metadataExternalCallId: metadataExternalCallId || null,
+      wrapupId: matchedWrapup.id,
+      wrapupCallId: matchedWrapup.callId || null,
+      source: matchSource,
+    });
   }
+
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
   const subfinalizacao = matchedWrapup?.nextAction?.trim() ? matchedWrapup.nextAction.trim() : "-";
   const atendenteFromWrapupResponsavelId =
@@ -555,9 +513,9 @@ function mapInternalCallToRow(
 ): MappedCall {
   const linkedLead = item.leadId ? context.leadsIndexes.byId.get(item.leadId) : null;
   let matchedWrapup: PostCallWrapup | undefined =
-    context.wrapupsIndexes.byCallId.get(item.id) ||
-    (item.externalCallId ? context.wrapupsIndexes.byExternalCallId.get(item.externalCallId) : undefined) ||
-    (item.sessionId ? context.wrapupsIndexes.bySessionId.get(item.sessionId) : undefined);
+    (item.sessionId ? getUniqueWrapup(context.wrapupsIndexes.bySessionId, item.sessionId) : undefined) ||
+    (item.externalCallId ? getUniqueWrapup(context.wrapupsIndexes.byExternalCallId, item.externalCallId) : undefined) ||
+    getUniqueWrapup(context.wrapupsIndexes.byCallId, item.id);
 
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
   const subfinalizacao = matchedWrapup?.nextAction?.trim() ? matchedWrapup.nextAction.trim() : "-";
@@ -713,20 +671,18 @@ export default function LigacoesPage() {
       setInternalById(internalMap);
 
       const leadsIndexes = buildLeadsIndexes(leadsSnapshot);
-      const internalIndexes = buildInternalCallIndexes(Array.from(internalMap.values()));
       const wrapupsIndexes = buildWrapupsIndexes(wrapups);
       const externalItems = externalResponse.ok && externalData.ok && Array.isArray(externalData.items) ? externalData.items : [];
 
       const rows =
         externalItems.length > 0
           ? externalItems.map((item, index) =>
-              mapApiCallToRow(item, index, {
-                leadsIndexes,
-                internalById: internalMap,
-                internalIndexes,
-                wrapupsIndexes,
-                responsavelById,
-              }),
+                mapApiCallToRow(item, index, {
+                  leadsIndexes,
+                  internalById: internalMap,
+                  wrapupsIndexes,
+                  responsavelById,
+                }),
             )
           : Array.from(internalMap.values()).map((item) =>
               mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),

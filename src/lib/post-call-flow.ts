@@ -140,87 +140,62 @@ function isEndedCallLog(entry: CallLog) {
   return Boolean(
     entry.endedAt ||
       eventType.includes("hangup") ||
-      (typeof entry.durationSeconds === "number" && entry.durationSeconds >= 0),
+      (typeof entry.durationSeconds === "number" && entry.durationSeconds > 0),
   );
 }
 
 function findMatchingCallLog(session: ActiveCallSession, logs: CallLog[]): CallLog | null {
-  const sessionPhone = normalizePhoneDigits(session.telefone);
-  const sessionStart = Date.parse(session.startedAt);
+  const sessionId = String(session.sessionId || "").trim();
+  const externalCallId = String(session.externalCallId || "").trim();
   debugLog("Iniciando matching com call logs internos", {
-    sessionId: session.sessionId,
-    leadId: session.leadId,
-    sessionPhone,
-    sessionStart: session.startedAt,
+    sessionId,
+    externalCallId,
     logsCount: logs.length,
   });
 
-  const candidatesByTime: CallLog[] = [];
+  const endedLogs = logs.filter((entry) => isEndedCallLog(entry));
 
-  for (const log of logs) {
-    if (!isEndedCallLog(log)) continue;
-
-    const sameLead = Boolean(session.leadId && log.leadId && session.leadId === log.leadId);
-    const logPhone = normalizePhoneDigits(log.telefone || log.called || log.caller || "");
-    const samePhone = Boolean(sessionPhone && logPhone && (logPhone.endsWith(sessionPhone) || sessionPhone.endsWith(logPhone)));
-    const reference = log.endedAt || log.startedAt || log.updatedAt || log.createdAt;
-    const referenceMs = Date.parse(reference || "");
-    const inRecentWindow =
-      !Number.isNaN(sessionStart) && !Number.isNaN(referenceMs) && referenceMs >= sessionStart - 1000 * 60 * 5 && referenceMs <= sessionStart + 1000 * 60 * 120;
-
-    if (inRecentWindow) {
-      candidatesByTime.push(log);
-    }
-
-    if (!sameLead && !samePhone) {
-      debugLog("Registro interno rejeitado por lead/telefone", {
-        callId: log.id,
-        sameLead,
-        samePhone,
-        logLeadId: log.leadId,
-        logPhone,
+  if (sessionId) {
+    const sessionMatches = endedLogs.filter((log) => String(log.sessionId || "").trim() === sessionId);
+    if (sessionMatches.length === 1) {
+      debugLog("Registro interno correlacionado por sessionId", {
+        sessionId,
+        callId: sessionMatches[0].id,
       });
-      continue;
+      return sessionMatches[0];
     }
-
-    if (!Number.isNaN(sessionStart)) {
-      const logTimeRaw = log.startedAt || log.createdAt || "";
-      const logTime = Date.parse(logTimeRaw);
-      if (!Number.isNaN(logTime)) {
-        const distance = Math.abs(logTime - sessionStart);
-        if (distance > 1000 * 60 * 120) {
-          debugLog("Registro interno rejeitado por janela de tempo", {
-            callId: log.id,
-            logTime: logTimeRaw,
-            distanceMs: distance,
-          });
-          continue;
-        }
-      }
+    if (sessionMatches.length > 1) {
+      debugLog("Correlacao ambigua por sessionId (nao sera conciliado)", {
+        sessionId,
+        callIds: sessionMatches.map((item) => item.id),
+      });
+      return null;
     }
-
-    debugLog("Registro interno aceito", {
-      callId: log.id,
-      sameLead,
-      samePhone,
-      status: log.status,
-      eventType: log.eventType,
-      startedAt: log.startedAt,
-      endedAt: log.endedAt,
-    });
-    return log;
   }
 
-  if (candidatesByTime.length === 1) {
-    debugLog("Sem match estrito. Usando fallback por candidato unico em janela recente", {
-      callId: candidatesByTime[0].id,
+  if (externalCallId) {
+    const externalMatches = endedLogs.filter((log) => {
+      const logId = String(log.id || "").trim();
+      const logExternalId = String(log.externalCallId || "").trim();
+      return logId === externalCallId || logExternalId === externalCallId;
     });
-    return candidatesByTime[0];
+    if (externalMatches.length === 1) {
+      debugLog("Registro interno correlacionado por externalCallId", {
+        externalCallId,
+        callId: externalMatches[0].id,
+      });
+      return externalMatches[0];
+    }
+    if (externalMatches.length > 1) {
+      debugLog("Correlacao ambigua por externalCallId (nao sera conciliado)", {
+        externalCallId,
+        callIds: externalMatches.map((item) => item.id),
+      });
+      return null;
+    }
   }
 
-  debugLog("Nenhum matching interno encontrado", {
-    candidatesByTime: candidatesByTime.map((item) => item.id),
-  });
+  debugLog("Nenhum matching interno deterministico encontrado", { sessionId, externalCallId });
   return null;
 }
 
@@ -228,33 +203,13 @@ function findMatchingApi4ComHistoryCall(
   session: ActiveCallSession,
   items: Array<Record<string, unknown>>,
 ): { id?: string } | null {
-  const sessionPhone = normalizePhoneDigits(session.telefone);
-  const sessionStart = Date.parse(session.startedAt);
+  const sessionId = String(session.sessionId || "").trim();
   const sessionExternalCallId = String(session.externalCallId || "").trim();
-  const MAX_EXTERNAL_MATCH_DISTANCE_MS = 1000 * 60 * 60 * 12; // 12h (tolerancia para timezone/formatos diferentes)
-  const MAX_PAST_FALLBACK_MS = 1000 * 60 * 1; // 1 min para evitar casar com ligacao anterior
   debugLog("Iniciando matching com historico externo API4Com", {
-    sessionId: session.sessionId,
-    leadId: session.leadId,
-    sessionPhone,
-    sessionStart: session.startedAt,
+    sessionId,
+    externalCallId: sessionExternalCallId,
     itemsCount: items.length,
   });
-
-  const recentCandidates: Array<Record<string, unknown>> = [];
-  const recentEndedCandidates: Array<Record<string, unknown>> = [];
-  const broadPhoneEndedCandidates: Array<Record<string, unknown>> = [];
-  const broadPhoneCandidates: Array<Record<string, unknown>> = [];
-  const recentGlobalEndedCandidates: Array<Record<string, unknown>> = [];
-  const strictCandidates: Array<{
-    item: Record<string, unknown>;
-    distance: number;
-    ended: boolean;
-    id?: string;
-    hardMatch: boolean;
-    isPastBeyondTolerance: boolean;
-    referenceTs: number;
-  }> = [];
 
   const isExternallyEnded = (item: Record<string, unknown>) => {
     const endedAt = String(item.ended_at || item.endedAt || "").trim();
@@ -283,258 +238,55 @@ function findMatchingApi4ComHistoryCall(
   const getItemId = (item: Record<string, unknown>) =>
     String(item.id || item.uniqueid || item.call_id || "").trim();
 
-  const getExternalReferenceDate = (item: Record<string, unknown>) => {
-    const candidates = [
-      item.started_at,
-      item.startedAt,
-      item.ended_at,
-      item.endedAt,
-      item.created_at,
-      item.createdAt,
-      item.updated_at,
-      item.updatedAt,
-      item.timestamp,
-      item.datetime,
-      item.date_time,
-      item.date,
-    ];
-
-    for (const candidate of candidates) {
-      const raw = String(candidate || "").trim();
-      if (!raw) continue;
-      const ts = Date.parse(raw);
-      if (!Number.isNaN(ts)) return { raw, ts };
-    }
-    return { raw: "", ts: Number.NaN };
-  };
+  const bySession: Record<string, unknown>[] = [];
+  const byExternalId: Record<string, unknown>[] = [];
 
   for (const item of items) {
     const itemId = getItemId(item);
-    if (sessionExternalCallId && itemId && itemId === sessionExternalCallId) {
-      if (isExternallyEnded(item)) {
-        debugLog("Registro externo aceito por callId da sessao (encerrado)", {
-          itemId,
-          sessionExternalCallId,
-        });
-        return { id: itemId };
-      }
-
-      debugLog("Registro externo bateu callId da sessao, mas ainda nao encerrou", {
-        itemId,
-        sessionExternalCallId,
-      });
-    }
-
     const metadata = item.metadata && typeof item.metadata === "object" ? (item.metadata as Record<string, unknown>) : {};
-    const metaLeadId = String(metadata.leadId || "").trim();
     const metaSessionId = String(metadata.sessionId || "").trim();
-    const hasLeadMatch = Boolean(session.leadId && metaLeadId && session.leadId === metaLeadId);
-    const hasSessionMatch = Boolean(metaSessionId && metaSessionId === session.sessionId);
-
-    const phoneCandidates = [
-      item.telefone,
-      item.to,
-      item.to_number,
-      item.called,
-      item.caller,
-      item.from,
-      item.from_number,
-      item.number,
-      item.phone_number,
-      item.phoneNumber,
-      item.dst,
-      item.src,
-      item.phone,
-      item.destination,
-      metadata.telefone,
-    ]
-      .map((value) => normalizePhoneDigits(String(value || "")))
-      .filter(Boolean);
-
-    const hasPhoneMatch =
-      sessionPhone.length > 0 &&
-      phoneCandidates.some((phone) => phone.endsWith(sessionPhone) || sessionPhone.endsWith(phone));
-
-    if (!hasLeadMatch && !hasPhoneMatch) {
-      debugLog("Registro externo rejeitado por lead/telefone", {
-        itemId,
-        metaLeadId,
-        phoneCandidates,
-      });
-      continue;
-    }
-
-    if (hasPhoneMatch) {
-      broadPhoneCandidates.push(item);
-      if (isExternallyEnded(item)) {
-        broadPhoneEndedCandidates.push(item);
-      }
-    }
-
-    const startedAt = String(item.started_at || item.startedAt || "");
-    const endedAt = String(item.ended_at || item.endedAt || "");
-    const reference = getExternalReferenceDate(item);
-    const hardMatch = hasSessionMatch || Boolean(sessionExternalCallId && itemId && itemId === sessionExternalCallId);
-    const isPastBeyondTolerance =
-      !Number.isNaN(reference.ts) && !Number.isNaN(sessionStart) && reference.ts < sessionStart - MAX_PAST_FALLBACK_MS;
-
-    if (!hardMatch && isPastBeyondTolerance) {
-      debugLog("Registro externo rejeitado por ser anterior a sessao (tolerancia curta)", {
-        itemId,
-        referenceAt: reference.raw,
-        sessionStart: session.startedAt,
-      });
-      continue;
-    }
-
-    if (!Number.isNaN(reference.ts) && !Number.isNaN(sessionStart)) {
-      const distance = Math.abs(reference.ts - sessionStart);
-      if (distance > MAX_EXTERNAL_MATCH_DISTANCE_MS) {
-        debugLog("Registro externo rejeitado por janela de tempo", {
-          itemId,
-          referenceAt: reference.raw,
-          distanceMs: distance,
-        });
-        continue;
-      }
-
-      if (reference.ts >= sessionStart - MAX_PAST_FALLBACK_MS) {
-        recentCandidates.push(item);
-        if (isExternallyEnded(item)) {
-          recentEndedCandidates.push(item);
-        }
-      }
-
-      // Fallback global: chamada encerrada em janela proxima da sessao, mesmo sem metadados/telefone confiaveis.
-      if (
-        isExternallyEnded(item) &&
-        reference.ts >= sessionStart - MAX_PAST_FALLBACK_MS &&
-        reference.ts <= sessionStart + 1000 * 60 * 120
-      ) {
-        recentGlobalEndedCandidates.push(item);
-      }
-    }
-
-    const id = itemId || undefined;
-    debugLog("Registro externo aceito", {
-      itemId: id,
-      hasLeadMatch,
-      hasPhoneMatch,
-      startedAt,
-      endedAt,
-      hangup: item.hangup_cause || item.hangupCause,
-      duration: item.duration,
-    });
-
-    const distance =
-      Number.isNaN(reference.ts) || Number.isNaN(sessionStart) ? Number.POSITIVE_INFINITY : Math.abs(reference.ts - sessionStart);
-    strictCandidates.push({
-      item,
-      id,
-      ended: isExternallyEnded(item),
-      distance,
-      hardMatch,
-      isPastBeyondTolerance,
-      referenceTs: reference.ts,
-    });
-    continue;
+    if (!isExternallyEnded(item)) continue;
+    if (sessionId && metaSessionId === sessionId) bySession.push(item);
+    if (sessionExternalCallId && itemId && itemId === sessionExternalCallId) byExternalId.push(item);
   }
 
-  if (strictCandidates.length > 0) {
-    const best = strictCandidates
-      .sort((a, b) => {
-        if (a.hardMatch !== b.hardMatch) return a.hardMatch ? -1 : 1;
-        if (a.ended !== b.ended) return a.ended ? -1 : 1;
-        if (a.isPastBeyondTolerance !== b.isPastBeyondTolerance) return a.isPastBeyondTolerance ? 1 : -1;
-        const aIsPast = Number.isFinite(a.referenceTs) && Number.isFinite(sessionStart) && a.referenceTs < sessionStart;
-        const bIsPast = Number.isFinite(b.referenceTs) && Number.isFinite(sessionStart) && b.referenceTs < sessionStart;
-        if (aIsPast !== bIsPast) return aIsPast ? 1 : -1;
-        return a.distance - b.distance;
-      })[0];
-    debugLog("Candidato externo escolhido por ranking estrito", {
-      id: best.id,
-      ended: best.ended,
-      distanceMs: best.distance,
-      hardMatch: best.hardMatch,
-      totalCandidates: strictCandidates.length,
-    });
-    return { id: best.id };
-  }
-
-  if (recentCandidates.length === 1) {
-    const unique = recentCandidates[0];
-    const id = String(unique.id || unique.uniqueid || unique.call_id || "").trim() || undefined;
-    debugLog("Sem match estrito. Usando fallback externo por candidato unico recente", { id });
-    return { id };
-  }
-
-  if (recentEndedCandidates.length === 1) {
-    const unique = recentEndedCandidates[0];
-    const id = String(unique.id || unique.uniqueid || unique.call_id || "").trim() || undefined;
-    debugLog("Sem match estrito. Usando fallback externo por candidato unico recente e encerrado", {
-      id,
+  if (bySession.length === 1) {
+    const item = bySession[0];
+    const id = getItemId(item) || undefined;
+    debugLog("Registro externo correlacionado por sessionId", {
+      sessionId,
+      callId: id,
     });
     return { id };
   }
+  if (bySession.length > 1) {
+    debugLog("Correlacao externa ambigua por sessionId (nao sera conciliado)", {
+      sessionId,
+      ids: bySession.map((item) => getItemId(item)).filter(Boolean),
+    });
+    return null;
+  }
 
-  if (broadPhoneEndedCandidates.length === 1) {
-    const unique = broadPhoneEndedCandidates[0];
-    const id = String(unique.id || unique.uniqueid || unique.call_id || "").trim() || undefined;
-    debugLog("Sem match por janela. Usando fallback por telefone unico encerrado", { id });
+  if (byExternalId.length === 1) {
+    const item = byExternalId[0];
+    const id = getItemId(item) || undefined;
+    debugLog("Registro externo correlacionado por externalCallId", {
+      externalCallId: sessionExternalCallId,
+      callId: id,
+    });
     return { id };
   }
-
-  if (broadPhoneCandidates.length === 1) {
-    const unique = broadPhoneCandidates[0];
-    const id = String(unique.id || unique.uniqueid || unique.call_id || "").trim() || undefined;
-    debugLog("Sem match por janela. Usando fallback por telefone unico", { id });
-    return { id };
+  if (byExternalId.length > 1) {
+    debugLog("Correlacao externa ambigua por externalCallId (nao sera conciliado)", {
+      externalCallId: sessionExternalCallId,
+      ids: byExternalId.map((item) => getItemId(item)).filter(Boolean),
+    });
+    return null;
   }
 
-  if (recentGlobalEndedCandidates.length === 1) {
-    const unique = recentGlobalEndedCandidates[0];
-    const id = String(unique.id || unique.uniqueid || unique.call_id || "").trim() || undefined;
-    debugLog("Fallback global aplicado: unico registro encerrado em janela recente", { id });
-    return { id };
-  }
-
-  if (recentGlobalEndedCandidates.length > 1) {
-    // Escolhe o encerrado mais proximo do inicio da sessao quando ha mais de um candidato.
-    const nearest = recentGlobalEndedCandidates
-      .map((item) => {
-        const startedAt = String(item.started_at || item.startedAt || "");
-        const ts = Date.parse(startedAt);
-        return {
-          item,
-          distance: Number.isNaN(ts) || Number.isNaN(sessionStart) ? Number.POSITIVE_INFINITY : Math.abs(ts - sessionStart),
-        };
-      })
-      .sort((a, b) => a.distance - b.distance)[0];
-
-    if (nearest && Number.isFinite(nearest.distance)) {
-      const id = String(nearest.item.id || nearest.item.uniqueid || nearest.item.call_id || "").trim() || undefined;
-      debugLog("Fallback global aplicado: candidato encerrado mais proximo", {
-        id,
-        distanceMs: nearest.distance,
-      });
-      return { id };
-    }
-  }
-
-  debugLog("Nenhum matching externo encontrado", {
-    recentCandidates: recentCandidates.map((item) => String(item.id || item.uniqueid || item.call_id || "")),
-    recentEndedCandidates: recentEndedCandidates.map((item) =>
-      String(item.id || item.uniqueid || item.call_id || ""),
-    ),
-    broadPhoneEndedCandidates: broadPhoneEndedCandidates.map((item) =>
-      String(item.id || item.uniqueid || item.call_id || ""),
-    ),
-    broadPhoneCandidates: broadPhoneCandidates.map((item) =>
-      String(item.id || item.uniqueid || item.call_id || ""),
-    ),
-    recentGlobalEndedCandidates: recentGlobalEndedCandidates.map((item) =>
-      String(item.id || item.uniqueid || item.call_id || ""),
-    ),
+  debugLog("Nenhum matching externo deterministico encontrado", {
+    sessionId,
+    externalCallId: sessionExternalCallId,
   });
   return null;
 }
@@ -665,29 +417,115 @@ export function reconcileWrapupsWithCallLogs(logs: CallLog[]) {
   const current = readWrapups();
   if (current.length === 0) return { changed: 0, records: current };
 
+  const endedLogs = logs.filter((entry) => isEndedCallLog(entry));
+  const byId = new Map<string, CallLog>();
+  const bySessionId = new Map<string, CallLog[]>();
+  const byExternalCallId = new Map<string, CallLog[]>();
+
+  for (const log of endedLogs) {
+    const id = String(log.id || "").trim();
+    if (id) byId.set(id, log);
+
+    const sessionId = String(log.sessionId || "").trim();
+    if (sessionId) {
+      const list = bySessionId.get(sessionId) || [];
+      list.push(log);
+      bySessionId.set(sessionId, list);
+    }
+
+    const externalCallId = String(log.externalCallId || "").trim();
+    if (externalCallId) {
+      const list = byExternalCallId.get(externalCallId) || [];
+      list.push(log);
+      byExternalCallId.set(externalCallId, list);
+    }
+  }
+
+  const resolveBySessionId = (sessionId: string) => {
+    const candidates = bySessionId.get(sessionId) || [];
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+
+  const resolveByExternalCallId = (externalCallId: string) => {
+    const candidates = [
+      ...(byExternalCallId.get(externalCallId) || []),
+      ...(byId.has(externalCallId) ? [byId.get(externalCallId)!] : []),
+    ];
+    const uniqueById = Array.from(new Map(candidates.map((item) => [item.id, item])).values());
+    return uniqueById.length === 1 ? uniqueById[0] : null;
+  };
+
+  const resolveByCallId = (callId: string) => {
+    const log = byId.get(callId);
+    return log || null;
+  };
+
   const next = current.map((wrapup) => {
-    if (wrapup.conciliationStatus === "conciliated") return wrapup;
+    const wrapSessionId = String(wrapup.sessionId || "").trim();
+    const wrapExternalCallId = String(wrapup.externalCallId || "").trim();
+    const wrapCallId = String(wrapup.callId || "").trim();
 
-    const syntheticSession: ActiveCallSession = {
-      sessionId: wrapup.sessionId,
-      leadId: wrapup.leadId,
-      nome: wrapup.nome,
-      empresa: wrapup.empresa,
-      telefone: wrapup.telefone,
-      userId: wrapup.userId,
-      responsavelId: wrapup.responsavelId,
-      atendenteNome: wrapup.atendenteNome,
-      startedAt: wrapup.createdAt,
-      sourcePath: "/ligacoes",
-      status: "ended_detected",
-    };
+    let matched: CallLog | null = null;
+    let source: "sessionId" | "externalCallId" | "callId" | null = null;
 
-    const match = findMatchingCallLog(syntheticSession, logs);
-    if (!match) return wrapup;
+    if (wrapSessionId) {
+      matched = resolveBySessionId(wrapSessionId);
+      source = matched ? "sessionId" : null;
+    } else if (wrapExternalCallId) {
+      matched = resolveByExternalCallId(wrapExternalCallId);
+      source = matched ? "externalCallId" : null;
+    } else if (wrapCallId) {
+      matched = resolveByCallId(wrapCallId);
+      source = matched ? "callId" : null;
+    }
+
+    if (!matched) {
+      const shouldKeepPending = wrapup.conciliationStatus === "pending_conciliation" && !wrapup.callId;
+      if (shouldKeepPending) return wrapup;
+      return {
+        ...wrapup,
+        callId: undefined,
+        conciliationStatus: "pending_conciliation" as const,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    if (wrapSessionId && String(matched.sessionId || "").trim() && String(matched.sessionId || "").trim() !== wrapSessionId) {
+      return {
+        ...wrapup,
+        callId: undefined,
+        conciliationStatus: "pending_conciliation" as const,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    if (
+      wrapExternalCallId &&
+      String(matched.externalCallId || "").trim() &&
+      String(matched.externalCallId || "").trim() !== wrapExternalCallId &&
+      String(matched.id || "").trim() !== wrapExternalCallId
+    ) {
+      return {
+        ...wrapup,
+        callId: undefined,
+        conciliationStatus: "pending_conciliation" as const,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    debugLog("Wrapup conciliado de forma deterministica", {
+      wrapupId: wrapup.id,
+      callId: matched.id,
+      source,
+    });
+
+    if (wrapup.callId === matched.id && wrapup.conciliationStatus === "conciliated") {
+      return wrapup;
+    }
 
     return {
       ...wrapup,
-      callId: wrapup.callId || match.id,
+      callId: matched.id,
       conciliationStatus: "conciliated" as const,
       updatedAt: new Date().toISOString(),
     };
