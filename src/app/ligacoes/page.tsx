@@ -1318,34 +1318,34 @@ export default function LigacoesPage() {
             <article className="rounded-md border border-violet-500/40 bg-violet-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-violet-200">CPC Total</p>
               <div className="mt-1 flex items-end gap-2">
-                <p className="text-3xl font-semibold leading-none text-violet-100">{contactQuality.cpc}</p>
-                <p className="text-lg font-semibold leading-none text-violet-200">{contactQuality.cpcRate}%</p>
+                <p className="text-3xl font-semibold leading-none text-violet-200">{contactQuality.cpcRate}%</p>
+                <p className="text-xl font-semibold leading-none text-violet-100">{contactQuality.cpc}</p>
               </div>
               <p className="mt-1 text-[11px] text-violet-200/90">Contato com cliente</p>
             </article>
             <article className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200">CPC Positivo</p>
               <div className="mt-1 flex items-end gap-2">
-                <p className="text-3xl font-semibold leading-none text-emerald-100">{contactQuality.cpcPositive}</p>
-                <p className="text-lg font-semibold leading-none text-emerald-200">{contactQuality.cpcPositiveRate}%</p>
+                <p className="text-3xl font-semibold leading-none text-emerald-200">{contactQuality.cpcPositiveRate}%</p>
+                <p className="text-xl font-semibold leading-none text-emerald-100">{contactQuality.cpcPositive}</p>
               </div>
               <p className="mt-1 text-[11px] text-emerald-200/90">Falou + retorno</p>
             </article>
             <article className="rounded-md border border-rose-500/40 bg-rose-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-rose-200">CPC Negativo</p>
               <div className="mt-1 flex items-end gap-2">
-                <p className="text-3xl font-semibold leading-none text-rose-100">{contactQuality.cpcNegative}</p>
-                <p className="text-lg font-semibold leading-none text-rose-200">{contactQuality.cpcNegativeRate}%</p>
+                <p className="text-3xl font-semibold leading-none text-rose-200">{contactQuality.cpcNegativeRate}%</p>
+                <p className="text-xl font-semibold leading-none text-rose-100">{contactQuality.cpcNegative}</p>
               </div>
               <p className="mt-1 text-[11px] text-rose-200/90">Sem interesse</p>
             </article>
             <article className="rounded-md border border-orange-500/40 bg-orange-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-orange-200">Ligacoes Improdutivas</p>
               <div className="mt-1 flex items-end gap-2">
-                <p className="text-3xl font-semibold leading-none text-orange-100">{contactQuality.improdutivas}</p>
-                <p className="text-lg font-semibold leading-none text-orange-200">
+                <p className="text-3xl font-semibold leading-none text-orange-200">
                   {filteredCalls.length > 0 ? Math.round((contactQuality.improdutivas / filteredCalls.length) * 100) : 0}%
                 </p>
+                <p className="text-xl font-semibold leading-none text-orange-100">{contactQuality.improdutivas}</p>
               </div>
               <p className="mt-1 text-[11px] text-orange-200/90">Sem conexao/base</p>
             </article>
