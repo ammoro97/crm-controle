@@ -11,6 +11,7 @@ export type PublicUser = {
   nome: string;
   email: string;
   responsavelId: string;
+  responsavelVinculado: boolean;
 };
 
 export type AuthSessionRecord = {

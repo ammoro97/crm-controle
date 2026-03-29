@@ -16,41 +16,22 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function toResponsavelId(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function toDefaultName(email: string) {
-  const localPart = (email || "").split("@")[0] || "usuario";
-  return localPart
-    .replace(/[._-]+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+function normalizeEmail(value: string) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function toPublicUserFromSupabase(user: User): PublicUser {
-  const email = user.email || "";
+  const email = normalizeEmail(user.email || "");
   const mappedResponsavel = getResponsavelByEmailSnapshot(email);
-  const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-  const nome =
-    mappedResponsavel?.nome ||
-    String(metadata.nome || "").trim() ||
-    String(metadata.name || "").trim() ||
-    toDefaultName(email);
-  const responsavelId =
-    mappedResponsavel?.id ||
-    String(metadata.responsavelId || "").trim() || toResponsavelId(nome || email || user.id);
+  const nome = mappedResponsavel?.nome || "Responsavel nao cadastrado";
+  const responsavelId = mappedResponsavel?.id || "";
 
   return {
     id: user.id,
     email,
     nome,
     responsavelId,
+    responsavelVinculado: Boolean(mappedResponsavel),
   };
 }
 

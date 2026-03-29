@@ -82,6 +82,17 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!responsavelId || !atendenteNome) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Seu usuario ainda nao esta cadastrado em Responsaveis. Faca esse cadastro antes de realizar ligacoes.",
+        },
+        { status: 400 },
+      );
+    }
+
     const payload = {
       extension,
       phone: normalizedPhone,

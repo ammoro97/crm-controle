@@ -14,11 +14,13 @@ let usersCache: UserRecord[] | null = null;
 let sessionsCache: AuthSessionRecord[] | null = null;
 
 function toPublicUser(user: UserRecord): PublicUser {
+  const responsavelId = String(user.responsavelId || "").trim();
   return {
     id: user.id,
     nome: user.nome,
     email: user.email,
-    responsavelId: user.responsavelId,
+    responsavelId,
+    responsavelVinculado: Boolean(responsavelId),
   };
 }
 

@@ -10,6 +10,7 @@ import {
   setMeetingsSnapshot,
   subscribeLeadsSnapshot,
 } from "@/lib/crm-data-store";
+import { useResponsaveisRecords } from "@/lib/responsaveis-store";
 import {
   ActiveCallSession,
   PostCallWrapup,
@@ -102,6 +103,8 @@ type WrapupsIndexes = {
   byCallId: Map<string, PostCallWrapup>;
   byPhone: Map<string, PostCallWrapup[]>;
 };
+
+type ResponsavelByIdIndex = Map<string, string>;
 
 const postCallResultOptions: Array<{ value: PostCallResultOption; label: string }> = [
   { value: "Ligacao caiu", label: "Ligacao caiu" },
@@ -361,6 +364,7 @@ function mapApiCallToRow(
     leadsIndexes: LeadsIndexes;
     internalById: Map<string, CallLog>;
     wrapupsIndexes: WrapupsIndexes;
+    responsavelById: ResponsavelByIdIndex;
   },
 ): MappedCall {
   const startedAt = parseDateMaybe(item.started_at ?? item.startedAt);
@@ -376,6 +380,7 @@ function mapApiCallToRow(
   const metadataEmpresa = String(metadata?.empresa ?? "").trim();
   const metadataTelefone = String(metadata?.telefone ?? "").trim();
   const metadataAtendenteNome = String(metadata?.atendenteNome ?? metadata?.atendente ?? "").trim();
+  const metadataResponsavelId = String(metadata?.responsavelId ?? "").trim();
 
   const internal = rawId ? context.internalById.get(rawId) : undefined;
   const leadFromId =
@@ -428,7 +433,14 @@ function mapApiCallToRow(
     }
   }
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
-  const atendente = matchedWrapup?.atendenteNome?.trim() || metadataAtendenteNome || "Nao definido";
+  const atendenteFromResponsavelId = metadataResponsavelId
+    ? context.responsavelById.get(metadataResponsavelId)
+    : undefined;
+  const atendente =
+    matchedWrapup?.atendenteNome?.trim() ||
+    metadataAtendenteNome ||
+    atendenteFromResponsavelId ||
+    "Nao definido";
 
   return {
     id: rawId || `api4com-${index}-${Date.now()}`,
@@ -477,6 +489,7 @@ function statusBadgeClass(status?: string) {
 
 export default function LigacoesPage() {
   const { currentUser } = useAuth();
+  const responsaveisRecords = useResponsaveisRecords();
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [calls, setCalls] = useState<MappedCall[]>([]);
   const [loading, setLoading] = useState(true);
@@ -498,6 +511,13 @@ export default function LigacoesPage() {
   const showReasonField = postCallForm.result === "Cliente sem interesse";
   const showNextActionField = finalizacaoComProximaAcao.has(postCallForm.result);
   const showFollowUpFields = showNextActionField && nextActionComFollowUp.has(postCallForm.nextAction);
+  const responsavelById = useMemo(() => {
+    const map: ResponsavelByIdIndex = new Map();
+    for (const item of responsaveisRecords) {
+      map.set(item.id, item.nome);
+    }
+    return map;
+  }, [responsaveisRecords]);
 
   const loadCalls = async (signal?: AbortSignal) => {
     setLoading(true);
@@ -537,7 +557,7 @@ export default function LigacoesPage() {
       const leadsIndexes = buildLeadsIndexes(leadsSnapshot);
       const wrapupsIndexes = buildWrapupsIndexes(wrapups);
       const rows = (Array.isArray(externalData.items) ? externalData.items : []).map((item, index) =>
-        mapApiCallToRow(item, index, { leadsIndexes, internalById: internalMap, wrapupsIndexes }),
+        mapApiCallToRow(item, index, { leadsIndexes, internalById: internalMap, wrapupsIndexes, responsavelById }),
       );
       rows.sort((a, b) => {
         const first = a.startedAt || "";
@@ -755,7 +775,12 @@ export default function LigacoesPage() {
     }
 
     const lead = leads[leadIndex];
-    const ownerName = session.atendenteNome?.trim() || lead.owner || "Time Comercial";
+    const ownerName =
+      (session.responsavelId ? responsavelById.get(session.responsavelId) : undefined) ||
+      session.atendenteNome?.trim() ||
+      (currentUser?.responsavelVinculado ? currentUser.nome : "") ||
+      lead.owner ||
+      "Time Comercial";
     const observationId = `OBS-CALL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const resultLabel = normalizeFinalizacaoLabel(formState.result) || "Finalizacao registrada";
     const durationText = formatDurationHuman(callEvidence?.durationSeconds);
@@ -835,8 +860,9 @@ export default function LigacoesPage() {
       null;
 
     const ownerName =
+      (session.responsavelId ? responsavelById.get(session.responsavelId) : undefined) ||
       session.atendenteNome?.trim() ||
-      currentUser?.nome?.trim() ||
+      (currentUser?.responsavelVinculado ? currentUser.nome.trim() : "") ||
       lead?.owner ||
       "Time Comercial";
 
@@ -938,8 +964,13 @@ export default function LigacoesPage() {
         empresa: activeSession.empresa,
         telefone: activeSession.telefone,
         userId: activeSession.userId,
-        responsavelId: activeSession.responsavelId,
-        atendenteNome: activeSession.atendenteNome,
+        responsavelId:
+          activeSession.responsavelId ||
+          (currentUser?.responsavelVinculado ? currentUser.responsavelId : undefined),
+        atendenteNome:
+          (activeSession.responsavelId ? responsavelById.get(activeSession.responsavelId) : undefined) ||
+          activeSession.atendenteNome ||
+          (currentUser?.responsavelVinculado ? currentUser.nome : undefined),
         result: postCallForm.result,
         reason: postCallForm.reason || undefined,
         observations: postCallForm.observations.trim(),
