@@ -1,6 +1,8 @@
 "use client";
 
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { User } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase-client";
 import { PublicUser } from "@/types/auth";
 
 type AuthContextValue = {
@@ -13,10 +15,40 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-type MeResponse = {
-  authenticated?: boolean;
-  user?: PublicUser | null;
-};
+function toResponsavelId(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function toDefaultName(email: string) {
+  const localPart = (email || "").split("@")[0] || "usuario";
+  return localPart
+    .replace(/[._-]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function toPublicUserFromSupabase(user: User): PublicUser {
+  const email = user.email || "";
+  const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+  const nome =
+    String(metadata.nome || "").trim() ||
+    String(metadata.name || "").trim() ||
+    toDefaultName(email);
+  const responsavelId =
+    String(metadata.responsavelId || "").trim() || toResponsavelId(nome || email || user.id);
+
+  return {
+    id: user.id,
+    email,
+    nome,
+    responsavelId,
+  };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<PublicUser | null>(null);
@@ -24,16 +56,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const response = await fetch("/api/auth/me", {
-        method: "GET",
-        cache: "no-store",
-      });
-      const data = (await response.json()) as MeResponse;
-      if (!response.ok || !data.authenticated || !data.user) {
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data.user) {
         setCurrentUser(null);
         return;
       }
-      setCurrentUser(data.user);
+      setCurrentUser(toPublicUserFromSupabase(data.user));
     } catch {
       setCurrentUser(null);
     }
@@ -41,31 +69,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    let subscription: { unsubscribe: () => void } | null = null;
+
     const bootstrap = async () => {
       await refreshUser();
       if (active) setLoading(false);
+
+      const listener = supabase.auth.onAuthStateChange((_event, session) => {
+        if (!active) return;
+        if (!session?.user) {
+          setCurrentUser(null);
+          return;
+        }
+        setCurrentUser(toPublicUserFromSupabase(session.user));
+      });
+
+      subscription = listener.data.subscription;
     };
+
     void bootstrap();
+
     return () => {
       active = false;
+      if (subscription) subscription.unsubscribe();
     };
   }, [refreshUser]);
 
   const login = useCallback(
     async (email: string, senha: string) => {
       try {
-        const response = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ email, senha }),
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password: senha,
         });
-        const data = (await response.json()) as { success?: boolean; user?: PublicUser; message?: string };
-        if (!response.ok || !data.success || !data.user) {
-          return { success: false, message: data.message || "Nao foi possivel autenticar." };
+        if (error || !data.user) {
+          return { success: false, message: error?.message || "Nao foi possivel autenticar." };
         }
-        setCurrentUser(data.user);
+        setCurrentUser(toPublicUserFromSupabase(data.user));
         return { success: true };
       } catch {
         return { success: false, message: "Falha de rede ao autenticar." };
@@ -76,9 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-      });
+      await supabase.auth.signOut();
     } finally {
       setCurrentUser(null);
     }

@@ -3,11 +3,24 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase-client";
 
-type RegisterResponse = {
-  success?: boolean;
-  message?: string;
-};
+function toDefaultName(email: string) {
+  const localPart = (email || "").split("@")[0] || "usuario";
+  return localPart
+    .replace(/[._-]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function toResponsavelId(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 export default function CadastroPage() {
   const router = useRouter();
@@ -24,17 +37,26 @@ export default function CadastroPage() {
     setSuccess(null);
 
     try {
-      const response = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const nome = toDefaultName(email);
+      const responsavelId = toResponsavelId(nome || email);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: senha,
+        options: {
+          data: {
+            nome,
+            responsavelId,
+          },
         },
-        body: JSON.stringify({ email, senha }),
       });
-      const data = (await response.json()) as RegisterResponse;
 
-      if (!response.ok || !data.success) {
-        setError(data.message || "Nao foi possivel criar a conta.");
+      if (error) {
+        setError(error.message || "Nao foi possivel criar a conta.");
+        return;
+      }
+
+      if (!data.user) {
+        setError("Nao foi possivel criar a conta.");
         return;
       }
 
@@ -96,4 +118,3 @@ export default function CadastroPage() {
     </section>
   );
 }
-
