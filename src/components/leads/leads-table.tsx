@@ -6,7 +6,7 @@ import { Modal } from "@/components/ui/modal";
 import { getLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
-import { createDialSession, generateCallSessionId } from "@/lib/post-call-flow";
+import { createDialSession, generateCallSessionId, getBlockingCallSessionForNewDial } from "@/lib/post-call-flow";
 import { Lead } from "@/types/crm";
 
 type LeadsTableProps = {
@@ -160,6 +160,24 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
 
     if (!phoneToDial) {
       setCallFeedback(lead.id, { type: "error", message: "Lead sem telefone para discagem." });
+      return;
+    }
+
+    const blockingSession = getBlockingCallSessionForNewDial();
+    if (blockingSession) {
+      const blockingMessage =
+        blockingSession.status === "ended_detected"
+          ? "Existe uma ligacao encerrada aguardando finalizacao obrigatoria. Finalize antes de iniciar outra."
+          : "Existe uma ligacao em andamento. Conclua essa chamada antes de iniciar outra.";
+      setCallFeedback(lead.id, { type: "error", message: blockingMessage });
+      console.log("[POSTCALL_DEBUG] Nova ligacao bloqueada por sessao pendente", {
+        leadId: lead.id,
+        blockingSessionId: blockingSession.sessionId,
+        blockingStatus: blockingSession.status,
+      });
+      if (typeof window !== "undefined" && blockingSession.status === "ended_detected") {
+        window.location.assign("/ligacoes?postCall=1");
+      }
       return;
     }
 

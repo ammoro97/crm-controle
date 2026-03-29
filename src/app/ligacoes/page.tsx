@@ -154,6 +154,13 @@ const secondaryOptionsByFinalizacao: Record<"Falou com cliente" | "Falou com sec
 
 const OFFICIAL_FINALIZACOES = new Set(baseFinalizacaoOptions.filter((value) => value !== "Todas"));
 const HIDDEN_CALL_IDS_STORAGE_KEY = "crm:ligacoes:hidden-call-ids";
+const LIGACOES_DEBUG_PREFIX = "[LIGACOES_DEBUG]";
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
 
 function normalizeDigits(value?: string | null) {
   return String(value || "").replace(/\D/g, "");
@@ -625,6 +632,8 @@ export default function LigacoesPage() {
   const [postCallForm, setPostCallForm] = useState<PostCallFormState>(createDefaultPostCallForm());
 
   const checkingCallEndRef = useRef(false);
+  const initialLoadDoneRef = useRef(false);
+  const isInitialLoadRunningRef = useRef(false);
   const showReasonField = postCallForm.result === "Cliente sem interesse";
   const showNextActionField = finalizacaoComProximaAcao.has(postCallForm.result);
   const currentSecondaryOptions =
@@ -633,6 +642,7 @@ export default function LigacoesPage() {
       : [];
   const secondaryFieldLabel = "Subfinalizacao";
   const showFollowUpFields = showNextActionField && nextActionComFollowUp.has(postCallForm.nextAction);
+  const isFinalizacaoObrigatoria = Boolean(activeSession && activeSession.status === "ended_detected");
   const responsavelById = useMemo(() => {
     const map: ResponsavelByIdIndex = new Map();
     for (const item of responsaveisRecords) {
@@ -641,7 +651,12 @@ export default function LigacoesPage() {
     return map;
   }, [responsaveisRecords]);
 
-  const loadCalls = async (signal?: AbortSignal) => {
+  const loadCalls = async (signal?: AbortSignal, reason = "manual-refresh"): Promise<boolean> => {
+    console.log(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD START`, {
+      reason,
+      hasSignal: Boolean(signal),
+      ts: new Date().toISOString(),
+    });
     setLoading(true);
     setError(null);
 
@@ -701,12 +716,38 @@ export default function LigacoesPage() {
       });
       const visibleRows = rows.filter((row) => !hiddenCallIdsRef.current.has(row.id));
       setCalls(visibleRows);
+      console.log(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD SUCCESS`, {
+        reason,
+        externalOk: externalResponse.ok && externalData.ok,
+        externalCount: externalItems.length,
+        internalCount: internalMap.size,
+        renderedCount: visibleRows.length,
+        source: externalItems.length > 0 ? "api4com" : "internal-fallback",
+      });
+      return true;
     } catch (requestError) {
-      if (requestError instanceof DOMException && requestError.name === "AbortError") return;
+      if (requestError instanceof DOMException && requestError.name === "AbortError") return false;
       setError("Nao foi possivel carregar ligacoes.");
       setCalls([]);
+      console.error(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD FAIL`, {
+        reason,
+        message: requestError instanceof Error ? requestError.message : "erro desconhecido",
+      });
+      return false;
     } finally {
       setLoading(false);
+    }
+    return false;
+  };
+
+  const loadCallsWithRetry = async (reason: string, attempts: number, signal?: AbortSignal) => {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      if (signal?.aborted) return;
+      const ok = await loadCalls(signal, `${reason}#${attempt}`);
+      if (ok) return;
+      if (attempt < attempts) {
+        await sleep(400 * attempt);
+      }
     }
   };
 
@@ -762,17 +803,40 @@ export default function LigacoesPage() {
   }, [activeSession]);
 
   useEffect(() => {
+    console.log(`${LIGACOES_DEBUG_PREFIX} PAGE MOUNT`);
     hiddenCallIdsRef.current = readHiddenCallIds();
     const controller = new AbortController();
-    void loadCalls(controller.signal);
+    isInitialLoadRunningRef.current = true;
+    void loadCallsWithRetry("initial-mount", 3, controller.signal).finally(() => {
+      isInitialLoadRunningRef.current = false;
+      initialLoadDoneRef.current = true;
+    });
     void runWrapupReconciliation();
     return () => controller.abort();
   }, []);
 
   useEffect(() => {
     if (responsavelById.size === 0) return;
-    void loadCalls();
+    if (!initialLoadDoneRef.current && isInitialLoadRunningRef.current) return;
+    void loadCallsWithRetry("responsaveis-ready", 2);
   }, [responsavelById]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      void loadCallsWithRetry("window-focus", 2);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void loadCallsWithRetry("visibility-visible", 2);
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -795,6 +859,11 @@ export default function LigacoesPage() {
         const detection = await detectCallEnd(session, controller.signal);
         if (!detection.matched || !detection.detectionSource) return;
         if (unmounted) return;
+        console.log(`${LIGACOES_DEBUG_PREFIX} CALL ENDED DETECTED`, {
+          sessionId: session.sessionId,
+          callId: detection.callId || null,
+          source: detection.detectionSource,
+        });
         markCallSessionEnded({
           sessionId: session.sessionId,
           callId: detection.callId,
@@ -819,24 +888,28 @@ export default function LigacoesPage() {
   useEffect(() => {
     if (!activeSession) return;
     if (activeSession.status !== "ended_detected") return;
-    if (activeSession.promptedAt) {
-      console.log("[POSTCALL_DEBUG] Modal de finalizacao nao abriu: sessao ja marcada como prompted", {
-        sessionId: activeSession.sessionId,
-        promptedAt: activeSession.promptedAt,
-      });
-      return;
-    }
+    if (wrapupOpen) return;
 
     console.log("[POSTCALL_DEBUG] Abrindo modal automatico de finalizacao", {
       sessionId: activeSession.sessionId,
       callId: activeSession.matchedCallId,
       detectionSource: activeSession.detectionSource,
     });
+    console.log(`${LIGACOES_DEBUG_PREFIX} FINALIZATION REQUIRED`, {
+      sessionId: activeSession.sessionId,
+      callId: activeSession.matchedCallId || null,
+      source: activeSession.detectionSource || null,
+    });
     setPostCallForm(createDefaultPostCallForm());
     setWrapupError(null);
     setWrapupOpen(true);
-    markSessionPrompted(activeSession.sessionId);
-  }, [activeSession]);
+    if (!activeSession.promptedAt) {
+      markSessionPrompted(activeSession.sessionId);
+    }
+    console.log(`${LIGACOES_DEBUG_PREFIX} FINALIZATION MODAL OPEN`, {
+      sessionId: activeSession.sessionId,
+    });
+  }, [activeSession, wrapupOpen]);
 
   useEffect(() => {
     setPostCallForm((prev) => {
@@ -918,6 +991,21 @@ export default function LigacoesPage() {
       setSelectedCallId(null);
     }
     setSelectedIds([]);
+  };
+
+  const handleWrapupModalClose = () => {
+    if (isFinalizacaoObrigatoria) {
+      console.log(`${LIGACOES_DEBUG_PREFIX} FINALIZATION MODAL BLOCKED`, {
+        reason: "finalizacao_obrigatoria",
+        sessionId: activeSession?.sessionId || null,
+      });
+      setWrapupError("Finalizacao obrigatoria: conclua e salve esta ligacao para continuar.");
+      setWrapupOpen(true);
+      return;
+    }
+
+    setWrapupOpen(false);
+    setWrapupError(null);
   };
 
   const summary = useMemo(() => {
@@ -1360,11 +1448,17 @@ export default function LigacoesPage() {
       console.log("[POSTCALL_DEBUG] Wrapup salvo e sessao marcada como wrapped", {
         sessionId: activeSession.sessionId,
       });
+      console.log(`${LIGACOES_DEBUG_PREFIX} FINALIZATION SAVED`, {
+        sessionId: activeSession.sessionId,
+        callId: activeSession.matchedCallId || null,
+        result: postCallForm.result,
+        nextAction: postCallForm.nextAction || null,
+      });
       setPostCallForm(createDefaultPostCallForm());
       setWrapupOpen(false);
       setWrapupMessage("Finalizacao da ligacao registrada com sucesso.");
       await runWrapupReconciliation();
-      await loadCalls();
+      await loadCallsWithRetry("after-wrapup-save", 2);
     } catch {
       setWrapupError("Nao foi possivel registrar a finalizacao desta ligacao.");
     } finally {
@@ -1413,7 +1507,7 @@ export default function LigacoesPage() {
               type="button"
               className="btn-ghost h-9 px-3 py-1.5 text-xs"
               onClick={() => {
-                void loadCalls();
+                void loadCallsWithRetry("manual-refresh", 1);
               }}
               disabled={loading}
             >
@@ -1757,10 +1851,7 @@ export default function LigacoesPage() {
       <Modal
         title="Finalizacao de ligacao"
         open={wrapupOpen}
-        onClose={() => {
-          setWrapupOpen(false);
-          setWrapupError(null);
-        }}
+        onClose={handleWrapupModalClose}
       >
         <form className="space-y-4" onSubmit={handleSaveWrapup}>
           <div className="grid gap-3 md:grid-cols-2">
@@ -1872,7 +1963,7 @@ export default function LigacoesPage() {
           {wrapupError ? <p className="text-xs text-rose-300">{wrapupError}</p> : null}
 
           <div className="flex items-center gap-2">
-            <button type="button" className="btn-ghost" onClick={() => setWrapupOpen(false)} disabled={wrapupSaving}>
+            <button type="button" className="btn-ghost" onClick={handleWrapupModalClose} disabled={wrapupSaving}>
               Fechar
             </button>
             <button type="submit" className="btn-primary" disabled={wrapupSaving}>

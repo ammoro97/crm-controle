@@ -410,6 +410,13 @@ export function getActiveCallSession() {
   return readActiveSession();
 }
 
+export function getBlockingCallSessionForNewDial() {
+  const current = readActiveSession();
+  if (!current) return null;
+  if (current.status === "wrapped") return null;
+  return current;
+}
+
 export function generateCallSessionId() {
   return `SESSION-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
