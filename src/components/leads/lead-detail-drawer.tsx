@@ -27,6 +27,8 @@ type TimelineItem = {
   eventType: string;
   description: string;
   owner: string;
+  linkedObservationId?: string;
+  sourceEventType: string;
 };
 
 const tabs: { id: DetailTab; label: string }[] = [
@@ -36,7 +38,13 @@ const tabs: { id: DetailTab; label: string }[] = [
   { id: "observacoes", label: "Observacoes" },
 ];
 
-function LeadHistoryTab({ draftLead }: { draftLead: Lead }) {
+function LeadHistoryTab({
+  draftLead,
+  onOpenObservation,
+}: {
+  draftLead: Lead;
+  onOpenObservation: (observationId: string) => void;
+}) {
   const timelineItems = useMemo<TimelineItem[]>(() => {
     const historyItems = draftLead.history
       .filter((event) => {
@@ -59,6 +67,8 @@ function LeadHistoryTab({ draftLead }: { draftLead: Lead }) {
       eventType: normalizeEventTypeLabel(event.eventType),
       description: normalizeHistoryDescription(event),
       owner: event.owner,
+      linkedObservationId: event.linkedObservationId,
+      sourceEventType: String(event.eventType || "").trim().toUpperCase(),
     }));
 
     return historyItems.sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
@@ -71,7 +81,19 @@ function LeadHistoryTab({ draftLead }: { draftLead: Lead }) {
           <div className="rounded-xl border border-border bg-slate-900/50 p-4 text-sm text-muted">Nenhum evento registrado.</div>
         ) : (
           timelineItems.map((item) => (
-            <article key={item.id} className="relative rounded-xl border border-border bg-slate-900/50 p-4">
+            <article
+              key={item.id}
+              className={`relative rounded-xl border p-4 ${
+                item.sourceEventType.includes("LIGACAO") && item.linkedObservationId
+                  ? "cursor-pointer border-emerald-400/40 bg-slate-900/60 transition hover:bg-slate-900/80"
+                  : "border-border bg-slate-900/50"
+              }`}
+              onClick={() => {
+                if (item.sourceEventType.includes("LIGACAO") && item.linkedObservationId) {
+                  onOpenObservation(item.linkedObservationId);
+                }
+              }}
+            >
               <span className="absolute -left-5 top-5 h-2.5 w-2.5 rounded-full bg-accent" />
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-muted">
@@ -83,6 +105,9 @@ function LeadHistoryTab({ draftLead }: { draftLead: Lead }) {
               </div>
               <p className="mt-2 text-sm text-slate-100">{item.description}</p>
               <p className="mt-2 text-xs text-muted">Responsavel: {item.owner || "-"}</p>
+              {item.sourceEventType.includes("LIGACAO") && item.linkedObservationId ? (
+                <p className="mt-2 text-[11px] text-emerald-300">Clique para abrir a observacao vinculada</p>
+              ) : null}
             </article>
           ))
         )}
@@ -95,11 +120,27 @@ type LeadObservationsTabProps = {
   draftLead: Lead;
   onDraftChange: (next: Lead) => void;
   onPersist: (next: Lead) => void;
+  targetObservationId?: string | null;
 };
 
-function LeadObservationsTab({ draftLead, onDraftChange, onPersist }: LeadObservationsTabProps) {
+function LeadObservationsTab({ draftLead, onDraftChange, onPersist, targetObservationId }: LeadObservationsTabProps) {
   const [noteType, setNoteType] = useState<LeadObservationType>("informacao interna");
   const [noteText, setNoteText] = useState("");
+  const [highlightedObservationId, setHighlightedObservationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!targetObservationId) return;
+    setHighlightedObservationId(targetObservationId);
+  }, [targetObservationId]);
+
+  useEffect(() => {
+    if (!highlightedObservationId) return;
+    const element = document.getElementById(`lead-observation-${highlightedObservationId}`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    const clearId = window.setTimeout(() => setHighlightedObservationId(null), 1800);
+    return () => window.clearTimeout(clearId);
+  }, [highlightedObservationId]);
 
   const addObservation = () => {
     const content = noteText.trim();
@@ -175,7 +216,15 @@ function LeadObservationsTab({ draftLead, onDraftChange, onPersist }: LeadObserv
             .slice()
             .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
             .map((item) => (
-              <article key={item.id} className="rounded-xl border border-border bg-slate-900/50 p-4">
+              <article
+                id={`lead-observation-${item.id}`}
+                key={item.id}
+                className={`rounded-xl border p-4 transition ${
+                  highlightedObservationId === item.id
+                    ? "border-emerald-400/60 bg-emerald-500/10"
+                    : "border-border bg-slate-900/50"
+                }`}
+              >
                 <div className="flex items-center justify-between gap-2">
                   <span className="rounded bg-slate-800 px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-slate-300">{item.type}</span>
                   <p className="text-xs text-muted">
@@ -196,11 +245,13 @@ export function LeadDetailDrawer({ lead, open, onSave, onClose }: LeadDetailDraw
   const [activeTab, setActiveTab] = useState<DetailTab>("resumo");
   const [isEditing, setIsEditing] = useState(false);
   const [draftLead, setDraftLead] = useState<Lead | null>(lead);
+  const [targetObservationId, setTargetObservationId] = useState<string | null>(null);
 
   useEffect(() => {
     setDraftLead(lead);
     setIsEditing(false);
     setActiveTab("resumo");
+    setTargetObservationId(null);
   }, [lead?.id]);
 
   if (!open || !lead || !draftLead) return null;
@@ -220,7 +271,13 @@ export function LeadDetailDrawer({ lead, open, onSave, onClose }: LeadDetailDraw
         onDraftChange={setDraftLead}
       />
     ) : activeTab === "historico" ? (
-      <LeadHistoryTab draftLead={draftLead} />
+      <LeadHistoryTab
+        draftLead={draftLead}
+        onOpenObservation={(observationId) => {
+          setTargetObservationId(observationId);
+          setActiveTab("observacoes");
+        }}
+      />
     ) : activeTab === "qualificacao" ? (
       <LeadIntelligenceTab
         draftLead={draftLead}
@@ -230,7 +287,12 @@ export function LeadDetailDrawer({ lead, open, onSave, onClose }: LeadDetailDraw
         onPersist={persistDraft}
       />
     ) : (
-      <LeadObservationsTab draftLead={draftLead} onDraftChange={setDraftLead} onPersist={persistDraft} />
+      <LeadObservationsTab
+        draftLead={draftLead}
+        onDraftChange={setDraftLead}
+        onPersist={persistDraft}
+        targetObservationId={targetObservationId}
+      />
     );
 
   return (

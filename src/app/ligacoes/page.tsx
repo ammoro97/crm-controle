@@ -821,6 +821,8 @@ export default function LigacoesPage() {
           eventType: "LIGACAO",
           description: historyEventDescription,
           owner: ownerName,
+          linkedObservationId: observationId,
+          linkedTab: "observacoes",
         },
       ],
       observationLog: [...lead.observationLog, observation],
