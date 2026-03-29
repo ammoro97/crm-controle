@@ -370,7 +370,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     void checkCallEnd();
     const intervalId = window.setInterval(() => {
       void checkCallEnd();
-    }, 4000);
+    }, 1500);
 
     return () => {
       unmounted = true;

@@ -232,6 +232,34 @@ function findMatchingApi4ComHistoryCall(
   });
 
   const recentCandidates: Array<Record<string, unknown>> = [];
+  const recentEndedCandidates: Array<Record<string, unknown>> = [];
+  const broadPhoneEndedCandidates: Array<Record<string, unknown>> = [];
+  const broadPhoneCandidates: Array<Record<string, unknown>> = [];
+  const recentGlobalEndedCandidates: Array<Record<string, unknown>> = [];
+
+  const isExternallyEnded = (item: Record<string, unknown>) => {
+    const endedAt = String(item.ended_at || item.endedAt || "").trim();
+    const hangup = String(item.hangup_cause || item.hangupCause || "").trim();
+    const state = String(item.state || item.call_state || item.callStatus || item.status || "").toLowerCase().trim();
+    const disposition = String(item.disposition || item.call_disposition || "").toLowerCase().trim();
+    const durationRaw = item.duration;
+    const duration = Number(durationRaw);
+    const terminalStateTokens = [
+      "hangup",
+      "finished",
+      "completed",
+      "cancel",
+      "busy",
+      "failed",
+      "no answer",
+      "no-answer",
+      "answered",
+    ];
+    const hasTerminalState = terminalStateTokens.some(
+      (token) => state.includes(token) || disposition.includes(token),
+    );
+    return Boolean(endedAt || hangup || (Number.isFinite(duration) && duration > 0) || hasTerminalState);
+  };
 
   for (const item of items) {
     const metadata = item.metadata && typeof item.metadata === "object" ? (item.metadata as Record<string, unknown>) : {};
@@ -241,11 +269,17 @@ function findMatchingApi4ComHistoryCall(
     const phoneCandidates = [
       item.telefone,
       item.to,
+      item.to_number,
       item.called,
       item.caller,
       item.from,
-      item.phone,
+      item.from_number,
+      item.number,
       item.phone_number,
+      item.phoneNumber,
+      item.dst,
+      item.src,
+      item.phone,
       item.destination,
       metadata.telefone,
     ]
@@ -265,6 +299,13 @@ function findMatchingApi4ComHistoryCall(
       continue;
     }
 
+    if (hasPhoneMatch) {
+      broadPhoneCandidates.push(item);
+      if (isExternallyEnded(item)) {
+        broadPhoneEndedCandidates.push(item);
+      }
+    }
+
     const startedAt = String(item.started_at || item.startedAt || "");
     const endedAt = String(item.ended_at || item.endedAt || "");
     if (startedAt && !Number.isNaN(sessionStart)) {
@@ -281,6 +322,18 @@ function findMatchingApi4ComHistoryCall(
         }
         if (startedTs >= sessionStart - 1000 * 60 * 5) {
           recentCandidates.push(item);
+          if (isExternallyEnded(item)) {
+            recentEndedCandidates.push(item);
+          }
+        }
+
+        // Fallback global: chamada encerrada em janela proxima da sessao, mesmo sem metadados/telefone confiaveis.
+        if (
+          isExternallyEnded(item) &&
+          startedTs >= sessionStart - 1000 * 60 * 3 &&
+          startedTs <= sessionStart + 1000 * 60 * 20
+        ) {
+          recentGlobalEndedCandidates.push(item);
         }
       }
     }
@@ -305,8 +358,73 @@ function findMatchingApi4ComHistoryCall(
     return { id };
   }
 
+  if (recentEndedCandidates.length === 1) {
+    const unique = recentEndedCandidates[0];
+    const id = String(unique.id || unique.uniqueid || unique.call_id || "").trim() || undefined;
+    debugLog("Sem match estrito. Usando fallback externo por candidato unico recente e encerrado", {
+      id,
+    });
+    return { id };
+  }
+
+  if (broadPhoneEndedCandidates.length === 1) {
+    const unique = broadPhoneEndedCandidates[0];
+    const id = String(unique.id || unique.uniqueid || unique.call_id || "").trim() || undefined;
+    debugLog("Sem match por janela. Usando fallback por telefone unico encerrado", { id });
+    return { id };
+  }
+
+  if (broadPhoneCandidates.length === 1) {
+    const unique = broadPhoneCandidates[0];
+    const id = String(unique.id || unique.uniqueid || unique.call_id || "").trim() || undefined;
+    debugLog("Sem match por janela. Usando fallback por telefone unico", { id });
+    return { id };
+  }
+
+  if (recentGlobalEndedCandidates.length === 1) {
+    const unique = recentGlobalEndedCandidates[0];
+    const id = String(unique.id || unique.uniqueid || unique.call_id || "").trim() || undefined;
+    debugLog("Fallback global aplicado: unico registro encerrado em janela recente", { id });
+    return { id };
+  }
+
+  if (recentGlobalEndedCandidates.length > 1) {
+    // Escolhe o encerrado mais proximo do inicio da sessao quando ha mais de um candidato.
+    const nearest = recentGlobalEndedCandidates
+      .map((item) => {
+        const startedAt = String(item.started_at || item.startedAt || "");
+        const ts = Date.parse(startedAt);
+        return {
+          item,
+          distance: Number.isNaN(ts) || Number.isNaN(sessionStart) ? Number.POSITIVE_INFINITY : Math.abs(ts - sessionStart),
+        };
+      })
+      .sort((a, b) => a.distance - b.distance)[0];
+
+    if (nearest && Number.isFinite(nearest.distance)) {
+      const id = String(nearest.item.id || nearest.item.uniqueid || nearest.item.call_id || "").trim() || undefined;
+      debugLog("Fallback global aplicado: candidato encerrado mais proximo", {
+        id,
+        distanceMs: nearest.distance,
+      });
+      return { id };
+    }
+  }
+
   debugLog("Nenhum matching externo encontrado", {
     recentCandidates: recentCandidates.map((item) => String(item.id || item.uniqueid || item.call_id || "")),
+    recentEndedCandidates: recentEndedCandidates.map((item) =>
+      String(item.id || item.uniqueid || item.call_id || ""),
+    ),
+    broadPhoneEndedCandidates: broadPhoneEndedCandidates.map((item) =>
+      String(item.id || item.uniqueid || item.call_id || ""),
+    ),
+    broadPhoneCandidates: broadPhoneCandidates.map((item) =>
+      String(item.id || item.uniqueid || item.call_id || ""),
+    ),
+    recentGlobalEndedCandidates: recentGlobalEndedCandidates.map((item) =>
+      String(item.id || item.uniqueid || item.call_id || ""),
+    ),
   });
   return null;
 }
@@ -513,33 +631,45 @@ export async function detectCallEnd(session: ActiveCallSession, signal?: AbortSi
   }
 
   try {
-    debugLog("Consultando fonte fallback /api/api4com/calls");
-    const response = await fetch("/api/api4com/calls?page=1", {
-      method: "GET",
-      cache: "no-store",
-      signal,
-    });
-    if (!response.ok) return { matched: false };
-    const data = (await response.json()) as { ok?: boolean; items?: Array<Record<string, unknown>> };
-    if (!data.ok || !Array.isArray(data.items)) {
-      debugLog("Fallback sem dados validos", { ok: data.ok, itemsType: typeof data.items });
-      return { matched: false };
+    const sessionPhoneDigits = normalizePhoneDigits(session.telefone);
+    const fallbackUrls = [
+      sessionPhoneDigits ? `/api/api4com/calls?page=1&filter=${encodeURIComponent(sessionPhoneDigits)}` : "",
+      "/api/api4com/calls?page=1",
+    ].filter(Boolean);
+
+    for (const fallbackUrl of fallbackUrls) {
+      debugLog("Consultando fonte fallback /api/api4com/calls", { fallbackUrl });
+      const response = await fetch(fallbackUrl, {
+        method: "GET",
+        cache: "no-store",
+        signal,
+      });
+      if (!response.ok) continue;
+
+      const data = (await response.json()) as { ok?: boolean; items?: Array<Record<string, unknown>> };
+      if (!data.ok || !Array.isArray(data.items)) {
+        debugLog("Fallback sem dados validos", { ok: data.ok, itemsType: typeof data.items, fallbackUrl });
+        continue;
+      }
+
+      debugLog("Fonte fallback respondeu", { itemsCount: data.items.length, fallbackUrl });
+
+      const match = findMatchingApi4ComHistoryCall(session, data.items);
+      if (!match) {
+        debugLog("Nenhum fim detectado no fallback desta rodada", { fallbackUrl });
+        continue;
+      }
+
+      debugLog("Fim detectado no fallback", { callId: match.id, fallbackUrl });
+      return {
+        matched: true,
+        callId: match.id,
+        detectionSource: "api4com-history",
+      };
     }
 
-    debugLog("Fonte fallback respondeu", { itemsCount: data.items.length });
-
-    const match = findMatchingApi4ComHistoryCall(session, data.items);
-    if (!match) {
-      debugLog("Nenhum fim detectado no fallback");
-      return { matched: false };
-    }
-
-    debugLog("Fim detectado no fallback", { callId: match.id });
-    return {
-      matched: true,
-      callId: match.id,
-      detectionSource: "api4com-history",
-    };
+    debugLog("Nenhum fim detectado no fallback");
+    return { matched: false };
   } catch {
     debugLog("Erro ao consultar fallback /api/api4com/calls");
     return { matched: false };
