@@ -142,6 +142,7 @@ const nextActionComFollowUp = new Set([
   "Agendar Video Chamada",
   "Agendar Ligacao",
   "Agendar WhatsApp",
+  "Confirmou possibilidade de contato",
 ]);
 
 const secondaryOptionsByFinalizacao: Record<"Falou com cliente" | "Falou com secretaria", string[]> = {
