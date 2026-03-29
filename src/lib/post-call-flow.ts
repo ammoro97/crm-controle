@@ -15,6 +15,7 @@ export type ActiveCallSession = {
   nome?: string;
   empresa?: string;
   telefone: string;
+  externalCallId?: string;
   userId?: string;
   responsavelId?: string;
   atendenteNome?: string;
@@ -223,6 +224,7 @@ function findMatchingApi4ComHistoryCall(
 ): { id?: string } | null {
   const sessionPhone = normalizePhoneDigits(session.telefone);
   const sessionStart = Date.parse(session.startedAt);
+  const sessionExternalCallId = String(session.externalCallId || "").trim();
   const MAX_EXTERNAL_MATCH_DISTANCE_MS = 1000 * 60 * 60 * 12; // 12h (tolerancia para timezone/formatos diferentes)
   debugLog("Iniciando matching com historico externo API4Com", {
     sessionId: session.sessionId,
@@ -262,6 +264,9 @@ function findMatchingApi4ComHistoryCall(
     return Boolean(endedAt || hangup || (Number.isFinite(duration) && duration > 0) || hasTerminalState);
   };
 
+  const getItemId = (item: Record<string, unknown>) =>
+    String(item.id || item.uniqueid || item.call_id || "").trim();
+
   const getExternalReferenceDate = (item: Record<string, unknown>) => {
     const candidates = [
       item.started_at,
@@ -288,6 +293,22 @@ function findMatchingApi4ComHistoryCall(
   };
 
   for (const item of items) {
+    const itemId = getItemId(item);
+    if (sessionExternalCallId && itemId && itemId === sessionExternalCallId) {
+      if (isExternallyEnded(item)) {
+        debugLog("Registro externo aceito por callId da sessao (encerrado)", {
+          itemId,
+          sessionExternalCallId,
+        });
+        return { id: itemId };
+      }
+
+      debugLog("Registro externo bateu callId da sessao, mas ainda nao encerrou", {
+        itemId,
+        sessionExternalCallId,
+      });
+    }
+
     const metadata = item.metadata && typeof item.metadata === "object" ? (item.metadata as Record<string, unknown>) : {};
     const metaLeadId = String(metadata.leadId || "").trim();
     const hasLeadMatch = Boolean(session.leadId && metaLeadId && session.leadId === metaLeadId);
@@ -318,7 +339,7 @@ function findMatchingApi4ComHistoryCall(
 
     if (!hasLeadMatch && !hasPhoneMatch) {
       debugLog("Registro externo rejeitado por lead/telefone", {
-        itemId: String(item.id || item.uniqueid || item.call_id || ""),
+        itemId,
         metaLeadId,
         phoneCandidates,
       });
@@ -339,7 +360,7 @@ function findMatchingApi4ComHistoryCall(
       const distance = Math.abs(reference.ts - sessionStart);
       if (distance > MAX_EXTERNAL_MATCH_DISTANCE_MS) {
         debugLog("Registro externo rejeitado por janela de tempo", {
-          itemId: String(item.id || item.uniqueid || item.call_id || ""),
+          itemId,
           referenceAt: reference.raw,
           distanceMs: distance,
         });
@@ -363,7 +384,7 @@ function findMatchingApi4ComHistoryCall(
       }
     }
 
-    const id = String(item.id || item.uniqueid || item.call_id || "").trim() || undefined;
+    const id = itemId || undefined;
     debugLog("Registro externo aceito", {
       itemId: id,
       hasLeadMatch,
@@ -463,6 +484,7 @@ export function createDialSession(input: {
   nome?: string;
   empresa?: string;
   telefone: string;
+  externalCallId?: string;
   userId?: string;
   responsavelId?: string;
   atendenteNome?: string;
@@ -474,6 +496,7 @@ export function createDialSession(input: {
     nome: input.nome,
     empresa: input.empresa,
     telefone: input.telefone,
+    externalCallId: input.externalCallId,
     userId: input.userId,
     responsavelId: input.responsavelId,
     atendenteNome: input.atendenteNome,
@@ -488,6 +511,7 @@ export function createDialSession(input: {
     nome: session.nome,
     empresa: session.empresa,
     telefone: session.telefone,
+    externalCallId: session.externalCallId || null,
     sourcePath: session.sourcePath,
     startedAt: session.startedAt,
   });
@@ -660,6 +684,8 @@ export async function detectCallEnd(session: ActiveCallSession, signal?: AbortSi
     const fallbackUrls = [
       sessionPhoneDigits ? `/api/api4com/calls?page=1&filter=${encodeURIComponent(sessionPhoneDigits)}` : "",
       "/api/api4com/calls?page=1",
+      "/api/api4com/calls?page=2",
+      "/api/api4com/calls?page=3",
     ].filter(Boolean);
 
     for (const fallbackUrl of fallbackUrls) {

@@ -16,6 +16,7 @@ type DialApiResponse = {
   success?: boolean;
   message?: string;
   error?: string;
+  data?: unknown;
 };
 
 type CallFeedback = {
@@ -55,6 +56,18 @@ function formatDateBR(value?: string): string {
   const [year = "", month = "", day = ""] = value.split("-");
   if (!year || !month || !day) return "-";
   return `${day}/${month}/${year}`;
+}
+
+function extractDialCallId(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const source = payload as Record<string, unknown>;
+  const direct = String(source.id || source.call_id || source.callId || source.uniqueid || "").trim();
+  if (direct) return direct;
+
+  const nested = source.data && typeof source.data === "object" ? (source.data as Record<string, unknown>) : null;
+  if (!nested) return undefined;
+  const nestedId = String(nested.id || nested.call_id || nested.callId || nested.uniqueid || "").trim();
+  return nestedId || undefined;
 }
 
 export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) {
@@ -182,11 +195,18 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
         message: data.message || "Ligacao disparada com sucesso.",
       });
 
+      const externalCallId = extractDialCallId(data?.data);
+      console.log("[POSTCALL_DEBUG] CallId recebido no disparo", {
+        leadId: lead.id,
+        externalCallId: externalCallId || null,
+      });
+
       const session = createDialSession({
         leadId: lead.id,
         nome: lead.name,
         empresa: lead.company,
         telefone: lead.phone,
+        externalCallId,
         userId: currentUser?.id,
         responsavelId: currentUser?.responsavelId,
         atendenteNome: currentUser?.nome,
