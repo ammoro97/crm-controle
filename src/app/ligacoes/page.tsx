@@ -9,6 +9,7 @@ import {
   setLeadsSnapshot,
   setMeetingsSnapshot,
   subscribeLeadsSnapshot,
+  subscribeMeetingsSnapshot,
 } from "@/lib/crm-data-store";
 import { useResponsaveisRecords } from "@/lib/responsaveis-store";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
@@ -54,6 +55,7 @@ type Api4ComCallItem = {
 
 type MappedCall = {
   id: string;
+  leadId?: string | null;
   nome: string;
   empresa: string;
   telefone: string;
@@ -446,6 +448,7 @@ function mapApiCallToRow(
 
   return {
     id: rawId || `api4com-${index}-${Date.now()}`,
+    leadId: linkedLead?.id || internal?.leadId || metadataLeadId || null,
     nome: resolvedNome,
     empresa: resolvedEmpresa,
     telefone: resolvedTelefone,
@@ -487,8 +490,20 @@ function normalizeFinalizacaoKey(value: string) {
     .trim();
 }
 
+const CPC_POSITIVE_FINALIZACOES = new Set(["falou com cliente", "pediu retorno"]);
+const CPC_NEGATIVE_FINALIZACOES = new Set(["cliente sem interesse"]);
+const IMPRODUTIVE_FINALIZACOES = new Set([
+  "nao atendeu",
+  "caixa postal",
+  "ligacao caiu",
+  "ligacao muda",
+  "numero invalido",
+  "pessoa nao conhece",
+]);
+
 function finalizacaoBarColor(label: string) {
   const normalized = normalizeFinalizacaoKey(label);
+  if (normalized === "outros") return "bg-fuchsia-400";
   if (normalized.includes("falou com cliente")) return "bg-emerald-400";
   if (normalized.includes("pediu retorno")) return "bg-sky-400";
   if (normalized.includes("caixa postal")) return "bg-amber-400";
@@ -518,6 +533,7 @@ export default function LigacoesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [leadsSnapshot, setLeadsSnapshotState] = useState<Lead[]>(() => getLeadsSnapshot());
+  const [meetingsSnapshot, setMeetingsSnapshotState] = useState<Meeting[]>(() => getMeetingsSnapshot());
   const [internalById, setInternalById] = useState<Map<string, CallLog>>(new Map());
   const [wrapups, setWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
   const [finalizacaoFilter, setFinalizacaoFilter] = useState("Todas");
@@ -631,6 +647,14 @@ export default function LigacoesPage() {
     };
     syncLeads();
     return subscribeLeadsSnapshot(syncLeads);
+  }, []);
+
+  useEffect(() => {
+    const syncMeetings = () => {
+      setMeetingsSnapshotState(getMeetingsSnapshot());
+    };
+    syncMeetings();
+    return subscribeMeetingsSnapshot(syncMeetings);
   }, []);
 
   useEffect(() => {
@@ -757,25 +781,28 @@ export default function LigacoesPage() {
     let todayCalls = 0;
     let answered = 0;
     let missed = 0;
+    let totalCallSeconds = 0;
     let totalAnsweredSeconds = 0;
 
     for (const call of filteredCalls) {
       const duration = Number(call.durationSeconds || 0);
       if ((call.startedAt || "").slice(0, 10) === today) todayCalls += 1;
+      totalCallSeconds += Math.max(0, duration);
       const classification = getFinalizacaoClassification(call.finalizacao);
       const connected = classification ? classification.conectado : isTechnicalAnswered(call.status, duration);
       if (connected) {
         answered += 1;
         totalAnsweredSeconds += duration;
-      }
-      else missed += 1;
+      } else missed += 1;
     }
 
     return {
       todayCalls,
       answered,
       missed,
+      totalCallSeconds,
       totalAnsweredSeconds,
+      totalCallTime: formatTotalTime(totalCallSeconds),
       totalTime: formatTotalTime(totalAnsweredSeconds),
     };
   }, [filteredCalls]);
@@ -791,15 +818,106 @@ export default function LigacoesPage() {
     [summary.answered, summary.totalAnsweredSeconds],
   );
 
-  const cpc = useMemo(() => {
-    const productive = filteredCalls.filter((call) => {
+  const callsPerHour = useMemo(() => {
+    if (filteredCalls.length === 0) return 0;
+    const startedMs = filteredCalls
+      .map((call) => Date.parse(call.startedAt || ""))
+      .filter((value) => Number.isFinite(value)) as number[];
+    if (startedMs.length <= 1) return filteredCalls.length;
+    const min = Math.min(...startedMs);
+    const max = Math.max(...startedMs);
+    const hours = Math.max(1, (max - min) / (1000 * 60 * 60));
+    return Number((filteredCalls.length / hours).toFixed(1));
+  }, [filteredCalls]);
+
+  const productivePercent = useMemo(() => {
+    if (summary.totalCallSeconds <= 0) return 0;
+    return Math.round((summary.totalAnsweredSeconds / summary.totalCallSeconds) * 100);
+  }, [summary.totalAnsweredSeconds, summary.totalCallSeconds]);
+
+  const contactQuality = useMemo(() => {
+    const cpc = filteredCalls.filter((call) => {
       const normalized = normalizeFinalizacaoKey(call.finalizacao);
       return normalized === "falou com cliente";
     }).length;
+
+    const cpcPositive = filteredCalls.filter((call) => {
+      const normalized = normalizeFinalizacaoKey(call.finalizacao);
+      return CPC_POSITIVE_FINALIZACOES.has(normalized);
+    }).length;
+
+    const cpcNegative = filteredCalls.filter((call) => {
+      const normalized = normalizeFinalizacaoKey(call.finalizacao);
+      return CPC_NEGATIVE_FINALIZACOES.has(normalized);
+    }).length;
+
+    const improdutivas = filteredCalls.filter((call) => {
+      const normalized = normalizeFinalizacaoKey(call.finalizacao);
+      if (IMPRODUTIVE_FINALIZACOES.has(normalized)) return true;
+      const classification = getFinalizacaoClassification(call.finalizacao);
+      return Boolean(classification && !classification.conectado);
+    }).length;
+
     const total = filteredCalls.length;
-    const rate = total > 0 ? Math.round((productive / total) * 100) : 0;
-    return { productive, total, rate };
+    const cpcRate = total > 0 ? Math.round((cpc / total) * 100) : 0;
+    const cpcPositiveRate = total > 0 ? Math.round((cpcPositive / total) * 100) : 0;
+    const cpcNegativeRate = total > 0 ? Math.round((cpcNegative / total) * 100) : 0;
+    return { cpc, cpcRate, cpcPositive, cpcPositiveRate, cpcNegative, cpcNegativeRate, improdutivas };
   }, [filteredCalls]);
+
+  const conversion = useMemo(() => {
+    const contactedLeadIds = new Set<string>();
+    const contactedPhones = new Set<string>();
+    const contactedNames = new Set<string>();
+
+    for (const call of filteredCalls) {
+      if (call.leadId) contactedLeadIds.add(call.leadId);
+      const phoneDigits = normalizeDigits(call.telefone);
+      if (phoneDigits) contactedPhones.add(phoneDigits);
+      const callName = normalizeMeetingPersonName(call.nome);
+      if (callName) contactedNames.add(callName);
+    }
+
+    const leadStatusAvanco = new Set(["Qualificado", "Reuniao marcada", "Proposta enviada", "Fechado"]);
+    const advancedByLead = leadsSnapshot.filter((lead) => {
+      const phoneDigits = normalizeDigits(lead.phone);
+      const leadName = normalizeMeetingPersonName(lead.name);
+      const isContacted =
+        contactedLeadIds.has(lead.id) || (phoneDigits ? contactedPhones.has(phoneDigits) : false) || contactedNames.has(leadName);
+      if (!isContacted) return false;
+      return leadStatusAvanco.has(lead.status);
+    });
+
+    const contactedBase = new Set<string>();
+    for (const call of filteredCalls) {
+      if (call.leadId) {
+        contactedBase.add(`lead:${call.leadId}`);
+        continue;
+      }
+      const phoneDigits = normalizeDigits(call.telefone);
+      if (phoneDigits) contactedBase.add(`phone:${phoneDigits}`);
+    }
+
+    const agendamentos = meetingsSnapshot.filter((meeting) => {
+      const meetingPerson = normalizeMeetingPersonName(meeting.personName);
+      if (contactedNames.has(meetingPerson)) return true;
+      const meetingNotesDigits = normalizeDigits(meeting.notes || "");
+      if (!meetingNotesDigits) return false;
+      for (const phone of contactedPhones) {
+        if (meetingNotesDigits.includes(phone) || phone.includes(meetingNotesDigits)) return true;
+      }
+      return false;
+    }).length;
+
+    const conversionRate = contactedBase.size > 0 ? Math.round((advancedByLead.length / contactedBase.size) * 100) : 0;
+
+    return {
+      conversionRate,
+      agendamentos,
+      leadsAvancaram: advancedByLead.length,
+      baseContatada: contactedBase.size,
+    };
+  }, [filteredCalls, leadsSnapshot, meetingsSnapshot]);
 
   const finalizacaoChart = useMemo(() => {
     const counts = new Map<string, number>();
@@ -808,13 +926,24 @@ export default function LigacoesPage() {
       counts.set(label, (counts.get(label) || 0) + 1);
     }
     const total = filteredCalls.length;
-    return Array.from(counts.entries())
+    const sorted = Array.from(counts.entries())
       .map(([label, count]) => ({
         label,
         count,
         percent: total > 0 ? Math.round((count / total) * 100) : 0,
       }))
       .sort((a, b) => b.count - a.count);
+    if (sorted.length <= 5) return sorted;
+    const top = sorted.slice(0, 4);
+    const othersCount = sorted.slice(4).reduce((acc, item) => acc + item.count, 0);
+    if (othersCount > 0) {
+      top.push({
+        label: "Outros",
+        count: othersCount,
+        percent: total > 0 ? Math.round((othersCount / total) * 100) : 0,
+      });
+    }
+    return top;
   }, [filteredCalls]);
 
   const applyWrapupToLead = (
@@ -1166,58 +1295,107 @@ export default function LigacoesPage() {
       </div>
 
       <div className="space-y-3">
-        <article className="panel border-sky-400/40 bg-sky-500/10 p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.12em] text-sky-200">Ligacoes Hoje</p>
-              <p className="mt-2 text-4xl font-semibold leading-none text-slate-100">{summary.todayCalls}</p>
-              <p className="mt-2 text-xs text-sky-100/80">Volume total de chamadas do dia</p>
-            </div>
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 text-sm text-sky-100">☎</span>
-          </div>
-        </article>
-
-        <div className="grid gap-3 lg:grid-cols-[1.35fr_1fr_1fr]">
-          <article className="panel border-emerald-500/40 bg-emerald-500/10 p-5">
+        <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+          <article className="panel border-sky-400/40 bg-sky-500/10 p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-emerald-200">Taxa de Atendimento</p>
-                <p className="mt-2 text-4xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
-                <p className="mt-2 text-xs text-emerald-200/90">
-                  {summary.answered} atendidas de {filteredCalls.length} ligacoes
-                </p>
+                <p className="text-xs uppercase tracking-[0.12em] text-sky-200">Ligacoes Hoje</p>
+                <p className="mt-2 text-4xl font-semibold leading-none text-slate-100">{summary.todayCalls}</p>
+                <p className="mt-2 text-xs text-sky-100/80">Volume total de chamadas do dia</p>
               </div>
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/20 text-sm text-emerald-100">✓</span>
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 text-[10px] font-semibold text-sky-100">TEL</span>
             </div>
           </article>
-
-          <article className="panel border-blue-500/40 bg-blue-500/10 p-4">
+          <article className="panel border-indigo-500/40 bg-indigo-500/10 p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-blue-200">TMA</p>
-                <p className="mt-2 text-3xl font-semibold leading-none text-blue-100">{tmaValue}</p>
-                <p className="mt-2 text-xs text-blue-200/90">Tempo medio de atendimento</p>
+                <p className="text-xs uppercase tracking-[0.12em] text-indigo-200">Tempo total em chamadas</p>
+                <p className="mt-2 text-4xl font-semibold leading-none text-indigo-100">{summary.totalCallTime}</p>
+                <p className="mt-2 text-xs text-indigo-200/90">Volume de tempo da operacao</p>
               </div>
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-500/20 text-sm text-blue-100">⏱</span>
-            </div>
-          </article>
-
-          <article className="panel border-violet-500/40 bg-violet-500/10 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-violet-200">CPC</p>
-                <p className="mt-2 text-3xl font-semibold leading-none text-violet-100">{cpc.productive}</p>
-                <p className="mt-2 text-xs text-violet-200/90">Contatos produtivos ({cpc.rate}%)</p>
-              </div>
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-500/20 text-sm text-violet-100">✦</span>
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/20 text-[10px] font-semibold text-indigo-100">TMP</span>
             </div>
           </article>
         </div>
 
+        <article className="panel border-emerald-500/40 bg-emerald-500/10 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.12em] text-emerald-200">Taxa de Atendimento</p>
+              <p className="mt-2 text-5xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
+              <p className="mt-2 text-xs text-emerald-200/90">
+                {summary.answered} atendidas de {filteredCalls.length} ligacoes
+              </p>
+            </div>
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/20 text-[10px] font-semibold text-emerald-100">OK</span>
+          </div>
+        </article>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <article className="panel border-cyan-500/40 bg-cyan-500/10 p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-cyan-200">Chamadas por hora</p>
+            <p className="mt-2 text-3xl font-semibold leading-none text-cyan-100">{callsPerHour}</p>
+            <p className="mt-2 text-xs text-cyan-200/90">Ritmo medio da operacao</p>
+          </article>
+          <article className="panel border-amber-500/40 bg-amber-500/10 p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-amber-200">Tempo produtivo</p>
+            <p className="mt-2 text-3xl font-semibold leading-none text-amber-100">{productivePercent}%</p>
+            <p className="mt-2 text-xs text-amber-200/90">Tempo conectado x tempo total</p>
+          </article>
+          <article className="panel border-blue-500/40 bg-blue-500/10 p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-blue-200">TMA</p>
+            <p className="mt-2 text-3xl font-semibold leading-none text-blue-100">{tmaValue}</p>
+            <p className="mt-2 text-xs text-blue-200/90">Tempo medio de atendimento</p>
+          </article>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <article className="panel border-violet-500/40 bg-violet-500/10 p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-violet-200">CPC</p>
+            <p className="mt-2 text-3xl font-semibold leading-none text-violet-100">{contactQuality.cpc}</p>
+            <p className="mt-2 text-xs text-violet-200/90">Contato com cliente ({contactQuality.cpcRate}%)</p>
+          </article>
+          <article className="panel border-emerald-500/40 bg-emerald-500/10 p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-emerald-200">CPC Positivo</p>
+            <p className="mt-2 text-3xl font-semibold leading-none text-emerald-100">{contactQuality.cpcPositive}</p>
+            <p className="mt-2 text-xs text-emerald-200/90">Falou com cliente + pediu retorno ({contactQuality.cpcPositiveRate}%)</p>
+          </article>
+          <article className="panel border-rose-500/40 bg-rose-500/10 p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-rose-200">CPC Negativo</p>
+            <p className="mt-2 text-3xl font-semibold leading-none text-rose-100">{contactQuality.cpcNegative}</p>
+            <p className="mt-2 text-xs text-rose-200/90">Cliente sem interesse ({contactQuality.cpcNegativeRate}%)</p>
+          </article>
+          <article className="panel border-orange-500/40 bg-orange-500/10 p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-orange-200">Ligacao improdutiva</p>
+            <p className="mt-2 text-3xl font-semibold leading-none text-orange-100">{contactQuality.improdutivas}</p>
+            <p className="mt-2 text-xs text-orange-200/90">Sem conexao ou problema de base</p>
+          </article>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <article className="panel border-fuchsia-500/40 bg-fuchsia-500/10 p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-fuchsia-200">Taxa de conversao</p>
+            <p className="mt-2 text-3xl font-semibold leading-none text-fuchsia-100">{conversion.conversionRate}%</p>
+            <p className="mt-2 text-xs text-fuchsia-200/90">
+              {conversion.leadsAvancaram} leads avancaram de {conversion.baseContatada} contatados
+            </p>
+          </article>
+          <article className="panel border-teal-500/40 bg-teal-500/10 p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-teal-200">Agendamentos</p>
+            <p className="mt-2 text-3xl font-semibold leading-none text-teal-100">{conversion.agendamentos}</p>
+            <p className="mt-2 text-xs text-teal-200/90">Quantidade de agendamentos vinculados</p>
+          </article>
+        </div>
+
         <article className="panel p-5">
-          <div>
-            <p className="text-xs uppercase tracking-[0.12em] text-slate-300">Grafico de Finalizacoes</p>
-            <p className="mt-1 text-xs text-slate-500">Distribuicao percentual por tipo de finalizacao</p>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.12em] text-slate-300">Grafico de Finalizacoes</p>
+              <p className="mt-1 text-xs text-slate-500">Top finalizacoes por distribuicao percentual</p>
+            </div>
+            <span className="rounded-md border border-border/70 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-300">
+              Top {Math.min(4, finalizacaoChart.length)} + Outros
+            </span>
           </div>
           <div className="mt-4 space-y-2">
             {finalizacaoChart.length === 0 ? (
@@ -1227,7 +1405,7 @@ export default function LigacoesPage() {
                 <div key={item.label} className="space-y-1">
                   <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
                     <span>{item.label}</span>
-                    <span>{item.percent}%</span>
+                    <span>{item.count} ({item.percent}%)</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded bg-slate-800">
                     <div className={`h-full ${finalizacaoBarColor(item.label)}`} style={{ width: `${item.percent}%` }} />
@@ -1239,7 +1417,7 @@ export default function LigacoesPage() {
         </article>
       </div>
 
-      <div className="panel overflow-hidden">
+<div className="panel overflow-hidden">
         {loading ? <p className="px-4 py-4 text-sm text-slate-400">Carregando ligacoes...</p> : null}
         {error ? <p className="px-4 py-4 text-sm text-rose-300">{error}</p> : null}
 
