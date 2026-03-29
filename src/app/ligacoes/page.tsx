@@ -1294,120 +1294,104 @@ export default function LigacoesPage() {
         {wrapupMessage ? <p className="mt-2 text-xs text-emerald-300">{wrapupMessage}</p> : null}
       </div>
 
-      <div className="space-y-3">
-        <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
-          <article className="panel border-sky-400/40 bg-sky-500/10 p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-sky-200">Ligacoes Hoje</p>
-                <p className="mt-2 text-4xl font-semibold leading-none text-slate-100">{summary.todayCalls}</p>
-                <p className="mt-2 text-xs text-sky-100/80">Volume total de chamadas do dia</p>
-              </div>
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 text-[10px] font-semibold text-sky-100">TEL</span>
-            </div>
+      <div className="space-y-2">
+        <div className="grid gap-2 lg:grid-cols-3">
+          <article className="panel border-sky-400/40 bg-sky-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-sky-200">Ligacoes Hoje</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-slate-100">{summary.todayCalls}</p>
+            <p className="mt-1 text-[11px] text-sky-100/80">Volume do dia</p>
           </article>
-          <article className="panel border-indigo-500/40 bg-indigo-500/10 p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-indigo-200">Tempo total em chamadas</p>
-                <p className="mt-2 text-4xl font-semibold leading-none text-indigo-100">{summary.totalCallTime}</p>
-                <p className="mt-2 text-xs text-indigo-200/90">Volume de tempo da operacao</p>
-              </div>
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/20 text-[10px] font-semibold text-indigo-100">TMP</span>
-            </div>
+          <article className="panel border-indigo-500/40 bg-indigo-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-indigo-200">Tempo Total</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-indigo-100">{summary.totalCallTime}</p>
+            <p className="mt-1 text-[11px] text-indigo-200/90">Tempo em chamadas</p>
           </article>
-        </div>
-
-        <article className="panel border-emerald-500/40 bg-emerald-500/10 p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.12em] text-emerald-200">Taxa de Atendimento</p>
-              <p className="mt-2 text-5xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
-              <p className="mt-2 text-xs text-emerald-200/90">
-                {summary.answered} atendidas de {filteredCalls.length} ligacoes
-              </p>
-            </div>
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/20 text-[10px] font-semibold text-emerald-100">OK</span>
-          </div>
-        </article>
-
-        <div className="grid gap-3 md:grid-cols-3">
-          <article className="panel border-cyan-500/40 bg-cyan-500/10 p-4">
-            <p className="text-xs uppercase tracking-[0.12em] text-cyan-200">Chamadas por hora</p>
-            <p className="mt-2 text-3xl font-semibold leading-none text-cyan-100">{callsPerHour}</p>
-            <p className="mt-2 text-xs text-cyan-200/90">Ritmo medio da operacao</p>
-          </article>
-          <article className="panel border-amber-500/40 bg-amber-500/10 p-4">
-            <p className="text-xs uppercase tracking-[0.12em] text-amber-200">Tempo produtivo</p>
-            <p className="mt-2 text-3xl font-semibold leading-none text-amber-100">{productivePercent}%</p>
-            <p className="mt-2 text-xs text-amber-200/90">Tempo conectado x tempo total</p>
-          </article>
-          <article className="panel border-blue-500/40 bg-blue-500/10 p-4">
-            <p className="text-xs uppercase tracking-[0.12em] text-blue-200">TMA</p>
-            <p className="mt-2 text-3xl font-semibold leading-none text-blue-100">{tmaValue}</p>
-            <p className="mt-2 text-xs text-blue-200/90">Tempo medio de atendimento</p>
-          </article>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <article className="panel border-violet-500/40 bg-violet-500/10 p-4">
-            <p className="text-xs uppercase tracking-[0.12em] text-violet-200">CPC</p>
-            <p className="mt-2 text-3xl font-semibold leading-none text-violet-100">{contactQuality.cpc}</p>
-            <p className="mt-2 text-xs text-violet-200/90">Contato com cliente ({contactQuality.cpcRate}%)</p>
-          </article>
-          <article className="panel border-emerald-500/40 bg-emerald-500/10 p-4">
-            <p className="text-xs uppercase tracking-[0.12em] text-emerald-200">CPC Positivo</p>
-            <p className="mt-2 text-3xl font-semibold leading-none text-emerald-100">{contactQuality.cpcPositive}</p>
-            <p className="mt-2 text-xs text-emerald-200/90">Falou com cliente + pediu retorno ({contactQuality.cpcPositiveRate}%)</p>
-          </article>
-          <article className="panel border-rose-500/40 bg-rose-500/10 p-4">
-            <p className="text-xs uppercase tracking-[0.12em] text-rose-200">CPC Negativo</p>
-            <p className="mt-2 text-3xl font-semibold leading-none text-rose-100">{contactQuality.cpcNegative}</p>
-            <p className="mt-2 text-xs text-rose-200/90">Cliente sem interesse ({contactQuality.cpcNegativeRate}%)</p>
-          </article>
-          <article className="panel border-orange-500/40 bg-orange-500/10 p-4">
-            <p className="text-xs uppercase tracking-[0.12em] text-orange-200">Ligacao improdutiva</p>
-            <p className="mt-2 text-3xl font-semibold leading-none text-orange-100">{contactQuality.improdutivas}</p>
-            <p className="mt-2 text-xs text-orange-200/90">Sem conexao ou problema de base</p>
-          </article>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <article className="panel border-fuchsia-500/40 bg-fuchsia-500/10 p-4">
-            <p className="text-xs uppercase tracking-[0.12em] text-fuchsia-200">Taxa de conversao</p>
-            <p className="mt-2 text-3xl font-semibold leading-none text-fuchsia-100">{conversion.conversionRate}%</p>
-            <p className="mt-2 text-xs text-fuchsia-200/90">
-              {conversion.leadsAvancaram} leads avancaram de {conversion.baseContatada} contatados
+          <article className="panel border-emerald-500/40 bg-emerald-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200">Taxa de Atendimento</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
+            <p className="mt-1 text-[11px] text-emerald-200/90">
+              {summary.answered}/{filteredCalls.length} atendidas
             </p>
           </article>
-          <article className="panel border-teal-500/40 bg-teal-500/10 p-4">
-            <p className="text-xs uppercase tracking-[0.12em] text-teal-200">Agendamentos</p>
-            <p className="mt-2 text-3xl font-semibold leading-none text-teal-100">{conversion.agendamentos}</p>
-            <p className="mt-2 text-xs text-teal-200/90">Quantidade de agendamentos vinculados</p>
+        </div>
+
+        <div className="grid gap-2 md:grid-cols-3">
+          <article className="panel border-cyan-500/40 bg-cyan-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-cyan-200">Chamadas por hora</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-cyan-100">{callsPerHour}</p>
+            <p className="mt-1 text-[11px] text-cyan-200/90">Ritmo operacional</p>
+          </article>
+          <article className="panel border-amber-500/40 bg-amber-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-amber-200">Tempo Produtivo</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-amber-100">{productivePercent}%</p>
+            <p className="mt-1 text-[11px] text-amber-200/90">Conectado/total</p>
+          </article>
+          <article className="panel border-blue-500/40 bg-blue-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-blue-200">TMA</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-blue-100">{tmaValue}</p>
+            <p className="mt-1 text-[11px] text-blue-200/90">Tempo medio</p>
           </article>
         </div>
 
-        <article className="panel p-5">
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          <article className="panel border-violet-500/40 bg-violet-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-violet-200">CPC</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-violet-100">{contactQuality.cpc}</p>
+            <p className="mt-1 text-[11px] text-violet-200/90">Contato com cliente ({contactQuality.cpcRate}%)</p>
+          </article>
+          <article className="panel border-emerald-500/40 bg-emerald-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200">CPC Positivo</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-emerald-100">{contactQuality.cpcPositive}</p>
+            <p className="mt-1 text-[11px] text-emerald-200/90">Falou + retorno ({contactQuality.cpcPositiveRate}%)</p>
+          </article>
+          <article className="panel border-rose-500/40 bg-rose-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-rose-200">CPC Negativo</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-rose-100">{contactQuality.cpcNegative}</p>
+            <p className="mt-1 text-[11px] text-rose-200/90">Sem interesse ({contactQuality.cpcNegativeRate}%)</p>
+          </article>
+          <article className="panel border-orange-500/40 bg-orange-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-orange-200">Improdutivas</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-orange-100">{contactQuality.improdutivas}</p>
+            <p className="mt-1 text-[11px] text-orange-200/90">Sem conexao/base</p>
+          </article>
+        </div>
+
+        <div className="grid gap-2 md:grid-cols-2">
+          <article className="panel border-fuchsia-500/40 bg-fuchsia-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-fuchsia-200">Conversao</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-fuchsia-100">{conversion.conversionRate}%</p>
+            <p className="mt-1 text-[11px] text-fuchsia-200/90">
+              {conversion.leadsAvancaram} de {conversion.baseContatada}
+            </p>
+          </article>
+          <article className="panel border-teal-500/40 bg-teal-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-teal-200">Agendamentos</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-teal-100">{conversion.agendamentos}</p>
+            <p className="mt-1 text-[11px] text-teal-200/90">Vinculados ao funil</p>
+          </article>
+        </div>
+
+        <article className="panel p-3">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-300">Grafico de Finalizacoes</p>
-              <p className="mt-1 text-xs text-slate-500">Top finalizacoes por distribuicao percentual</p>
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-300">Grafico de Finalizacoes</p>
+              <p className="mt-1 text-[11px] text-slate-500">Top finalizacoes por distribuicao percentual</p>
             </div>
-            <span className="rounded-md border border-border/70 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-300">
+            <span className="rounded-md border border-border/70 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-300">
               Top {Math.min(4, finalizacaoChart.length)} + Outros
             </span>
           </div>
-          <div className="mt-4 space-y-2">
+          <div className="mt-2 space-y-1.5">
             {finalizacaoChart.length === 0 ? (
               <p className="text-sm text-slate-500">Sem dados para exibir.</p>
             ) : (
               finalizacaoChart.map((item) => (
                 <div key={item.label} className="space-y-1">
-                  <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-300">
                     <span>{item.label}</span>
                     <span>{item.count} ({item.percent}%)</span>
                   </div>
-                  <div className="h-2 overflow-hidden rounded bg-slate-800">
+                  <div className="h-1.5 overflow-hidden rounded bg-slate-800">
                     <div className={`h-full ${finalizacaoBarColor(item.label)}`} style={{ width: `${item.percent}%` }} />
                   </div>
                 </div>
