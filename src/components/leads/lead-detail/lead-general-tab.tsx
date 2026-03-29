@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { getStateFromCity } from "@/lib/br-city-state";
 import { getLeadContacts, getLeadEmails, getLeadPhones, updateLeadContacts, updateLeadEmails, updateLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { Lead } from "@/types/crm";
@@ -247,6 +248,8 @@ export function LeadGeneralTab({
   const phones = useMemo(() => getLeadPhones(draftLead), [draftLead]);
   const emails = useMemo(() => getLeadEmails(draftLead), [draftLead]);
   const cityState = useMemo(() => parseCityState(draftLead.city), [draftLead.city]);
+  const autoDetectedState = useMemo(() => getStateFromCity(cityState.city), [cityState.city]);
+  const effectiveState = autoDetectedState || cityState.state;
   const [activeField, setActiveField] = useState<EditableKey | null>(null);
   const [entryDateDraft, setEntryDateDraft] = useState(formatDateBR(draftLead.entryDate || ""));
 
@@ -274,6 +277,20 @@ export function LeadGeneralTab({
       ...draftLead,
       city: stateClean ? `${cityClean} - ${stateClean}` : cityClean,
     });
+  };
+
+  const onCityChange = (value: string) => {
+    const cityClean = value.trim();
+    if (!cityClean) {
+      updateCityState("", "");
+      return;
+    }
+    const detected = getStateFromCity(cityClean);
+    if (detected) {
+      updateCityState(cityClean, detected);
+      return;
+    }
+    updateCityState(cityClean, "");
   };
 
   return (
@@ -336,15 +353,19 @@ export function LeadGeneralTab({
             editable
             isEditing={activeField === "city"}
             onActivateEdit={() => toggleField("city")}
-            onChange={(value) => updateCityState(value, cityState.state)}
+            onChange={onCityChange}
           />
 
           <LeadInlineField
             label="Estado"
-            value={cityState.state}
-            editable
+            value={effectiveState}
+            editable={!autoDetectedState}
             isEditing={activeField === "state"}
-            onActivateEdit={() => toggleField("state")}
+            onActivateEdit={() => {
+              if (!autoDetectedState) {
+                toggleField("state");
+              }
+            }}
             onChange={(value) => updateCityState(cityState.city, value)}
           />
 
