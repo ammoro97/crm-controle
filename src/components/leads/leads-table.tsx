@@ -279,6 +279,9 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
         sourcePath: typeof window !== "undefined" ? window.location.pathname : "/leads",
       });
       console.log("[POSTCALL_DEBUG] Sessao criada apos discagem", session);
+      if (typeof window !== "undefined") {
+        window.location.assign(`/ligacoes?postCall=1&sessionId=${encodeURIComponent(session.sessionId)}`);
+      }
     } catch {
       setCallFeedback(lead.id, {
         type: "error",

@@ -8,6 +8,7 @@ const POST_CALL_EVENT = "crm:calls:flow:changed";
 
 export type ActiveCallSessionStatus = "dialing" | "ended_detected" | "wrapped";
 export type EndDetectionSource = "webhook" | "api4com-history";
+export type WrapupSessionState = "opened" | "minimized" | "pending";
 
 export type ActiveCallSession = {
   sessionId: string;
@@ -22,6 +23,7 @@ export type ActiveCallSession = {
   startedAt: string;
   sourcePath: string;
   status: ActiveCallSessionStatus;
+  wrapupState: WrapupSessionState;
   detectedAt?: string;
   matchedCallId?: string;
   detectionSource?: EndDetectionSource;
@@ -106,6 +108,21 @@ function normalizePhoneDigits(value?: string | null) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function normalizeSessionWrapupState(session: ActiveCallSession): WrapupSessionState {
+  if (session.wrapupState === "opened" || session.wrapupState === "minimized" || session.wrapupState === "pending") {
+    return session.wrapupState;
+  }
+  if (session.status === "ended_detected") return "pending";
+  return "opened";
+}
+
+function normalizeActiveSessionRecord(session: ActiveCallSession): ActiveCallSession {
+  return {
+    ...session,
+    wrapupState: normalizeSessionWrapupState(session),
+  };
+}
+
 function parseReferenceTimestamp(value: unknown): number {
   if (value === null || value === undefined) return Number.NaN;
 
@@ -139,9 +156,14 @@ function parseReferenceTimestamp(value: unknown): number {
 
 function readActiveSession(): ActiveCallSession | null {
   if (!isBrowser()) return null;
-  const session = safeParseJSON<ActiveCallSession | null>(window.localStorage.getItem(ACTIVE_CALL_SESSION_KEY), null);
-  debugLog("Leitura de sessao ativa", session);
-  return session;
+  const parsed = safeParseJSON<ActiveCallSession | null>(window.localStorage.getItem(ACTIVE_CALL_SESSION_KEY), null);
+  if (!parsed) {
+    debugLog("Leitura de sessao ativa", null);
+    return null;
+  }
+  const normalized = normalizeActiveSessionRecord(parsed);
+  debugLog("Leitura de sessao ativa", normalized);
+  return normalized;
 }
 
 function writeActiveSession(next: ActiveCallSession | null) {
@@ -149,7 +171,7 @@ function writeActiveSession(next: ActiveCallSession | null) {
   if (!next) {
     window.localStorage.removeItem(ACTIVE_CALL_SESSION_KEY);
   } else {
-    window.localStorage.setItem(ACTIVE_CALL_SESSION_KEY, JSON.stringify(next));
+    window.localStorage.setItem(ACTIVE_CALL_SESSION_KEY, JSON.stringify(normalizeActiveSessionRecord(next)));
   }
   emitFlowChanged();
   debugLog("Sessao ativa atualizada", next);
@@ -517,6 +539,44 @@ export function clearActiveCallSession(input?: { expectedSessionId?: string; rea
   return true;
 }
 
+export function setWrapupSessionState(sessionId: string, wrapupState: WrapupSessionState) {
+  const current = readActiveSession();
+  if (!current || current.sessionId !== sessionId) return null;
+  if (current.status === "wrapped") return current;
+  if (current.wrapupState === wrapupState) return current;
+
+  const updated: ActiveCallSession = {
+    ...current,
+    wrapupState,
+  };
+  writeActiveSession(updated);
+
+  if (wrapupState === "minimized") {
+    debugLog("WRAPUP MODAL MINIMIZED", {
+      sessionId,
+      externalCallId: current.externalCallId || null,
+      callId: current.matchedCallId || null,
+      status: current.status,
+    });
+  } else if (wrapupState === "opened") {
+    debugLog("WRAPUP MODAL RESTORED", {
+      sessionId,
+      externalCallId: current.externalCallId || null,
+      callId: current.matchedCallId || null,
+      status: current.status,
+    });
+  } else if (wrapupState === "pending") {
+    debugLog("WRAPUP PENDING SET", {
+      sessionId,
+      externalCallId: current.externalCallId || null,
+      callId: current.matchedCallId || null,
+      status: current.status,
+    });
+  }
+
+  return updated;
+}
+
 export async function resolveBlockingStateBeforeNewDial(signal?: AbortSignal): Promise<{
   blocked: boolean;
   reason?: NewCallBlockReason;
@@ -594,6 +654,7 @@ export function createDialSession(input: {
     startedAt: new Date().toISOString(),
     sourcePath: input.sourcePath || "/leads",
     status: "dialing",
+    wrapupState: "opened",
   };
   writeActiveSession(session);
   debugLog("CALL STARTED", {
@@ -602,6 +663,12 @@ export function createDialSession(input: {
     leadId: session.leadId || null,
     telefone: session.telefone,
     status: session.status,
+  });
+  debugLog("WRAPUP SESSION CREATED", {
+    sessionId: session.sessionId,
+    externalCallId: session.externalCallId || null,
+    callId: session.matchedCallId || null,
+    wrapupState: session.wrapupState,
   });
   debugLog("Sessao de discagem criada", {
     sessionId: session.sessionId,
@@ -636,6 +703,7 @@ export function markCallSessionEnded(input: {
   const updated: ActiveCallSession = {
     ...current,
     status: "ended_detected",
+    wrapupState: current.wrapupState === "minimized" ? "pending" : "opened",
     detectedAt: new Date().toISOString(),
     matchedCallId: input.callId || current.matchedCallId,
     detectionSource: input.detectionSource,
@@ -660,6 +728,7 @@ export function markCallSessionWrapped(sessionId: string) {
   const updated: ActiveCallSession = {
     ...current,
     status: "wrapped",
+    wrapupState: "opened",
   };
   writeActiveSession(updated);
   debugLog("FINALIZATION SAVED", { sessionId });

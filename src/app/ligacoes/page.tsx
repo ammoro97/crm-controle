@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Modal } from "@/components/ui/modal";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
@@ -28,6 +29,7 @@ import {
   markSessionPrompted,
   reconcileWrapupsWithCallLogs,
   savePostCallWrapup,
+  setWrapupSessionState,
   subscribePostCallFlow,
 } from "@/lib/post-call-flow";
 import { CallLog, Lead, LeadObservation, Meeting } from "@/types/crm";
@@ -155,6 +157,7 @@ const secondaryOptionsByFinalizacao: Record<"Falou com cliente" | "Falou com sec
 
 const OFFICIAL_FINALIZACOES = new Set(baseFinalizacaoOptions.filter((value) => value !== "Todas"));
 const HIDDEN_CALL_IDS_STORAGE_KEY = "crm:ligacoes:hidden-call-ids";
+const WRAPUP_DRAFT_STORAGE_KEY = "crm:calls:wrapup-draft:v1";
 const LIGACOES_DEBUG_PREFIX = "[LIGACOES_DEBUG]";
 
 function sleep(ms: number) {
@@ -367,6 +370,53 @@ function readHiddenCallIds(): Set<string> {
 function writeHiddenCallIds(ids: Set<string>) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(HIDDEN_CALL_IDS_STORAGE_KEY, JSON.stringify(Array.from(ids)));
+}
+
+function readWrapupDraft(sessionId: string): PostCallFormState | null {
+  if (typeof window === "undefined" || !sessionId) return null;
+  try {
+    const raw = window.localStorage.getItem(WRAPUP_DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, PostCallFormState | undefined>;
+    const value = parsed[sessionId];
+    if (!value) return null;
+    return {
+      reason: value.reason || "",
+      result: value.result || "Caixa postal",
+      observations: value.observations || "",
+      nextAction: value.nextAction || "",
+      followUpDate: value.followUpDate || "",
+      followUpTime: value.followUpTime || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeWrapupDraft(sessionId: string, form: PostCallFormState) {
+  if (typeof window === "undefined" || !sessionId) return;
+  try {
+    const raw = window.localStorage.getItem(WRAPUP_DRAFT_STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, PostCallFormState>) : {};
+    parsed[sessionId] = form;
+    window.localStorage.setItem(WRAPUP_DRAFT_STORAGE_KEY, JSON.stringify(parsed));
+  } catch {
+    // noop
+  }
+}
+
+function clearWrapupDraft(sessionId: string) {
+  if (typeof window === "undefined" || !sessionId) return;
+  try {
+    const raw = window.localStorage.getItem(WRAPUP_DRAFT_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, PostCallFormState>;
+    if (!parsed[sessionId]) return;
+    delete parsed[sessionId];
+    window.localStorage.setItem(WRAPUP_DRAFT_STORAGE_KEY, JSON.stringify(parsed));
+  } catch {
+    // noop
+  }
 }
 
 function humanizeHangupCause(value: string): string {
@@ -610,6 +660,7 @@ function statusBadgeClass(status?: string) {
 }
 
 export default function LigacoesPage() {
+  const searchParams = useSearchParams();
   const { currentUser } = useAuth();
   const responsaveisRecords = useResponsaveisRecords();
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
@@ -635,6 +686,10 @@ export default function LigacoesPage() {
   const checkingCallEndRef = useRef(false);
   const initialLoadDoneRef = useRef(false);
   const isInitialLoadRunningRef = useRef(false);
+  const restoredFromQueryRef = useRef(false);
+  const currentWrapupSessionRef = useRef<string | null>(null);
+  const shouldRestoreWrapupByQuery =
+    searchParams.get("restoreWrapup") === "1" || searchParams.get("postCall") === "1";
   const showReasonField = postCallForm.result === "Cliente sem interesse";
   const showNextActionField = finalizacaoComProximaAcao.has(postCallForm.result);
   const currentSecondaryOptions =
@@ -643,7 +698,6 @@ export default function LigacoesPage() {
       : [];
   const secondaryFieldLabel = "Subfinalizacao";
   const showFollowUpFields = showNextActionField && nextActionComFollowUp.has(postCallForm.nextAction);
-  const isFinalizacaoObrigatoria = Boolean(activeSession && activeSession.status === "ended_detected");
   const responsavelById = useMemo(() => {
     const map: ResponsavelByIdIndex = new Map();
     for (const item of responsaveisRecords) {
@@ -887,30 +941,66 @@ export default function LigacoesPage() {
   }, []);
 
   useEffect(() => {
-    if (!activeSession) return;
-    if (activeSession.status !== "ended_detected") return;
-    if (wrapupOpen) return;
+    if (!activeSession || activeSession.status === "wrapped") {
+      currentWrapupSessionRef.current = null;
+      return;
+    }
 
-    console.log("[POSTCALL_DEBUG] Abrindo modal automatico de finalizacao", {
-      sessionId: activeSession.sessionId,
-      callId: activeSession.matchedCallId,
-      detectionSource: activeSession.detectionSource,
-    });
+    const isNewSession = currentWrapupSessionRef.current !== activeSession.sessionId;
+    if (isNewSession) {
+      currentWrapupSessionRef.current = activeSession.sessionId;
+      const draft = readWrapupDraft(activeSession.sessionId);
+      setPostCallForm(draft || createDefaultPostCallForm());
+      restoredFromQueryRef.current = false;
+      console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP SESSION CREATED`, {
+        sessionId: activeSession.sessionId,
+        externalCallId: activeSession.externalCallId || null,
+        callId: activeSession.matchedCallId || null,
+        status: activeSession.status,
+      });
+    }
+
+    const shouldForceRestore = shouldRestoreWrapupByQuery && !restoredFromQueryRef.current;
+    const canOpenAutomatically = activeSession.wrapupState !== "minimized" || shouldForceRestore;
+    if (!canOpenAutomatically || wrapupOpen) return;
+
+    if (shouldForceRestore) {
+      restoredFromQueryRef.current = true;
+      setWrapupSessionState(activeSession.sessionId, "opened");
+      console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP MODAL RESTORED`, {
+        sessionId: activeSession.sessionId,
+        externalCallId: activeSession.externalCallId || null,
+        callId: activeSession.matchedCallId || null,
+      });
+    }
+
     console.log(`${LIGACOES_DEBUG_PREFIX} FINALIZATION REQUIRED`, {
       sessionId: activeSession.sessionId,
       callId: activeSession.matchedCallId || null,
       source: activeSession.detectionSource || null,
+      status: activeSession.status,
+      wrapupState: activeSession.wrapupState,
     });
-    setPostCallForm(createDefaultPostCallForm());
+    if (activeSession.wrapupState !== "opened") {
+      setWrapupSessionState(activeSession.sessionId, "opened");
+    }
     setWrapupError(null);
     setWrapupOpen(true);
     if (!activeSession.promptedAt) {
       markSessionPrompted(activeSession.sessionId);
     }
-    console.log(`${LIGACOES_DEBUG_PREFIX} FINALIZATION MODAL OPEN`, {
+    console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP MODAL OPENED`, {
       sessionId: activeSession.sessionId,
+      externalCallId: activeSession.externalCallId || null,
+      callId: activeSession.matchedCallId || null,
+      status: activeSession.status,
     });
-  }, [activeSession, wrapupOpen]);
+  }, [activeSession, shouldRestoreWrapupByQuery, wrapupOpen]);
+
+  useEffect(() => {
+    if (!activeSession || activeSession.status === "wrapped") return;
+    writeWrapupDraft(activeSession.sessionId, postCallForm);
+  }, [activeSession, postCallForm]);
 
   useEffect(() => {
     setPostCallForm((prev) => {
@@ -994,19 +1084,38 @@ export default function LigacoesPage() {
     setSelectedIds([]);
   };
 
-  const handleWrapupModalClose = () => {
-    if (isFinalizacaoObrigatoria) {
-      console.log(`${LIGACOES_DEBUG_PREFIX} FINALIZATION MODAL BLOCKED`, {
-        reason: "finalizacao_obrigatoria",
-        sessionId: activeSession?.sessionId || null,
-      });
-      setWrapupError("Finalizacao obrigatoria: conclua e salve esta ligacao para continuar.");
-      setWrapupOpen(true);
+  const handleMinimizeWrapup = () => {
+    if (!activeSession || activeSession.status === "wrapped") {
+      setWrapupOpen(false);
+      setWrapupError(null);
       return;
     }
-
+    setWrapupSessionState(activeSession.sessionId, "minimized");
     setWrapupOpen(false);
     setWrapupError(null);
+    console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP MODAL MINIMIZED`, {
+      sessionId: activeSession.sessionId,
+      externalCallId: activeSession.externalCallId || null,
+      callId: activeSession.matchedCallId || null,
+      status: activeSession.status,
+    });
+  };
+
+  const handleRestoreWrapup = () => {
+    if (!activeSession || activeSession.status === "wrapped") return;
+    setWrapupSessionState(activeSession.sessionId, "opened");
+    setWrapupOpen(true);
+    setWrapupError(null);
+    console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP MODAL RESTORED`, {
+      sessionId: activeSession.sessionId,
+      externalCallId: activeSession.externalCallId || null,
+      callId: activeSession.matchedCallId || null,
+      status: activeSession.status,
+    });
+  };
+
+  const handleWrapupModalClose = () => {
+    handleMinimizeWrapup();
   };
 
   const summary = useMemo(() => {
@@ -1442,6 +1551,11 @@ export default function LigacoesPage() {
         callId: activeSession.matchedCallId,
         conciliationStatus: activeSession.matchedCallId ? "conciliated" : "pending_conciliation",
       });
+      console.log(`${LIGACOES_DEBUG_PREFIX} CALL_WRAPUP_MATCH_CONFIRMED`, {
+        sessionId: activeSession.sessionId,
+        externalCallId: activeSession.externalCallId || null,
+        callId: activeSession.matchedCallId || null,
+      });
       applyWrapupToLead(activeSession, postCallForm, ownerName, currentCallEvidence);
       createFollowUpMeetingIfNeeded(activeSession, postCallForm, ownerName);
 
@@ -1450,6 +1564,7 @@ export default function LigacoesPage() {
         expectedSessionId: activeSession.sessionId,
         reason: "wrapup_saved",
       });
+      clearWrapupDraft(activeSession.sessionId);
       setActiveSession(null);
       console.log("[POSTCALL_DEBUG] Wrapup salvo e sessao marcada como wrapped", {
         sessionId: activeSession.sessionId,
@@ -1531,6 +1646,23 @@ export default function LigacoesPage() {
         </div>
         {wrapupMessage ? <p className="mt-2 text-xs text-emerald-300">{wrapupMessage}</p> : null}
       </div>
+
+      {activeSession && activeSession.status !== "wrapped" && !wrapupOpen ? (
+        <div className="panel border-cyan-500/40 bg-cyan-500/10 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.12em] text-cyan-200">Finalizacao pendente</p>
+              <p className="mt-1 text-sm text-cyan-100">
+                Ligacao {activeSession.status === "dialing" ? "em andamento" : "encerrada"} para{" "}
+                <span className="font-semibold">{activeSession.nome || activeSession.telefone}</span>.
+              </p>
+            </div>
+            <button type="button" className="btn-primary h-9 px-3 py-1.5 text-xs" onClick={handleRestoreWrapup}>
+              Restaurar finalizacao
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="space-y-2">
         <div className="panel p-3">
@@ -1970,7 +2102,7 @@ export default function LigacoesPage() {
 
           <div className="flex items-center gap-2">
             <button type="button" className="btn-ghost" onClick={handleWrapupModalClose} disabled={wrapupSaving}>
-              Fechar
+              Minimizar
             </button>
             <button type="submit" className="btn-primary" disabled={wrapupSaving}>
               {wrapupSaving ? "Salvando..." : "Salvar finalizacao"}
