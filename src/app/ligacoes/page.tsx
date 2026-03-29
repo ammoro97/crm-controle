@@ -664,12 +664,12 @@ const IMPRODUTIVE_FINALIZACOES = new Set([
 
 function finalizacaoBarColor(label: string) {
   const normalized = normalizeFinalizacaoKey(label);
-  if (normalized === "outros") return "bg-fuchsia-400";
-  if (normalized.includes("falou com cliente")) return "bg-emerald-400";
-  if (normalized.includes("caixa postal")) return "bg-amber-400";
-  if (normalized.includes("ligacao caiu")) return "bg-violet-400";
-  if (normalized.includes("numero invalido")) return "bg-rose-400";
-  if (normalized.includes("cliente sem interesse")) return "bg-red-400";
+  if (normalized === "outros") return "bg-slate-500";
+  if (normalized.includes("falou com cliente")) return "bg-emerald-500";
+  if (normalized.includes("caixa postal")) return "bg-amber-500";
+  if (normalized.includes("ligacao caiu")) return "bg-violet-500";
+  if (normalized.includes("numero invalido")) return "bg-rose-500";
+  if (normalized.includes("cliente sem interesse")) return "bg-red-500";
   return "bg-slate-400";
 }
 
@@ -1641,18 +1641,19 @@ export default function LigacoesPage() {
   };
 
   return (
-    <section className="space-y-6">
-      <div className="panel p-5">
+    <section className="space-y-5">
+      <div className="panel border-slate-800/90 bg-slate-950/80 p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-slate-100">Ligacoes</h1>
+            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Painel de Ligacoes</p>
+            <h1 className="mt-1 text-xl font-semibold text-slate-100">Ligacoes</h1>
             <p className="mt-1 text-sm text-slate-400">Acompanhe o historico de chamadas realizadas no CRM.</p>
           </div>
-          <div className="flex w-full flex-wrap items-end justify-start gap-2 lg:w-auto lg:justify-end">
+          <div className="flex w-full flex-wrap items-end justify-start gap-2 rounded-xl border border-slate-800/90 bg-slate-950/70 p-2 lg:w-auto lg:justify-end">
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
               Atendente
               <select
-                className="field mt-1 h-9 min-w-[190px] px-2.5 py-1.5 text-xs"
+                className="field mt-1 h-9 min-w-[190px] border-slate-700 bg-slate-900/80 px-2.5 py-1.5 text-xs"
                 value={atendenteFilter}
                 onChange={(event) => setAtendenteFilter(event.target.value)}
               >
@@ -1666,7 +1667,7 @@ export default function LigacoesPage() {
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
               Finalizacao
               <select
-                className="field mt-1 h-9 min-w-[190px] px-2.5 py-1.5 text-xs"
+                className="field mt-1 h-9 min-w-[190px] border-slate-700 bg-slate-900/80 px-2.5 py-1.5 text-xs"
                 value={finalizacaoFilter}
                 onChange={(event) => setFinalizacaoFilter(event.target.value)}
               >
@@ -1679,7 +1680,7 @@ export default function LigacoesPage() {
             </label>
             <button
               type="button"
-              className="btn-ghost h-9 px-3 py-1.5 text-xs"
+              className="btn-ghost h-9 border-slate-700 bg-slate-900/70 px-3 py-1.5 text-xs"
               onClick={() => {
                 void loadCallsWithRetry("manual-refresh", 1);
               }}
@@ -1693,11 +1694,11 @@ export default function LigacoesPage() {
       </div>
 
       {activeSession && activeSession.status !== "wrapped" && !wrapupOpen ? (
-        <div className="panel border-cyan-500/40 bg-cyan-500/10 p-3">
+        <div className="panel border-amber-500/30 bg-amber-500/5 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-[10px] uppercase tracking-[0.12em] text-cyan-200">Finalizacao pendente</p>
-              <p className="mt-1 text-sm text-cyan-100">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-amber-200">Finalizacao pendente</p>
+              <p className="mt-1 text-sm text-amber-100/90">
                 Ligacao {activeSession.status === "dialing" ? "em andamento" : "encerrada"} para{" "}
                 <span className="font-semibold">{activeSession.nome || activeSession.telefone}</span>.
               </p>
@@ -1709,129 +1710,151 @@ export default function LigacoesPage() {
         </div>
       ) : null}
 
-      <div className="space-y-2">
-        <div className="panel p-3">
-          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-300">Volume</p>
-          <div className="mt-2 grid gap-2 md:grid-cols-2">
-            <article className="rounded-md border border-sky-400/40 bg-sky-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-sky-200">Ligacoes Gerais</p>
-              <p className="mt-1 text-3xl font-semibold leading-none text-slate-100">{filteredCalls.length}</p>
-              <p className="mt-1 text-[11px] text-sky-100/80">Total no filtro atual</p>
+      <div className="space-y-3">
+        <div className="panel border-slate-800/90 bg-slate-950/70 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Performance</p>
+              <p className="mt-1 text-xs text-slate-400">Indicadores centrais de atendimento do time</p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <article className="rounded-xl border border-slate-800/90 bg-slate-950/80 p-4 md:col-span-2">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Taxa de Atendimento</p>
+              <p className="mt-2 text-5xl font-semibold leading-none text-slate-50">{atendimentoRate}%</p>
+              <p className="mt-2 text-xs text-slate-400">
+                <span className="font-medium text-slate-200">{summary.answered}</span> de{" "}
+                <span className="font-medium text-slate-200">{filteredCalls.length}</span> atendidas
+              </p>
             </article>
-            <article className="rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-indigo-200">Tempo Total em Chamadas</p>
-              <p className="mt-1 text-3xl font-semibold leading-none text-indigo-100">{summary.totalCallTime}</p>
-              <p className="mt-1 text-[11px] text-indigo-200/90">Soma de duracao</p>
+            <article className="rounded-xl border border-slate-800/90 bg-slate-950/80 p-4">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">TMA</p>
+              <p className="mt-2 text-4xl font-semibold leading-none text-slate-100">{tmaValue}</p>
+              <p className="mt-2 text-xs text-slate-400">Tempo medio de atendimento</p>
             </article>
           </div>
         </div>
 
-        <div className="panel p-3">
-          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-300">Qualidade (CPC)</p>
-          <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-            <article className="rounded-md border border-violet-500/40 bg-violet-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-violet-200">CPC Total</p>
-              <div className="mt-1 flex items-end gap-2">
-                <p className="text-3xl font-semibold leading-none text-violet-200">{contactQuality.cpcRate}%</p>
-                <p className="text-xl font-semibold leading-none text-violet-100">{contactQuality.cpc}</p>
-              </div>
-              <p className="mt-1 text-[11px] text-violet-200/90">Contato com cliente</p>
+        <div className="panel border-slate-800/90 bg-slate-950/70 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Volume</p>
+              <p className="mt-1 text-xs text-slate-400">Panorama de volume e tempo total no periodo filtrado</p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <article className="rounded-xl border border-slate-800/90 bg-slate-950/80 p-4">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Ligacoes Gerais</p>
+              <p className="mt-2 text-4xl font-semibold leading-none text-slate-100">{filteredCalls.length}</p>
+              <p className="mt-2 text-xs text-slate-400">Total no filtro atual</p>
             </article>
-            <article className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200">CPC Positivo</p>
-              <div className="mt-1 flex items-end gap-2">
-                <p className="text-3xl font-semibold leading-none text-emerald-200">{contactQuality.cpcPositiveRate}%</p>
-                <p className="text-xl font-semibold leading-none text-emerald-100">{contactQuality.cpcPositive}</p>
-              </div>
-              <p className="mt-1 text-[11px] text-emerald-200/90">Falou + retorno</p>
+            <article className="rounded-xl border border-slate-800/90 bg-slate-950/80 p-4">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Tempo Total em Chamadas</p>
+              <p className="mt-2 text-4xl font-semibold leading-none text-slate-100">{summary.totalCallTime}</p>
+              <p className="mt-2 text-xs text-slate-400">Soma de duracao</p>
             </article>
-            <article className="rounded-md border border-rose-500/40 bg-rose-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-rose-200">CPC Negativo</p>
-              <div className="mt-1 flex items-end gap-2">
-                <p className="text-3xl font-semibold leading-none text-rose-200">{contactQuality.cpcNegativeRate}%</p>
-                <p className="text-xl font-semibold leading-none text-rose-100">{contactQuality.cpcNegative}</p>
+          </div>
+        </div>
+
+        <div className="panel border-slate-800/90 bg-slate-950/70 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Qualidade de Contato (CPC)</p>
+              <p className="mt-1 text-xs text-slate-400">Distribuicao dos resultados de contato</p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <article className="rounded-xl border border-slate-800/90 bg-slate-950/80 p-4">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">CPC Total</p>
+              <div className="mt-2 flex items-end gap-2">
+                <p className="text-3xl font-semibold leading-none text-slate-100">{contactQuality.cpcRate}%</p>
+                <p className="text-xl font-semibold leading-none text-slate-300">{contactQuality.cpc}</p>
               </div>
-              <p className="mt-1 text-[11px] text-rose-200/90">Sem interesse</p>
+              <p className="mt-2 text-xs text-slate-400">Contato com cliente</p>
             </article>
-            <article className="rounded-md border border-orange-500/40 bg-orange-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-orange-200">Ligacoes Improdutivas</p>
-              <div className="mt-1 flex items-end gap-2">
-                <p className="text-3xl font-semibold leading-none text-orange-200">
+            <article className="rounded-xl border border-emerald-500/25 bg-slate-950/80 p-4">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">CPC Positivo</p>
+              <div className="mt-2 flex items-end gap-2">
+                <p className="text-3xl font-semibold leading-none text-emerald-300">{contactQuality.cpcPositiveRate}%</p>
+                <p className="text-xl font-semibold leading-none text-slate-200">{contactQuality.cpcPositive}</p>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">Falou + retorno</p>
+            </article>
+            <article className="rounded-xl border border-rose-500/25 bg-slate-950/80 p-4">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">CPC Negativo</p>
+              <div className="mt-2 flex items-end gap-2">
+                <p className="text-3xl font-semibold leading-none text-rose-300">{contactQuality.cpcNegativeRate}%</p>
+                <p className="text-xl font-semibold leading-none text-slate-200">{contactQuality.cpcNegative}</p>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">Sem interesse</p>
+            </article>
+            <article className="rounded-xl border border-amber-500/25 bg-slate-950/80 p-4">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Ligacoes Improdutivas</p>
+              <div className="mt-2 flex items-end gap-2">
+                <p className="text-3xl font-semibold leading-none text-amber-300">
                   {filteredCalls.length > 0 ? Math.round((contactQuality.improdutivas / filteredCalls.length) * 100) : 0}%
                 </p>
-                <p className="text-xl font-semibold leading-none text-orange-100">{contactQuality.improdutivas}</p>
+                <p className="text-xl font-semibold leading-none text-slate-200">{contactQuality.improdutivas}</p>
               </div>
-              <p className="mt-1 text-[11px] text-orange-200/90">Sem conexao/base</p>
+              <p className="mt-2 text-xs text-slate-400">Sem conexao/base</p>
             </article>
           </div>
         </div>
 
-        <div className="panel p-3">
-          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-300">Eficiencia</p>
-          <div className="mt-2 grid gap-2 md:grid-cols-2">
-            <article className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200">Taxa de Atendimento</p>
-              <p className="mt-1 text-4xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
-              <p className="mt-1 text-[11px] text-emerald-200/90">
-                {summary.answered}/{filteredCalls.length} atendidas
-              </p>
-            </article>
-            <article className="rounded-md border border-blue-500/40 bg-blue-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-blue-200">TMA</p>
-              <p className="mt-1 text-4xl font-semibold leading-none text-blue-100">{tmaValue}</p>
-              <p className="mt-1 text-[11px] text-blue-200/90">Tempo medio de atendimento</p>
-            </article>
-          </div>
-        </div>
-
-        <div className="panel p-3">
-          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-300">Acao</p>
-          <div className="mt-2 grid gap-2 md:grid-cols-2">
-            <article className="rounded-md border border-teal-500/40 bg-teal-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-teal-200">Agendamentos de Follow-up</p>
-              <p className="mt-1 text-3xl font-semibold leading-none text-teal-100">{conversion.agendamentos}</p>
-              <p className="mt-1 text-[11px] text-teal-200/90">Baseado apenas em finalizacoes/subfinalizacoes</p>
-              <p className="mt-0.5 text-[11px] text-teal-200/80">
-                {followUpRates.vsContatosPositivos}% dos contatos positivos
-              </p>
-              <p className="mt-0.5 text-[11px] text-teal-200/80">
-                {followUpRates.vsLigacoesGerais}% das ligacoes gerais
-              </p>
-            </article>
-            <article className="rounded-md border border-fuchsia-500/40 bg-fuchsia-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-fuchsia-200">Conversao</p>
-              <p className="mt-1 text-3xl font-semibold leading-none text-fuchsia-100">{conversion.conversionRate}%</p>
-              <p className="mt-1 text-[11px] text-fuchsia-200/90">
-                {conversion.videoCalls} de {conversion.cpcPositiveBase}
-              </p>
-              <p className="mt-0.5 text-[11px] text-fuchsia-200/80">Baseado em chamadas de video / CPC positivo</p>
-            </article>
-          </div>
-        </div>
-
-        <article className="panel p-3">
-          <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="panel border-slate-800/90 bg-slate-950/70 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-300">Grafico de Finalizacoes</p>
-              <p className="mt-1 text-[11px] text-slate-500">Top finalizacoes por distribuicao percentual</p>
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Resultado</p>
+              <p className="mt-1 text-xs text-slate-400">Follow-up e conversao comercial</p>
             </div>
-            <span className="rounded-md border border-border/70 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-300">
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <article className="rounded-xl border border-slate-800/90 bg-slate-950/80 p-4">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Agendamentos de Follow-up</p>
+              <p className="mt-2 text-4xl font-semibold leading-none text-slate-100">{conversion.agendamentos}</p>
+              <p className="mt-2 text-xs text-slate-400">Baseado apenas em finalizacoes/subfinalizacoes</p>
+              <p className="mt-1 text-xs text-slate-400">
+                <span className="font-medium text-slate-200">{followUpRates.vsContatosPositivos}%</span> dos contatos positivos
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                <span className="font-medium text-slate-200">{followUpRates.vsLigacoesGerais}%</span> das ligacoes gerais
+              </p>
+            </article>
+            <article className="rounded-xl border border-slate-800/90 bg-slate-950/80 p-4">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Conversao</p>
+              <p className="mt-2 text-4xl font-semibold leading-none text-slate-100">{conversion.conversionRate}%</p>
+              <p className="mt-2 text-xs text-slate-400">
+                <span className="font-medium text-slate-200">{conversion.videoCalls}</span> de{" "}
+                <span className="font-medium text-slate-200">{conversion.cpcPositiveBase}</span>
+              </p>
+              <p className="mt-1 text-xs text-slate-400">Baseado em chamadas de video / CPC positivo</p>
+            </article>
+          </div>
+        </div>
+
+        <article className="panel border-slate-800/90 bg-slate-950/70 p-4">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Distribuicao de Finalizacoes</p>
+              <p className="mt-1 text-xs text-slate-400">Top finalizacoes por distribuicao percentual</p>
+            </div>
+            <span className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-300">
               Top {Math.min(4, finalizacaoChart.length)} + Outros
             </span>
           </div>
-          <div className="mt-2 space-y-1.5">
+          <div className="space-y-2">
             {finalizacaoChart.length === 0 ? (
               <p className="text-sm text-slate-500">Sem dados para exibir.</p>
             ) : (
               finalizacaoChart.map((item) => (
-                <div key={item.label} className="space-y-1">
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-300">
-                    <span>{item.label}</span>
-                    <span>{item.count} ({item.percent}%)</span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded bg-slate-800">
+                <div key={item.label} className="grid grid-cols-[minmax(0,180px)_1fr_auto] items-center gap-3">
+                  <span className="truncate text-xs text-slate-300">{item.label}</span>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
                     <div className={`h-full ${finalizacaoBarColor(item.label)}`} style={{ width: `${item.percent}%` }} />
                   </div>
+                  <span className="text-xs text-slate-300">
+                    {item.count} ({item.percent}%)
+                  </span>
                 </div>
               ))
             )}
@@ -1839,11 +1862,11 @@ export default function LigacoesPage() {
         </article>
       </div>
 
-      <div className="panel overflow-hidden">
-        <div className="flex items-center justify-end border-b border-border/70 px-3 py-2.5">
+      <div className="panel overflow-hidden border-slate-800/90 bg-slate-950/70">
+        <div className="flex items-center justify-end border-b border-slate-800/90 bg-slate-950/90 px-3 py-2.5">
           <button
             type="button"
-            className="h-9 rounded-md border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+            className="h-9 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-200 transition hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-40"
             onClick={deleteSelectedCalls}
             disabled={selectedIds.length === 0}
           >
@@ -1856,7 +1879,7 @@ export default function LigacoesPage() {
         {!loading && !error ? (
           <div className="overflow-x-auto">
             <table className="min-w-[1260px] w-full text-left">
-              <thead className="border-b border-border bg-slate-900/60 text-[11px] uppercase tracking-[0.08em] text-muted">
+              <thead className="border-b border-slate-800/90 bg-slate-950/90 text-[11px] uppercase tracking-[0.08em] text-slate-400">
                 <tr>
                   <th className="whitespace-nowrap px-3 py-2.5">
                     <input
