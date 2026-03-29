@@ -3,7 +3,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase-client";
-import { normalizeEmailForMatch, resolveResponsavelByEmail } from "@/lib/responsavel-resolver";
+import { normalizeEmailForMatch, resolveResponsavelByEmailAsync } from "@/lib/responsavel-resolver";
 import { PublicUser } from "@/types/auth";
 
 type AuthContextValue = {
@@ -16,9 +16,9 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function toPublicUserFromSupabase(user: User): PublicUser {
+async function toPublicUserFromSupabase(user: User): Promise<PublicUser> {
   const email = normalizeEmailForMatch(user.email || "");
-  const resolved = resolveResponsavelByEmail(email);
+  const resolved = await resolveResponsavelByEmailAsync(email);
   const nome = resolved.responsavel?.nome || "Responsavel nao vinculado";
   const responsavelId = resolved.responsavel?.id || "";
 
@@ -42,7 +42,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCurrentUser(null);
         return;
       }
-      setCurrentUser(toPublicUserFromSupabase(data.user));
+      const publicUser = await toPublicUserFromSupabase(data.user);
+      setCurrentUser(publicUser);
     } catch {
       setCurrentUser(null);
     }
@@ -62,7 +63,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setCurrentUser(null);
           return;
         }
-        setCurrentUser(toPublicUserFromSupabase(session.user));
+        void (async () => {
+          const publicUser = await toPublicUserFromSupabase(session.user);
+          if (active) setCurrentUser(publicUser);
+        })();
       });
 
       subscription = listener.data.subscription;
@@ -86,7 +90,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error || !data.user) {
           return { success: false, message: error?.message || "Nao foi possivel autenticar." };
         }
-        setCurrentUser(toPublicUserFromSupabase(data.user));
+        const publicUser = await toPublicUserFromSupabase(data.user);
+        setCurrentUser(publicUser);
         return { success: true };
       } catch {
         return { success: false, message: "Falha de rede ao autenticar." };

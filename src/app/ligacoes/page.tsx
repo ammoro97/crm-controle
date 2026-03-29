@@ -11,7 +11,7 @@ import {
   subscribeLeadsSnapshot,
 } from "@/lib/crm-data-store";
 import { useResponsaveisRecords } from "@/lib/responsaveis-store";
-import { resolveResponsavelFromUser } from "@/lib/responsavel-resolver";
+import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
 import {
   ActiveCallSession,
   PostCallWrapup,
@@ -380,7 +380,6 @@ function mapApiCallToRow(
   const metadataNome = String(metadata?.nome ?? "").trim();
   const metadataEmpresa = String(metadata?.empresa ?? "").trim();
   const metadataTelefone = String(metadata?.telefone ?? "").trim();
-  const metadataAtendenteNome = String(metadata?.atendenteNome ?? metadata?.atendente ?? "").trim();
   const metadataResponsavelId = String(metadata?.responsavelId ?? "").trim();
 
   const internal = rawId ? context.internalById.get(rawId) : undefined;
@@ -441,8 +440,6 @@ function mapApiCallToRow(
     : undefined;
   const atendente =
     atendenteFromWrapupResponsavelId ||
-    matchedWrapup?.atendenteNome?.trim() ||
-    metadataAtendenteNome ||
     atendenteFromResponsavelId ||
     "Responsavel nao vinculado";
 
@@ -931,7 +928,7 @@ export default function LigacoesPage() {
     setWrapupMessage(null);
 
     try {
-      const resolvedResponsavel = resolveResponsavelFromUser(currentUser);
+      const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);
       if (!resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {
         setWrapupError(
           "Seu usuario ainda nao esta vinculado a um responsavel no CRM. Cadastre esse e-mail em Configuracoes > Responsaveis antes de finalizar ligacoes.",

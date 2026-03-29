@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Modal } from "@/components/ui/modal";
 import { useResponsaveis } from "@/lib/responsaveis-store";
-import { resolveResponsavelFromUser } from "@/lib/responsavel-resolver";
+import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
 import { createDialSession } from "@/lib/post-call-flow";
 import { Lead } from "@/types/crm";
 
@@ -160,7 +160,7 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
       return;
     }
 
-    const resolvedResponsavel = resolveResponsavelFromUser(currentUser);
+    const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);
     if (!currentUser || !resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {
       setCallFeedback(lead.id, {
         type: "error",

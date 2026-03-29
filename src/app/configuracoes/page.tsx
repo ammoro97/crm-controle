@@ -8,6 +8,7 @@ import {
   ResponsavelTipo,
   addResponsavel,
   removeResponsavel,
+  reloadResponsaveisGlobal,
   updateResponsavel,
   useResponsaveis,
   useResponsaveisRecords,
@@ -229,7 +230,11 @@ export default function ConfiguracoesPage() {
     void loadApi4ComConfig();
   }, [integracoesOpen]);
 
-  const onAddResponsavel = () => {
+  useEffect(() => {
+    void reloadResponsaveisGlobal();
+  }, []);
+
+  const onAddResponsavel = async () => {
     const next = novoResponsavel.trim();
     const nextEmail = novoResponsavelEmail.trim().toLowerCase();
     if (!next) {
@@ -251,11 +256,15 @@ export default function ConfiguracoesPage() {
       }
     }
 
-    addResponsavel({ nome: next, tipo: novoResponsavelTipo, email: nextEmail });
-    setNovoResponsavel("");
-    setNovoResponsavelTipo("vendedor");
-    setNovoResponsavelEmail("");
-    setResponsavelErro(null);
+    try {
+      await addResponsavel({ nome: next, tipo: novoResponsavelTipo, email: nextEmail });
+      setNovoResponsavel("");
+      setNovoResponsavelTipo("vendedor");
+      setNovoResponsavelEmail("");
+      setResponsavelErro(null);
+    } catch (error) {
+      setResponsavelErro(error instanceof Error ? error.message : "Nao foi possivel adicionar responsavel.");
+    }
   };
 
   const openDeleteResponsavel = (record: ResponsavelRecord) => {
@@ -280,7 +289,7 @@ export default function ConfiguracoesPage() {
     setResponsavelErro(null);
   };
 
-  const saveEditResponsavel = () => {
+  const saveEditResponsavel = async () => {
     if (!editingResponsavelId) return;
     const nextNome = editingNome.trim();
     const nextEmail = editingEmail.trim().toLowerCase();
@@ -306,11 +315,15 @@ export default function ConfiguracoesPage() {
       }
     }
 
-    updateResponsavel(editingResponsavelId, { nome: nextNome, tipo: editingTipo, email: nextEmail });
-    cancelEditResponsavel();
+    try {
+      await updateResponsavel(editingResponsavelId, { nome: nextNome, tipo: editingTipo, email: nextEmail });
+      cancelEditResponsavel();
+    } catch (error) {
+      setResponsavelErro(error instanceof Error ? error.message : "Nao foi possivel editar responsavel.");
+    }
   };
 
-  const confirmDeleteResponsavel = () => {
+  const confirmDeleteResponsavel = async () => {
     if (!deleteTarget) return;
 
     if (deleteImpact.total > 0) {
@@ -329,10 +342,14 @@ export default function ConfiguracoesPage() {
       transferResponsavelVinculos(deleteTarget.nome, transferTo);
     }
 
-    removeResponsavel(deleteTarget.id);
-    setDeleteTarget(null);
-    setTransferTo("");
-    setDeleteErro(null);
+    try {
+      await removeResponsavel(deleteTarget.id);
+      setDeleteTarget(null);
+      setTransferTo("");
+      setDeleteErro(null);
+    } catch (error) {
+      setDeleteErro(error instanceof Error ? error.message : "Nao foi possivel excluir responsavel.");
+    }
   };
 
   const handleCopyWebhookUrl = async () => {
@@ -803,7 +820,7 @@ export default function ConfiguracoesPage() {
                 <option value="vendedor">Vendedor</option>
                 <option value="gestor">Gestor</option>
               </select>
-              <button type="button" className="btn-primary whitespace-nowrap" onClick={onAddResponsavel}>
+              <button type="button" className="btn-primary whitespace-nowrap" onClick={() => void onAddResponsavel()}>
                 Adicionar
               </button>
             </div>
@@ -847,7 +864,7 @@ export default function ConfiguracoesPage() {
                           <option value="vendedor">Vendedor</option>
                           <option value="gestor">Gestor</option>
                         </select>
-                        <button type="button" className="btn-primary whitespace-nowrap" onClick={saveEditResponsavel}>
+                        <button type="button" className="btn-primary whitespace-nowrap" onClick={() => void saveEditResponsavel()}>
                           Salvar
                         </button>
                         <button type="button" className="btn-ghost whitespace-nowrap" onClick={cancelEditResponsavel}>
@@ -930,7 +947,7 @@ export default function ConfiguracoesPage() {
               <button
                 type="button"
                 className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-500"
-                onClick={confirmDeleteResponsavel}
+                onClick={() => void confirmDeleteResponsavel()}
               >
                 Confirmar exclusao
               </button>

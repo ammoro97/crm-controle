@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { initialLeads, initialMeetings } from "@/lib/mock-data";
+import { supabase } from "@/lib/supabase-client";
 
-export const RESPONSAVEIS_STORAGE_KEY = "crm.settings.responsaveis.v1";
-const RESPONSAVEIS_BOOTSTRAP_KEY = "crm.settings.responsaveis.bootstrapped.v1";
 const RESPONSAVEIS_EVENT = "crm:responsaveis:changed";
+const RESPONSAVEIS_TABLE = "crm_responsaveis";
 
 export type ResponsavelTipo = "vendedor" | "gestor";
 
@@ -15,6 +14,10 @@ export type ResponsavelRecord = {
   tipo: ResponsavelTipo;
   email?: string;
 };
+
+let responsaveisCache: ResponsavelRecord[] = [];
+let responsaveisLoaded = false;
+let responsaveisLoadPromise: Promise<ResponsavelRecord[]> | null = null;
 
 function normalizeNome(value: string): string {
   return value.trim();
@@ -32,165 +35,163 @@ function normalizeEmail(value?: string): string {
   return String(value || "").trim().toLowerCase();
 }
 
-function slugify(value: string): string {
-  return normalizeNome(value)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+function toRecord(raw: Record<string, unknown>): ResponsavelRecord | null {
+  const id = String(raw.id || "").trim();
+  const nome = normalizeNome(String(raw.nome || ""));
+  if (!id || !nome) return null;
+  const tipo = normalizeTipo(String(raw.tipo || ""));
+  const email = normalizeEmail(String(raw.email || ""));
+  return {
+    id,
+    nome,
+    tipo,
+    email: email || undefined,
+  };
 }
 
 function uniqueResponsaveis(records: ResponsavelRecord[]): ResponsavelRecord[] {
   const byName = new Map<string, ResponsavelRecord>();
   const usedEmails = new Set<string>();
+
   for (const item of records) {
     const nome = normalizeNome(item.nome);
     if (!nome) continue;
     const key = normalizeNomeKey(nome);
     if (byName.has(key)) continue;
+
     const normalizedEmail = normalizeEmail(item.email);
-    const safeEmail =
-      normalizedEmail && !usedEmails.has(normalizedEmail) ? normalizedEmail : undefined;
+    const safeEmail = normalizedEmail && !usedEmails.has(normalizedEmail) ? normalizedEmail : undefined;
     if (safeEmail) usedEmails.add(safeEmail);
+
     byName.set(key, {
-      id: item.id || `resp-${slugify(nome)}-${Math.random().toString(36).slice(2, 6)}`,
+      id: String(item.id || "").trim(),
       nome,
       tipo: normalizeTipo(item.tipo),
       email: safeEmail,
     });
   }
+
   return Array.from(byName.values()).sort((a, b) => a.nome.localeCompare(b.nome));
 }
 
-function getFallbackResponsaveis(): ResponsavelRecord[] {
-  const names = Array.from(
-    new Set([...initialLeads.map((lead) => lead.owner), ...initialMeetings.map((meeting) => meeting.owner)].map((name) => normalizeNome(name)).filter(Boolean)),
-  );
-  return names
-    .map((nome, index) => ({
-      id: `resp-fallback-${index + 1}-${slugify(nome)}`,
-      nome,
-      tipo: "vendedor" as const,
-    }))
-    .sort((a, b) => a.nome.localeCompare(b.nome));
-}
-
-function parseStoredResponsaveis(raw: string | null): ResponsavelRecord[] | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return null;
-
-    const mapped = parsed.map((item, index) => {
-      if (typeof item === "string") {
-        return {
-          id: `resp-migrated-${index + 1}-${slugify(item)}`,
-          nome: normalizeNome(item),
-          tipo: "vendedor" as const,
-        };
-      }
-
-      if (!item || typeof item !== "object") {
-        return {
-          id: `resp-invalid-${index + 1}`,
-          nome: "",
-          tipo: "vendedor" as const,
-        };
-      }
-
-      const record = item as Partial<ResponsavelRecord> & { name?: string };
-      const nome = normalizeNome(String(record.nome || record.name || ""));
-      return {
-        id: String(record.id || `resp-${index + 1}-${slugify(nome || `item-${index + 1}`)}`),
-      nome,
-      tipo: normalizeTipo(record.tipo),
-      email: normalizeEmail((record as { email?: string }).email),
-    };
-  });
-
-    return uniqueResponsaveis(mapped);
-  } catch {
-    return null;
+function publishResponsaveis(records: ResponsavelRecord[]) {
+  responsaveisCache = uniqueResponsaveis(records);
+  responsaveisLoaded = true;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(RESPONSAVEIS_EVENT, { detail: responsaveisCache }));
   }
 }
 
-function persistRecords(next: ResponsavelRecord[]) {
-  if (typeof window === "undefined") return;
-  const normalized = uniqueResponsaveis(next);
-  window.localStorage.setItem(RESPONSAVEIS_STORAGE_KEY, JSON.stringify(normalized));
-  window.localStorage.setItem(RESPONSAVEIS_BOOTSTRAP_KEY, "1");
-  window.dispatchEvent(new CustomEvent(RESPONSAVEIS_EVENT, { detail: normalized }));
+async function fetchResponsaveisFromSupabase(): Promise<ResponsavelRecord[]> {
+  const { data, error } = await supabase
+    .from(RESPONSAVEIS_TABLE)
+    .select("id, nome, tipo, email")
+    .order("nome", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message || "Nao foi possivel carregar responsaveis.");
+  }
+
+  const parsed = Array.isArray(data)
+    ? data.map((item) => toRecord(item as Record<string, unknown>)).filter((item): item is ResponsavelRecord => Boolean(item))
+    : [];
+
+  return uniqueResponsaveis(parsed);
+}
+
+export async function reloadResponsaveisGlobal(): Promise<ResponsavelRecord[]> {
+  const records = await fetchResponsaveisFromSupabase();
+  publishResponsaveis(records);
+  return records;
+}
+
+async function ensureResponsaveisLoaded(): Promise<ResponsavelRecord[]> {
+  if (responsaveisLoaded) return responsaveisCache;
+
+  if (!responsaveisLoadPromise) {
+    responsaveisLoadPromise = reloadResponsaveisGlobal()
+      .catch(() => {
+        publishResponsaveis([]);
+        return [];
+      })
+      .finally(() => {
+        responsaveisLoadPromise = null;
+      });
+  }
+
+  return responsaveisLoadPromise;
 }
 
 export function getResponsaveisRecordsSnapshot(): ResponsavelRecord[] {
-  if (typeof window === "undefined") return getFallbackResponsaveis();
-
-  const raw = window.localStorage.getItem(RESPONSAVEIS_STORAGE_KEY);
-  const bootstrapped = window.localStorage.getItem(RESPONSAVEIS_BOOTSTRAP_KEY) === "1";
-  const parsed = parseStoredResponsaveis(raw);
-
-  if (parsed && parsed.length > 0) return parsed;
-  if (parsed && parsed.length === 0 && bootstrapped) return [];
-  if (bootstrapped && !raw) return [];
-  return getFallbackResponsaveis();
+  return [...responsaveisCache];
 }
 
 export function getResponsaveisSnapshot(): string[] {
   return getResponsaveisRecordsSnapshot().map((item) => item.nome);
 }
 
-export function setResponsaveis(next: string[]) {
-  const normalized: ResponsavelRecord[] = next.map((nome, index) => ({
-    id: `resp-set-${index + 1}-${slugify(nome)}`,
-    nome: normalizeNome(nome),
-    tipo: "vendedor",
-    email: "",
-  }));
-  persistRecords(normalized);
+export function setResponsaveis(_next: string[]) {
+  throw new Error("setResponsaveis descontinuado. Use add/update/remove com persistencia global.");
 }
 
-export function addResponsavel(
+export async function addResponsavel(
   input: string | { nome: string; tipo?: ResponsavelTipo; email?: string },
 ) {
-  const current = getResponsaveisRecordsSnapshot();
-  const nome = typeof input === "string" ? input : input.nome;
+  const nome = typeof input === "string" ? normalizeNome(input) : normalizeNome(input.nome);
   const tipo = typeof input === "string" ? "vendedor" : normalizeTipo(input.tipo);
   const email = typeof input === "string" ? "" : normalizeEmail(input.email);
-  const next: ResponsavelRecord = {
-    id: `resp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    nome: normalizeNome(nome),
+
+  const { error } = await supabase.from(RESPONSAVEIS_TABLE).insert({
+    nome,
     tipo,
-    email,
-  };
-  persistRecords([...current, next]);
+    email: email || null,
+  });
+
+  if (error) {
+    throw new Error(error.message || "Nao foi possivel adicionar responsavel.");
+  }
+
+  await reloadResponsaveisGlobal();
 }
 
-export function updateResponsavel(
+export async function updateResponsavel(
   id: string,
   input: { nome: string; tipo: ResponsavelTipo; email?: string },
 ) {
-  const current = getResponsaveisRecordsSnapshot();
-  const next = current.map((item) =>
-    item.id === id
-      ? {
-          ...item,
-          nome: normalizeNome(input.nome),
-          tipo: normalizeTipo(input.tipo),
-          email: normalizeEmail(input.email),
-        }
-      : item,
-  );
-  persistRecords(next);
+  const { error } = await supabase
+    .from(RESPONSAVEIS_TABLE)
+    .update({
+      nome: normalizeNome(input.nome),
+      tipo: normalizeTipo(input.tipo),
+      email: normalizeEmail(input.email) || null,
+    })
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(error.message || "Nao foi possivel atualizar responsavel.");
+  }
+
+  await reloadResponsaveisGlobal();
 }
 
-export function removeResponsavel(nameOrId: string) {
-  const current = getResponsaveisRecordsSnapshot();
-  const normalized = normalizeNomeKey(nameOrId);
-  const next = current.filter(
-    (item) => item.id !== nameOrId && normalizeNomeKey(item.nome) !== normalized,
-  );
-  persistRecords(next);
+export async function removeResponsavel(nameOrId: string) {
+  const target = String(nameOrId || "").trim();
+  if (!target) return;
+
+  let query = supabase.from(RESPONSAVEIS_TABLE).delete();
+  const byId = responsaveisCache.find((item) => item.id === target);
+  if (byId) {
+    query = query.eq("id", target);
+  } else {
+    query = query.eq("nome", target);
+  }
+
+  const { error } = await query;
+  if (error) {
+    throw new Error(error.message || "Nao foi possivel excluir responsavel.");
+  }
+
+  await reloadResponsaveisGlobal();
 }
 
 export function useResponsaveis(includeTodos = false) {
@@ -198,24 +199,19 @@ export function useResponsaveis(includeTodos = false) {
 
   useEffect(() => {
     const sync = () => setResponsaveisState(getResponsaveisSnapshot());
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === RESPONSAVEIS_STORAGE_KEY) sync();
+    const bootstrap = async () => {
+      await ensureResponsaveisLoaded();
+      sync();
     };
 
-    sync();
+    void bootstrap();
     window.addEventListener(RESPONSAVEIS_EVENT, sync);
-    window.addEventListener("storage", onStorage);
-
     return () => {
       window.removeEventListener(RESPONSAVEIS_EVENT, sync);
-      window.removeEventListener("storage", onStorage);
     };
   }, []);
 
-  return useMemo(
-    () => (includeTodos ? ["Todos", ...responsaveis] : responsaveis),
-    [includeTodos, responsaveis],
-  );
+  return useMemo(() => (includeTodos ? ["Todos", ...responsaveis] : responsaveis), [includeTodos, responsaveis]);
 }
 
 export function useResponsaveisRecords() {
@@ -223,26 +219,44 @@ export function useResponsaveisRecords() {
 
   useEffect(() => {
     const sync = () => setRecords(getResponsaveisRecordsSnapshot());
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === RESPONSAVEIS_STORAGE_KEY) sync();
+    const bootstrap = async () => {
+      await ensureResponsaveisLoaded();
+      sync();
     };
 
-    sync();
+    void bootstrap();
     window.addEventListener(RESPONSAVEIS_EVENT, sync);
-    window.addEventListener("storage", onStorage);
-
     return () => {
       window.removeEventListener(RESPONSAVEIS_EVENT, sync);
-      window.removeEventListener("storage", onStorage);
     };
   }, []);
 
   return records;
 }
 
+export async function getResponsavelByEmail(email?: string | null): Promise<ResponsavelRecord | null> {
+  const normalized = normalizeEmail(email || "");
+  if (!normalized) return null;
+
+  const { data, error } = await supabase
+    .from(RESPONSAVEIS_TABLE)
+    .select("id, nome, tipo, email")
+    .eq("email", normalized)
+    .limit(1)
+    .maybeSingle();
+
+  if (!error && data) {
+    const parsed = toRecord(data as Record<string, unknown>);
+    if (parsed) return parsed;
+  }
+
+  await ensureResponsaveisLoaded();
+  return responsaveisCache.find((item) => normalizeEmail(item.email) === normalized) || null;
+}
+
 export function getResponsavelByEmailSnapshot(email?: string | null): ResponsavelRecord | null {
   const normalized = normalizeEmail(email || "");
   if (!normalized) return null;
-  const records = getResponsaveisRecordsSnapshot();
-  return records.find((item) => normalizeEmail(item.email) === normalized) || null;
+  return responsaveisCache.find((item) => normalizeEmail(item.email) === normalized) || null;
 }
+
