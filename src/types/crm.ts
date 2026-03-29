@@ -161,6 +161,8 @@ export type CallRecord = {
 
 export type CallLog = {
   id: string;
+  externalCallId?: string | null;
+  sessionId?: string | null;
   leadId?: string | null;
   nome?: string;
   empresa?: string;

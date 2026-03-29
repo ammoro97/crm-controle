@@ -6,7 +6,7 @@ import { Modal } from "@/components/ui/modal";
 import { getLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
-import { createDialSession } from "@/lib/post-call-flow";
+import { createDialSession, generateCallSessionId } from "@/lib/post-call-flow";
 import { Lead } from "@/types/crm";
 
 type LeadsTableProps = {
@@ -181,12 +181,14 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
     });
 
     try {
+      const sessionId = generateCallSessionId();
       const response = await fetch("/api/api4com/dial", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          sessionId,
           phone: phoneToDial,
           leadId: lead.id,
           nome: lead.name,
@@ -224,6 +226,7 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
       });
 
       const session = createDialSession({
+        sessionId,
         leadId: lead.id,
         nome: lead.name,
         empresa: lead.company,

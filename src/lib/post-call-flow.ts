@@ -36,12 +36,12 @@ export type PostCallResultOption =
   | "Pessoa nao conhece"
   | "Falou com cliente"
   | "Falou com secretaria"
-  | "Pediu retorno"
   | "Cliente sem interesse";
 
 export type PostCallWrapup = {
   id: string;
   sessionId: string;
+  externalCallId?: string;
   leadId?: string;
   nome?: string;
   empresa?: string;
@@ -485,7 +485,12 @@ export function getActiveCallSession() {
   return readActiveSession();
 }
 
+export function generateCallSessionId() {
+  return `SESSION-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function createDialSession(input: {
+  sessionId?: string;
   leadId?: string;
   nome?: string;
   empresa?: string;
@@ -497,7 +502,7 @@ export function createDialSession(input: {
   sourcePath?: string;
 }) {
   const session: ActiveCallSession = {
-    sessionId: `SESSION-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    sessionId: input.sessionId || generateCallSessionId(),
     leadId: input.leadId,
     nome: input.nome,
     empresa: input.empresa,

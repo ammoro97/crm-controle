@@ -41,6 +41,8 @@ function normalizeCallLog(input: Partial<CallLog> & Pick<CallLog, "id">): CallLo
   const now = new Date().toISOString();
   return {
     id: input.id,
+    externalCallId: input.externalCallId || null,
+    sessionId: input.sessionId || null,
     leadId: input.leadId ?? null,
     nome: input.nome || "",
     empresa: input.empresa || "",

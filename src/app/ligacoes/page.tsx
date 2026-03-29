@@ -106,6 +106,8 @@ type CurrentCallEvidence = {
 
 type WrapupsIndexes = {
   byCallId: Map<string, PostCallWrapup>;
+  byExternalCallId: Map<string, PostCallWrapup>;
+  bySessionId: Map<string, PostCallWrapup>;
   byPhone: Map<string, PostCallWrapup[]>;
 };
 
@@ -215,16 +217,16 @@ function normalizeFinalizacaoLabel(value: string) {
     "número inválido": "Numero invalido",
     "ligacao caiu": "Ligacao caiu",
     "ligação caiu": "Ligacao caiu",
-    "pediu retorno": "Pediu retorno",
+    "pediu retorno": "Falou com cliente",
     "deixou recado": "Falou com secretaria",
-    outro: "Pediu retorno",
+    outro: "Falou com cliente",
     falou_com_pessoa: "Falou com cliente",
     pessoa_errada: "Pessoa nao conhece",
     nao_atendeu: "Caixa postal",
     caixa_postal: "Caixa postal",
     numero_invalido: "Numero invalido",
     ligacao_caiu: "Ligacao caiu",
-    pediu_retorno: "Pediu retorno",
+    pediu_retorno: "Falou com cliente",
     deixou_recado: "Falou com secretaria",
     "cliente sem interesse": "Cliente sem interesse",
     cliente_sem_interesse: "Cliente sem interesse",
@@ -235,12 +237,20 @@ function normalizeFinalizacaoLabel(value: string) {
 
 function buildWrapupsIndexes(wrapups: PostCallWrapup[]): WrapupsIndexes {
   const byCallId = new Map<string, PostCallWrapup>();
+  const byExternalCallId = new Map<string, PostCallWrapup>();
+  const bySessionId = new Map<string, PostCallWrapup>();
   const byPhone = new Map<string, PostCallWrapup[]>();
 
   const ordered = [...wrapups].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   for (const wrapup of ordered) {
     if (wrapup.callId && !byCallId.has(wrapup.callId)) {
       byCallId.set(wrapup.callId, wrapup);
+    }
+    if (wrapup.externalCallId && !byExternalCallId.has(wrapup.externalCallId)) {
+      byExternalCallId.set(wrapup.externalCallId, wrapup);
+    }
+    if (wrapup.sessionId && !bySessionId.has(wrapup.sessionId)) {
+      bySessionId.set(wrapup.sessionId, wrapup);
     }
     const digits = normalizeDigits(wrapup.telefone);
     if (digits) {
@@ -250,7 +260,7 @@ function buildWrapupsIndexes(wrapups: PostCallWrapup[]): WrapupsIndexes {
     }
   }
 
-  return { byCallId, byPhone };
+  return { byCallId, byExternalCallId, bySessionId, byPhone };
 }
 
 function isTechnicalAnswered(status: string, durationSeconds: number) {
@@ -372,6 +382,8 @@ function mapApiCallToRow(
   const metadataEmpresa = String(metadata?.empresa ?? "").trim();
   const metadataTelefone = String(metadata?.telefone ?? "").trim();
   const metadataResponsavelId = String(metadata?.responsavelId ?? "").trim();
+  const metadataSessionId = String(metadata?.sessionId ?? "").trim();
+  const metadataExternalCallId = String(metadata?.externalCallId ?? "").trim();
 
   const internal = rawId ? context.internalById.get(rawId) : undefined;
   const leadFromId =
@@ -400,27 +412,18 @@ function mapApiCallToRow(
   const resolvedStartedAt = internal?.startedAt || startedAt;
 
   let matchedWrapup: PostCallWrapup | undefined = rawId ? context.wrapupsIndexes.byCallId.get(rawId) : undefined;
+  if (!matchedWrapup && rawId) {
+    matchedWrapup = context.wrapupsIndexes.byExternalCallId.get(rawId);
+  }
+  if (!matchedWrapup && metadataExternalCallId) {
+    matchedWrapup =
+      context.wrapupsIndexes.byExternalCallId.get(metadataExternalCallId) ||
+      context.wrapupsIndexes.byCallId.get(metadataExternalCallId);
+  }
   if (!matchedWrapup) {
-    const phoneDigits = normalizeDigits(resolvedTelefone || metadataTelefone || item.telefone || item.to || "");
-    const candidates = context.wrapupsIndexes.byPhone.get(phoneDigits) || [];
-    if (candidates.length > 0) {
-      const startedTs = Date.parse(resolvedStartedAt || "");
-      if (!Number.isNaN(startedTs)) {
-        let best: PostCallWrapup | undefined;
-        let bestDistance = Number.POSITIVE_INFINITY;
-        for (const candidate of candidates) {
-          const candidateTs = Date.parse(candidate.createdAt || "");
-          if (Number.isNaN(candidateTs)) continue;
-          const distance = Math.abs(candidateTs - startedTs);
-          if (distance <= 1000 * 60 * 120 && distance < bestDistance) {
-            best = candidate;
-            bestDistance = distance;
-          }
-        }
-        matchedWrapup = best;
-      } else {
-        matchedWrapup = candidates[0];
-      }
+    const sessionIdCandidate = metadataSessionId || internal?.sessionId || "";
+    if (sessionIdCandidate) {
+      matchedWrapup = context.wrapupsIndexes.bySessionId.get(sessionIdCandidate);
     }
   }
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
@@ -453,6 +456,43 @@ function mapApiCallToRow(
   };
 }
 
+function mapInternalCallToRow(
+  item: CallLog,
+  context: {
+    leadsIndexes: LeadsIndexes;
+    wrapupsIndexes: WrapupsIndexes;
+    responsavelById: ResponsavelByIdIndex;
+  },
+): MappedCall {
+  const linkedLead = item.leadId ? context.leadsIndexes.byId.get(item.leadId) : null;
+  let matchedWrapup: PostCallWrapup | undefined =
+    context.wrapupsIndexes.byCallId.get(item.id) ||
+    (item.externalCallId ? context.wrapupsIndexes.byExternalCallId.get(item.externalCallId) : undefined) ||
+    (item.sessionId ? context.wrapupsIndexes.bySessionId.get(item.sessionId) : undefined);
+
+  const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
+  const subfinalizacao = matchedWrapup?.nextAction?.trim() ? matchedWrapup.nextAction.trim() : "-";
+  const atendenteFromWrapupResponsavelId =
+    matchedWrapup?.responsavelId ? context.responsavelById.get(matchedWrapup.responsavelId) : undefined;
+
+  return {
+    id: item.id,
+    leadId: linkedLead?.id || item.leadId || null,
+    nome: linkedLead?.name || item.nome || "-",
+    empresa: linkedLead?.company || item.empresa || "-",
+    telefone: linkedLead?.phone || item.telefone || item.called || item.caller || "-",
+    startedAt: item.startedAt || null,
+    endedAt: item.endedAt || null,
+    durationSeconds: Number(item.durationSeconds || 0),
+    status: item.status || "Nao atendida",
+    finalizacao,
+    subfinalizacao,
+    atendente: atendenteFromWrapupResponsavelId || "Responsavel nao vinculado",
+    origem: "interna",
+    raw: {},
+  };
+}
+
 function formatTotalTime(totalSeconds: number) {
   const safe = Math.max(0, Math.floor(totalSeconds || 0));
   const hours = Math.floor(safe / 3600);
@@ -480,7 +520,7 @@ function normalizeFinalizacaoKey(value: string) {
     .trim();
 }
 
-const CPC_POSITIVE_FINALIZACOES = new Set(["falou com cliente", "pediu retorno"]);
+const CPC_POSITIVE_FINALIZACOES = new Set(["falou com cliente"]);
 const CPC_NEGATIVE_FINALIZACOES = new Set(["cliente sem interesse"]);
 const IMPRODUTIVE_FINALIZACOES = new Set([
   "nao atendeu",
@@ -495,7 +535,6 @@ function finalizacaoBarColor(label: string) {
   const normalized = normalizeFinalizacaoKey(label);
   if (normalized === "outros") return "bg-fuchsia-400";
   if (normalized.includes("falou com cliente")) return "bg-emerald-400";
-  if (normalized.includes("pediu retorno")) return "bg-sky-400";
   if (normalized.includes("caixa postal")) return "bg-amber-400";
   if (normalized.includes("ligacao caiu")) return "bg-violet-400";
   if (normalized.includes("numero invalido")) return "bg-rose-400";
@@ -574,12 +613,6 @@ export default function LigacoesPage() {
       const externalData = (await externalResponse.json()) as CallsApiResponse;
       const internalData = (await internalResponse.json()) as InternalCallsApiResponse;
 
-      if (!externalResponse.ok || !externalData.ok) {
-        setError(externalData.error || "Nao foi possivel carregar ligacoes.");
-        setCalls([]);
-        return;
-      }
-
       const internalMap = new Map<string, CallLog>();
       if (internalResponse.ok && internalData.success && Array.isArray(internalData.calls)) {
         for (const item of internalData.calls) {
@@ -590,9 +623,23 @@ export default function LigacoesPage() {
 
       const leadsIndexes = buildLeadsIndexes(leadsSnapshot);
       const wrapupsIndexes = buildWrapupsIndexes(wrapups);
-      const rows = (Array.isArray(externalData.items) ? externalData.items : []).map((item, index) =>
-        mapApiCallToRow(item, index, { leadsIndexes, internalById: internalMap, wrapupsIndexes, responsavelById }),
-      );
+      const externalItems = externalResponse.ok && externalData.ok && Array.isArray(externalData.items) ? externalData.items : [];
+
+      const rows =
+        externalItems.length > 0
+          ? externalItems.map((item, index) =>
+              mapApiCallToRow(item, index, { leadsIndexes, internalById: internalMap, wrapupsIndexes, responsavelById }),
+            )
+          : Array.from(internalMap.values()).map((item) =>
+              mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),
+            );
+
+      if (!externalResponse.ok || !externalData.ok) {
+        setError(externalData.error || "Historico externo indisponivel. Exibindo ligacoes internas.");
+      } else {
+        setError(null);
+      }
+
       rows.sort((a, b) => {
         const first = a.startedAt || "";
         const second = b.startedAt || "";
@@ -1184,6 +1231,7 @@ export default function LigacoesPage() {
 
       savePostCallWrapup({
         sessionId: activeSession.sessionId,
+        externalCallId: activeSession.externalCallId,
         leadId: activeSession.leadId,
         nome: activeSession.nome,
         empresa: activeSession.empresa,

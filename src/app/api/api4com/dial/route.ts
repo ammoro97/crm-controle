@@ -4,6 +4,7 @@ import { getApi4ComConfig } from "@/lib/api4com-config-store";
 type DialRequestBody = {
   phone?: string;
   leadId?: string;
+  sessionId?: string;
   nome?: string;
   name?: string;
   empresa?: string;
@@ -58,6 +59,7 @@ export async function POST(request: Request) {
     const rawPhone = (body.phone || "").trim();
     const normalizedPhone = normalizePhone(rawPhone);
     const leadId = (body.leadId || "").trim();
+    const sessionId = (body.sessionId || "").trim();
     const nome = (body.nome || body.name || "").trim();
     const empresa = (body.empresa || body.company || "").trim();
     const userId = (body.userId || "").trim();
@@ -75,6 +77,7 @@ export async function POST(request: Request) {
             phone: rawPhone,
             normalizedPhone,
             leadId,
+            sessionId,
             nome,
           },
         },
@@ -98,6 +101,7 @@ export async function POST(request: Request) {
       phone: normalizedPhone,
       metadata: {
         gateway: gateway || "",
+        sessionId,
         leadId,
         nome,
         empresa,

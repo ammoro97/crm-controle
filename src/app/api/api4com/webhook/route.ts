@@ -80,6 +80,7 @@ export async function POST(request: Request) {
 
     const metadata = payload.metadata || {};
     const metaLeadId = String(metadata.leadId || "").trim() || null;
+    const metaSessionId = String(metadata.sessionId || "").trim() || null;
     const metaNome = String(metadata.nome || "").trim();
     const metaEmpresa = String(metadata.empresa || "").trim();
     const metaGateway = String(metadata.gateway || "").trim() || null;
@@ -101,6 +102,7 @@ export async function POST(request: Request) {
       hangupCauseCode,
       recordUrl,
       metaLeadId,
+      metaSessionId,
       metaNome,
       metaEmpresa,
       metaGateway,
@@ -139,6 +141,8 @@ export async function POST(request: Request) {
 
     const { record } = await upsertCallLog({
       id: callId,
+      externalCallId: callId,
+      sessionId: metaSessionId,
       leadId,
       nome,
       empresa,
@@ -196,11 +200,12 @@ export async function POST(request: Request) {
     console.error("[API4COM][WEBHOOK] Erro ao processar webhook:", error);
     return NextResponse.json(
       {
-        success: true,
+        success: false,
         received: false,
         message: "Webhook recebido com falhas de processamento.",
+        detail: error instanceof Error ? error.message : "Erro desconhecido",
       },
-      { status: 200 },
+      { status: 500 },
     );
   }
 }
