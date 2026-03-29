@@ -189,10 +189,12 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
           ? "Existe uma ligacao encerrada aguardando finalizacao obrigatoria. Finalize antes de iniciar outra."
           : "Existe uma ligacao em andamento. Conclua essa chamada antes de iniciar outra.";
       setCallFeedback(lead.id, { type: "error", message: blockingMessage });
-      console.log("[POSTCALL_DEBUG] NEW CALL BLOCKED", {
+      console.log("[POSTCALL_DEBUG] NEW_CALL_BLOCKED", {
         leadId: lead.id,
         reason: blocking.reason,
         blockingSessionId: blocking.session.sessionId,
+        blockingExternalCallId: blocking.session.externalCallId || null,
+        blockingCallId: blocking.session.matchedCallId || null,
         blockingStatus: blocking.session.status,
       });
       if (typeof window !== "undefined" && blocking.reason === "pending_wrapup") {
@@ -200,8 +202,11 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
       }
       return;
     }
-    console.log("[POSTCALL_DEBUG] NEW CALL ALLOWED", {
+    console.log("[POSTCALL_DEBUG] NEW_CALL_ALLOWED", {
       leadId: lead.id,
+      sessionId: null,
+      externalCallId: null,
+      callId: null,
     });
 
     const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);

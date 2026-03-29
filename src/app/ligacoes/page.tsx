@@ -272,7 +272,20 @@ function getUniqueWrapup(index: Map<string, PostCallWrapup[]>, key?: string | nu
   const normalized = String(key || "").trim();
   if (!normalized) return undefined;
   const matches = index.get(normalized) || [];
-  if (matches.length !== 1) return undefined;
+  if (matches.length === 0) return undefined;
+  if (matches.length > 1) {
+    console.warn(`${LIGACOES_DEBUG_PREFIX} WRAPUP_DUPLICATE_KEY`, {
+      key: normalized,
+      candidates: matches.map((item) => ({
+        wrapupId: item.id,
+        sessionId: item.sessionId,
+        externalCallId: item.externalCallId || null,
+        callId: item.callId || null,
+        createdAt: item.createdAt,
+      })),
+      selectedWrapupId: matches[0].id,
+    });
+  }
   return matches[0];
 }
 
@@ -519,12 +532,13 @@ function mapApiCallToRow(
   }
 
   if (matchedWrapup) {
-    console.log("[POSTCALL_DEBUG][LIGACOES] Finalizacao correlacionada", {
+    console.log(`${LIGACOES_DEBUG_PREFIX} TABLE_ROW_MATCH`, {
       tableCallId: rawId || internal?.id || null,
       sessionIdCandidate: sessionIdCandidate || null,
       metadataExternalCallId: metadataExternalCallId || null,
       wrapupId: matchedWrapup.id,
       wrapupCallId: matchedWrapup.callId || null,
+      wrapupSessionId: matchedWrapup.sessionId,
       source: matchSource,
     });
   }
@@ -574,6 +588,18 @@ function mapInternalCallToRow(
     (item.sessionId ? getUniqueWrapup(context.wrapupsIndexes.bySessionId, item.sessionId) : undefined) ||
     (item.externalCallId ? getUniqueWrapup(context.wrapupsIndexes.byExternalCallId, item.externalCallId) : undefined) ||
     getUniqueWrapup(context.wrapupsIndexes.byCallId, item.id);
+
+  if (matchedWrapup) {
+    console.log(`${LIGACOES_DEBUG_PREFIX} TABLE_ROW_MATCH`, {
+      tableCallId: item.id,
+      sessionIdCandidate: item.sessionId || null,
+      metadataExternalCallId: item.externalCallId || null,
+      wrapupId: matchedWrapup.id,
+      wrapupCallId: matchedWrapup.callId || null,
+      wrapupSessionId: matchedWrapup.sessionId,
+      source: "internal-call-map",
+    });
+  }
 
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
   const subfinalizacao = matchedWrapup?.nextAction?.trim() ? matchedWrapup.nextAction.trim() : "-";
@@ -914,9 +940,11 @@ export default function LigacoesPage() {
         const detection = await detectCallEnd(session, controller.signal);
         if (!detection.matched || !detection.detectionSource) return;
         if (unmounted) return;
-        console.log(`${LIGACOES_DEBUG_PREFIX} CALL ENDED DETECTED`, {
+        console.log(`${LIGACOES_DEBUG_PREFIX} CALL_ENDED_DETECTED`, {
           sessionId: session.sessionId,
+          externalCallId: session.externalCallId || null,
           callId: detection.callId || null,
+          leadId: session.leadId || null,
           source: detection.detectionSource,
         });
         markCallSessionEnded({
@@ -952,31 +980,35 @@ export default function LigacoesPage() {
       const draft = readWrapupDraft(activeSession.sessionId);
       setPostCallForm(draft || createDefaultPostCallForm());
       restoredFromQueryRef.current = false;
-      console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP SESSION CREATED`, {
+      console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP_SESSION_CREATED`, {
         sessionId: activeSession.sessionId,
         externalCallId: activeSession.externalCallId || null,
         callId: activeSession.matchedCallId || null,
+        leadId: activeSession.leadId || null,
         status: activeSession.status,
       });
     }
 
     const shouldForceRestore = shouldRestoreWrapupByQuery && !restoredFromQueryRef.current;
-    const canOpenAutomatically = activeSession.wrapupState !== "minimized" || shouldForceRestore;
+    const canOpenAutomatically = activeSession.wrapupState === "opened" || shouldForceRestore;
     if (!canOpenAutomatically || wrapupOpen) return;
 
     if (shouldForceRestore) {
       restoredFromQueryRef.current = true;
       setWrapupSessionState(activeSession.sessionId, "opened");
-      console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP MODAL RESTORED`, {
+      console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP_MODAL_RESTORED`, {
         sessionId: activeSession.sessionId,
         externalCallId: activeSession.externalCallId || null,
         callId: activeSession.matchedCallId || null,
+        leadId: activeSession.leadId || null,
       });
     }
 
-    console.log(`${LIGACOES_DEBUG_PREFIX} FINALIZATION REQUIRED`, {
+    console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP_PENDING_SET`, {
       sessionId: activeSession.sessionId,
+      externalCallId: activeSession.externalCallId || null,
       callId: activeSession.matchedCallId || null,
+      leadId: activeSession.leadId || null,
       source: activeSession.detectionSource || null,
       status: activeSession.status,
       wrapupState: activeSession.wrapupState,
@@ -989,10 +1021,11 @@ export default function LigacoesPage() {
     if (!activeSession.promptedAt) {
       markSessionPrompted(activeSession.sessionId);
     }
-    console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP MODAL OPENED`, {
+    console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP_MODAL_OPEN`, {
       sessionId: activeSession.sessionId,
       externalCallId: activeSession.externalCallId || null,
       callId: activeSession.matchedCallId || null,
+      leadId: activeSession.leadId || null,
       status: activeSession.status,
     });
   }, [activeSession, shouldRestoreWrapupByQuery, wrapupOpen]);
@@ -1049,6 +1082,11 @@ export default function LigacoesPage() {
     setSelectedIds((prev) => prev.filter((id) => currentIds.has(id)));
   }, [filteredCalls, selectedIds.length]);
 
+  useEffect(() => {
+    if (!initialLoadDoneRef.current) return;
+    void loadCallsWithRetry("wrapups-changed", 1);
+  }, [wrapups]);
+
   const allFilteredSelected = filteredCalls.length > 0 && filteredCalls.every((call) => selectedIds.includes(call.id));
 
   const toggleSelectAllFiltered = () => {
@@ -1090,13 +1128,15 @@ export default function LigacoesPage() {
       setWrapupError(null);
       return;
     }
-    setWrapupSessionState(activeSession.sessionId, "minimized");
+    const nextWrapupState = activeSession.status === "ended_detected" ? "pending" : "minimized";
+    setWrapupSessionState(activeSession.sessionId, nextWrapupState);
     setWrapupOpen(false);
     setWrapupError(null);
-    console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP MODAL MINIMIZED`, {
+    console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP_MODAL_MINIMIZED`, {
       sessionId: activeSession.sessionId,
       externalCallId: activeSession.externalCallId || null,
       callId: activeSession.matchedCallId || null,
+      leadId: activeSession.leadId || null,
       status: activeSession.status,
     });
   };
@@ -1106,10 +1146,11 @@ export default function LigacoesPage() {
     setWrapupSessionState(activeSession.sessionId, "opened");
     setWrapupOpen(true);
     setWrapupError(null);
-    console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP MODAL RESTORED`, {
+    console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP_MODAL_RESTORED`, {
       sessionId: activeSession.sessionId,
       externalCallId: activeSession.externalCallId || null,
       callId: activeSession.matchedCallId || null,
+      leadId: activeSession.leadId || null,
       status: activeSession.status,
     });
   };
@@ -1569,9 +1610,11 @@ export default function LigacoesPage() {
       console.log("[POSTCALL_DEBUG] Wrapup salvo e sessao marcada como wrapped", {
         sessionId: activeSession.sessionId,
       });
-      console.log(`${LIGACOES_DEBUG_PREFIX} FINALIZATION SAVED`, {
+      console.log(`${LIGACOES_DEBUG_PREFIX} FINALIZATION_SAVED`, {
         sessionId: activeSession.sessionId,
+        externalCallId: activeSession.externalCallId || null,
         callId: activeSession.matchedCallId || null,
+        leadId: activeSession.leadId || null,
         result: postCallForm.result,
         nextAction: postCallForm.nextAction || null,
       });

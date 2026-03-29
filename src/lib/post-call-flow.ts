@@ -171,7 +171,16 @@ function writeActiveSession(next: ActiveCallSession | null) {
   if (!next) {
     window.localStorage.removeItem(ACTIVE_CALL_SESSION_KEY);
   } else {
-    window.localStorage.setItem(ACTIVE_CALL_SESSION_KEY, JSON.stringify(normalizeActiveSessionRecord(next)));
+    const normalized = normalizeActiveSessionRecord(next);
+    window.localStorage.setItem(ACTIVE_CALL_SESSION_KEY, JSON.stringify(normalized));
+    debugLog("ACTIVE_CALL_SET", {
+      sessionId: normalized.sessionId,
+      externalCallId: normalized.externalCallId || null,
+      callId: normalized.matchedCallId || null,
+      leadId: normalized.leadId || null,
+      status: normalized.status,
+      wrapupState: normalized.wrapupState,
+    });
   }
   emitFlowChanged();
   debugLog("Sessao ativa atualizada", next);
@@ -531,8 +540,11 @@ export function clearActiveCallSession(input?: { expectedSessionId?: string; rea
     return false;
   }
   writeActiveSession(null);
-  debugLog("ACTIVE CALL CLEARED", {
+  debugLog("ACTIVE_CALL_CLEARED", {
     sessionId: current.sessionId,
+    externalCallId: current.externalCallId || null,
+    callId: current.matchedCallId || null,
+    leadId: current.leadId || null,
     previousStatus: current.status,
     reason: input?.reason || "manual",
   });
@@ -552,24 +564,27 @@ export function setWrapupSessionState(sessionId: string, wrapupState: WrapupSess
   writeActiveSession(updated);
 
   if (wrapupState === "minimized") {
-    debugLog("WRAPUP MODAL MINIMIZED", {
+    debugLog("WRAPUP_MODAL_MINIMIZED", {
       sessionId,
       externalCallId: current.externalCallId || null,
       callId: current.matchedCallId || null,
+      leadId: current.leadId || null,
       status: current.status,
     });
   } else if (wrapupState === "opened") {
-    debugLog("WRAPUP MODAL RESTORED", {
+    debugLog("WRAPUP_MODAL_RESTORED", {
       sessionId,
       externalCallId: current.externalCallId || null,
       callId: current.matchedCallId || null,
+      leadId: current.leadId || null,
       status: current.status,
     });
   } else if (wrapupState === "pending") {
-    debugLog("WRAPUP PENDING SET", {
+    debugLog("WRAPUP_PENDING_SET", {
       sessionId,
       externalCallId: current.externalCallId || null,
       callId: current.matchedCallId || null,
+      leadId: current.leadId || null,
       status: current.status,
     });
   }
@@ -584,16 +599,29 @@ export async function resolveBlockingStateBeforeNewDial(signal?: AbortSignal): P
 }> {
   const current = getBlockingCallSessionForNewDial();
   if (!current) {
-    debugLog("NEW CALL ALLOWED", { reason: "no_blocking_session" });
+    debugLog("NEW_CALL_ALLOWED", { reason: "no_blocking_session" });
     return { blocked: false, session: null };
   }
 
-  if (current.status === "ended_detected") {
-    debugLog("NEW CALL BLOCKED", {
+  if (current.wrapupState === "pending") {
+    debugLog("NEW_CALL_BLOCKED", {
       reason: "pending_wrapup",
       sessionId: current.sessionId,
       externalCallId: current.externalCallId || null,
       callId: current.matchedCallId || null,
+      leadId: current.leadId || null,
+      sessionStatus: current.status,
+    });
+    return { blocked: true, reason: "pending_wrapup", session: current };
+  }
+
+  if (current.status === "ended_detected") {
+    debugLog("NEW_CALL_BLOCKED", {
+      reason: "pending_wrapup",
+      sessionId: current.sessionId,
+      externalCallId: current.externalCallId || null,
+      callId: current.matchedCallId || null,
+      leadId: current.leadId || null,
       sessionStatus: current.status,
     });
     return { blocked: true, reason: "pending_wrapup", session: current };
@@ -611,15 +639,23 @@ export async function resolveBlockingStateBeforeNewDial(signal?: AbortSignal): P
       callId: detection.callId || null,
       source: detection.detectionSource,
     });
-    debugLog("NEW CALL BLOCKED", { reason: "pending_wrapup", sessionId: current.sessionId });
+    debugLog("NEW_CALL_BLOCKED", {
+      reason: "pending_wrapup",
+      sessionId: current.sessionId,
+      externalCallId: current.externalCallId || null,
+      callId: detection.callId || current.matchedCallId || null,
+      leadId: current.leadId || null,
+      sessionStatus: "ended_detected",
+    });
     return { blocked: true, reason: "pending_wrapup", session: updated || current };
   }
 
-  debugLog("NEW CALL BLOCKED", {
+  debugLog("NEW_CALL_BLOCKED", {
     reason: "active_call",
     sessionId: current.sessionId,
     externalCallId: current.externalCallId || null,
     callId: current.matchedCallId || null,
+    leadId: current.leadId || null,
     sessionStatus: current.status,
   });
   return { blocked: true, reason: "active_call", session: current };
@@ -657,17 +693,19 @@ export function createDialSession(input: {
     wrapupState: "opened",
   };
   writeActiveSession(session);
-  debugLog("CALL STARTED", {
+  debugLog("CALL_START", {
     sessionId: session.sessionId,
     externalCallId: session.externalCallId || null,
+    callId: session.matchedCallId || null,
     leadId: session.leadId || null,
     telefone: session.telefone,
     status: session.status,
   });
-  debugLog("WRAPUP SESSION CREATED", {
+  debugLog("WRAPUP_SESSION_CREATED", {
     sessionId: session.sessionId,
     externalCallId: session.externalCallId || null,
     callId: session.matchedCallId || null,
+    leadId: session.leadId || null,
     wrapupState: session.wrapupState,
   });
   debugLog("Sessao de discagem criada", {
@@ -709,9 +747,12 @@ export function markCallSessionEnded(input: {
     detectionSource: input.detectionSource,
   };
   writeActiveSession(updated);
-  debugLog("CALL ENDED DETECTED", {
+  debugLog("CALL_ENDED_DETECTED", {
     sessionId: input.sessionId,
+    externalCallId: updated.externalCallId || null,
     callId: input.callId || null,
+    leadId: updated.leadId || null,
+    wrapupState: updated.wrapupState,
     source: input.detectionSource,
   });
   debugLog("Sessao marcada como encerrada", {
@@ -731,7 +772,12 @@ export function markCallSessionWrapped(sessionId: string) {
     wrapupState: "opened",
   };
   writeActiveSession(updated);
-  debugLog("FINALIZATION SAVED", { sessionId });
+  debugLog("FINALIZATION_SAVED", {
+    sessionId,
+    externalCallId: updated.externalCallId || null,
+    callId: updated.matchedCallId || null,
+    leadId: updated.leadId || null,
+  });
   debugLog("Sessao marcada como finalizada (wrap concluido)", { sessionId });
   return updated;
 }
@@ -740,19 +786,43 @@ export function savePostCallWrapup(
   input: Omit<PostCallWrapup, "id" | "createdAt" | "updatedAt">,
 ): PostCallWrapup {
   const now = new Date().toISOString();
+  const current = readWrapups();
+  const existingIndex = current.findIndex((item) => item.sessionId === input.sessionId);
+  if (existingIndex >= 0) {
+    const previous = current[existingIndex];
+    const updated: PostCallWrapup = {
+      ...previous,
+      ...input,
+      id: previous.id,
+      createdAt: previous.createdAt,
+      updatedAt: now,
+    };
+    const next = [...current];
+    next[existingIndex] = updated;
+    writeWrapups(next);
+    debugLog("Wrapup de pos-ligacao atualizado (idempotencia por sessionId)", {
+      wrapupId: updated.id,
+      sessionId: updated.sessionId,
+      externalCallId: updated.externalCallId || null,
+      callId: updated.callId || null,
+      conciliationStatus: updated.conciliationStatus,
+    });
+    return updated;
+  }
+
   const wrapup: PostCallWrapup = {
     ...input,
     id: `WRAP-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: now,
     updatedAt: now,
   };
-  const current = readWrapups();
   writeWrapups([wrapup, ...current]);
   debugLog("Wrapup de pos-ligacao salvo", {
     wrapupId: wrapup.id,
     sessionId: wrapup.sessionId,
-    conciliationStatus: wrapup.conciliationStatus,
+    externalCallId: wrapup.externalCallId || null,
     callId: wrapup.callId || null,
+    conciliationStatus: wrapup.conciliationStatus,
   });
   return wrapup;
 }

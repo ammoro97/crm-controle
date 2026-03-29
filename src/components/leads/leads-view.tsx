@@ -1,12 +1,10 @@
 "use client";
 
 import { ChangeEvent, DragEvent, FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
 import { PageTopbar } from "@/components/layout/page-topbar";
 import { Modal } from "@/components/ui/modal";
 import { getLeadsSnapshot, setLeadsSnapshot } from "@/lib/crm-data-store";
 import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
-import { detectCallEnd, getActiveCallSession, markCallSessionEnded } from "@/lib/post-call-flow";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { Lead, LeadChannel, LeadHistoryEvent, LeadStatus } from "@/types/crm";
 import { LeadDetailDrawer } from "./lead-detail-drawer";
@@ -268,12 +266,8 @@ function buildRowIdentity(row: Pick<ImportedLeadRow, "email" | "phone">): string
 }
 
 export function LeadsView({ title, filter }: LeadsViewProps) {
-  const router = useRouter();
-  const pathname = usePathname();
   const responsaveis = useResponsaveis();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const checkingCallEndRef = useRef(false);
-  const redirectedForSessionRef = useRef<string | null>(null);
 
   const [leads, setLeads] = useState<Lead[]>(() => getLeadsSnapshot().map(normalizeLead));
   const [draftLead, setDraftLead] = useState<Lead | null>(null);
@@ -325,78 +319,6 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     void syncLeadLastContact();
     return () => controller.abort();
   }, []);
-
-  useEffect(() => {
-    let unmounted = false;
-
-    const checkCallEnd = async () => {
-      if (checkingCallEndRef.current) return;
-
-      const session = getActiveCallSession();
-      if (!session || session.status !== "dialing") return;
-      if (!pathname.startsWith("/leads")) return;
-
-      console.log("[POSTCALL_DEBUG] Polling de fim de chamada iniciado/rodando", {
-        sessionId: session.sessionId,
-        pathname,
-        intervalMs: 4000,
-        status: session.status,
-        startedAt: session.startedAt,
-      });
-
-      checkingCallEndRef.current = true;
-      const controller = new AbortController();
-
-      try {
-        const detection = await detectCallEnd(session, controller.signal);
-        if (!detection.matched || !detection.detectionSource) {
-          console.log("[POSTCALL_DEBUG] Polling: chamada ainda sem encerramento detectado", {
-            sessionId: session.sessionId,
-          });
-          return;
-        }
-        if (unmounted) return;
-
-        console.log("[POSTCALL_DEBUG] Polling: fim de chamada detectado", {
-          sessionId: session.sessionId,
-          callId: detection.callId,
-          source: detection.detectionSource,
-        });
-
-        const updatedSession = markCallSessionEnded({
-          sessionId: session.sessionId,
-          callId: detection.callId,
-          detectionSource: detection.detectionSource,
-        });
-        if (!updatedSession) return;
-        if (redirectedForSessionRef.current === updatedSession.sessionId) {
-          console.log("[POSTCALL_DEBUG] Navegacao bloqueada: sessao ja redirecionada", {
-            sessionId: updatedSession.sessionId,
-          });
-          return;
-        }
-
-        redirectedForSessionRef.current = updatedSession.sessionId;
-        console.log("[POSTCALL_DEBUG] Tentando navegar para /ligacoes?postCall=1", {
-          sessionId: updatedSession.sessionId,
-        });
-        router.push("/ligacoes?postCall=1");
-        console.log("[POSTCALL_DEBUG] router.push executado");
-      } finally {
-        checkingCallEndRef.current = false;
-      }
-    };
-
-    void checkCallEnd();
-    const intervalId = window.setInterval(() => {
-      void checkCallEnd();
-    }, 1500);
-
-    return () => {
-      unmounted = true;
-      window.clearInterval(intervalId);
-    };
-  }, [pathname, router]);
 
   const visibleLeads = useMemo(() => {
     const base = filter === "all" ? leads : leads.filter((lead) => lead.channel === filter);
