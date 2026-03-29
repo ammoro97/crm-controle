@@ -469,6 +469,47 @@ function formatTotalTime(totalSeconds: number) {
   return `${seconds}s`;
 }
 
+function formatAverageTime(totalSeconds: number, count: number) {
+  if (count <= 0) return "0s";
+  const avg = Math.floor(totalSeconds / count);
+  const minutes = Math.floor(avg / 60);
+  const seconds = avg % 60;
+  if (minutes <= 0) return `${seconds}s`;
+  return `${minutes}m${seconds.toString().padStart(2, "0")}s`;
+}
+
+function normalizeFinalizacaoKey(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function classifyFinalizacao(value: string): "positivo" | "negativo" | "neutro" {
+  const normalized = normalizeFinalizacaoKey(value);
+  if (!normalized || normalized === "-") return "neutro";
+
+  const positiveTokens = ["falou com cliente", "avancou negociacao", "pediu proposta", "proposta"];
+  if (positiveTokens.some((token) => normalized.includes(token))) return "positivo";
+
+  const negativeTokens = ["sem interesse", "recusou", "numero invalido", "pessoa nao conhece"];
+  if (negativeTokens.some((token) => normalized.includes(token))) return "negativo";
+
+  return "neutro";
+}
+
+function finalizacaoBarColor(label: string) {
+  const normalized = normalizeFinalizacaoKey(label);
+  if (normalized.includes("falou com cliente")) return "bg-emerald-400";
+  if (normalized.includes("pediu retorno")) return "bg-sky-400";
+  if (normalized.includes("caixa postal")) return "bg-amber-400";
+  if (normalized.includes("ligacao caiu")) return "bg-violet-400";
+  if (normalized.includes("numero invalido")) return "bg-rose-400";
+  if (normalized.includes("cliente sem interesse")) return "bg-red-400";
+  return "bg-slate-400";
+}
+
 function normalizeMeetingPersonName(value?: string) {
   return String(value || "").trim().toLowerCase();
 }
@@ -744,6 +785,7 @@ export default function LigacoesPage() {
       todayCalls,
       answered,
       missed,
+      totalAnsweredSeconds,
       totalTime: formatTotalTime(totalAnsweredSeconds),
     };
   }, [filteredCalls]);
@@ -753,6 +795,34 @@ export default function LigacoesPage() {
     if (total <= 0) return 0;
     return Math.round((summary.answered / total) * 100);
   }, [filteredCalls.length, summary.answered]);
+
+  const tmaValue = useMemo(
+    () => formatAverageTime(summary.totalAnsweredSeconds, summary.answered),
+    [summary.answered, summary.totalAnsweredSeconds],
+  );
+
+  const cpc = useMemo(() => {
+    const productive = filteredCalls.filter((call) => classifyFinalizacao(call.finalizacao) === "positivo").length;
+    const total = filteredCalls.length;
+    const rate = total > 0 ? Math.round((productive / total) * 100) : 0;
+    return { productive, total, rate };
+  }, [filteredCalls]);
+
+  const finalizacaoChart = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const call of filteredCalls) {
+      const label = call.finalizacao && call.finalizacao !== "-" ? call.finalizacao : "Sem finalizacao";
+      counts.set(label, (counts.get(label) || 0) + 1);
+    }
+    const total = filteredCalls.length;
+    return Array.from(counts.entries())
+      .map(([label, count]) => ({
+        label,
+        count,
+        percent: total > 0 ? Math.round((count / total) * 100) : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [filteredCalls]);
 
   const applyWrapupToLead = (
     session: ActiveCallSession,
@@ -1107,46 +1177,70 @@ export default function LigacoesPage() {
               <p className="mt-2 text-4xl font-semibold leading-none text-slate-100">{summary.todayCalls}</p>
               <p className="mt-2 text-xs text-sky-100/80">Volume total de chamadas do dia</p>
             </div>
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 text-sm text-sky-100">?</span>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 text-sm text-sky-100">☎</span>
           </div>
         </article>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <article className="panel border-emerald-500/40 bg-emerald-500/10 p-4">
+        <div className="grid gap-3 lg:grid-cols-[1.35fr_1fr_1fr]">
+          <article className="panel border-emerald-500/40 bg-emerald-500/10 p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-emerald-200">Ligacoes Atendidas</p>
-                <p className="mt-2 text-3xl font-semibold leading-none text-emerald-100">{summary.answered}</p>
+                <p className="text-xs uppercase tracking-[0.12em] text-emerald-200">Taxa de Atendimento</p>
+                <p className="mt-2 text-4xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
                 <p className="mt-2 text-xs text-emerald-200/90">
-                  Taxa de atendimento: {summary.answered} de {filteredCalls.length} ({atendimentoRate}%)
+                  {summary.answered} atendidas de {filteredCalls.length} ligacoes
                 </p>
               </div>
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/20 text-sm text-emerald-100">?</span>
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/20 text-sm text-emerald-100">✓</span>
             </div>
           </article>
 
-          <article className="panel border-amber-500/40 bg-amber-500/10 p-4">
+          <article className="panel border-blue-500/40 bg-blue-500/10 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-amber-200">Ligacoes Nao Atendidas</p>
-                <p className="mt-2 text-3xl font-semibold leading-none text-amber-100">{summary.missed}</p>
-                <p className="mt-2 text-xs text-amber-200/90">Chamadas sem atendimento efetivo</p>
+                <p className="text-xs uppercase tracking-[0.12em] text-blue-200">TMA</p>
+                <p className="mt-2 text-3xl font-semibold leading-none text-blue-100">{tmaValue}</p>
+                <p className="mt-2 text-xs text-blue-200/90">Tempo medio de atendimento</p>
               </div>
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-amber-500/20 text-sm text-amber-100">?</span>
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-500/20 text-sm text-blue-100">⏱</span>
             </div>
           </article>
 
-          <article className="panel border-slate-500/40 bg-slate-800/60 p-4">
+          <article className="panel border-violet-500/40 bg-violet-500/10 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-slate-300">Tempo Total em Chamadas</p>
-                <p className="mt-2 text-3xl font-semibold leading-none text-slate-100">{summary.totalTime}</p>
-                <p className="mt-2 text-xs text-slate-400">Soma de duracao das chamadas atendidas</p>
+                <p className="text-xs uppercase tracking-[0.12em] text-violet-200">CPC</p>
+                <p className="mt-2 text-3xl font-semibold leading-none text-violet-100">{cpc.productive}</p>
+                <p className="mt-2 text-xs text-violet-200/90">Contatos produtivos ({cpc.rate}%)</p>
               </div>
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-sm text-slate-200">?</span>
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-500/20 text-sm text-violet-100">✦</span>
             </div>
           </article>
         </div>
+
+        <article className="panel p-5">
+          <div>
+            <p className="text-xs uppercase tracking-[0.12em] text-slate-300">Grafico de Finalizacoes</p>
+            <p className="mt-1 text-xs text-slate-500">Distribuicao percentual por tipo de finalizacao</p>
+          </div>
+          <div className="mt-4 space-y-2">
+            {finalizacaoChart.length === 0 ? (
+              <p className="text-sm text-slate-500">Sem dados para exibir.</p>
+            ) : (
+              finalizacaoChart.map((item) => (
+                <div key={item.label} className="space-y-1">
+                  <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
+                    <span>{item.label}</span>
+                    <span>{item.percent}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded bg-slate-800">
+                    <div className={`h-full ${finalizacaoBarColor(item.label)}`} style={{ width: `${item.percent}%` }} />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </article>
       </div>
 
       <div className="panel overflow-hidden">
