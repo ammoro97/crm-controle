@@ -21,6 +21,33 @@ function normalizePhone(input: string) {
   return `+${withCountry}`;
 }
 
+function extractApi4ComCallId(payload: unknown): string | null {
+  const read = (value: unknown): string | null => {
+    if (!value || typeof value !== "object") return null;
+    const source = value as Record<string, unknown>;
+    const direct = String(
+      source.externalCallId || source.id || source.call_id || source.callId || source.uniqueid || "",
+    ).trim();
+    return direct || null;
+  };
+
+  const walk = (value: unknown, depth: number): string | null => {
+    if (depth > 5) return null;
+    const direct = read(value);
+    if (direct) return direct;
+    if (!value || typeof value !== "object") return null;
+    const source = value as Record<string, unknown>;
+    for (const nested of Object.values(source)) {
+      if (!nested || typeof nested !== "object") continue;
+      const found = walk(nested, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  return walk(payload, 0);
+}
+
 export async function POST(request: Request) {
   console.log("[API4COM][DIAL] Inicio da rota de discagem");
 
@@ -134,6 +161,8 @@ export async function POST(request: Request) {
 
     console.log("[API4COM][DIAL] Status API4COM:", response.status);
     console.log("[API4COM][DIAL] Body API4COM:", responseBody);
+    const externalCallId = extractApi4ComCallId(responseBody);
+    console.log("[API4COM][DIAL] CallId extraido:", externalCallId);
 
     if (response.status !== 200) {
       const apiMessage =
@@ -156,6 +185,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       message: "Ligacao disparada com sucesso.",
+      externalCallId,
       data: responseBody,
     });
   } catch (error) {

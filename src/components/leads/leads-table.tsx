@@ -19,6 +19,7 @@ type DialApiResponse = {
   success?: boolean;
   message?: string;
   error?: string;
+  externalCallId?: string | null;
   data?: unknown;
 };
 
@@ -62,15 +63,32 @@ function formatDateBR(value?: string): string {
 }
 
 function extractDialCallId(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== "object") return undefined;
-  const source = payload as Record<string, unknown>;
-  const direct = String(source.id || source.call_id || source.callId || source.uniqueid || "").trim();
-  if (direct) return direct;
+  const tryReadId = (value: unknown): string | undefined => {
+    if (!value || typeof value !== "object") return undefined;
+    const source = value as Record<string, unknown>;
+    const direct = String(
+      source.externalCallId || source.id || source.call_id || source.callId || source.uniqueid || "",
+    ).trim();
+    return direct || undefined;
+  };
 
-  const nested = source.data && typeof source.data === "object" ? (source.data as Record<string, unknown>) : null;
-  if (!nested) return undefined;
-  const nestedId = String(nested.id || nested.call_id || nested.callId || nested.uniqueid || "").trim();
-  return nestedId || undefined;
+  const walk = (value: unknown, depth: number): string | undefined => {
+    if (depth > 4) return undefined;
+    const direct = tryReadId(value);
+    if (direct) return direct;
+    if (!value || typeof value !== "object") return undefined;
+
+    const source = value as Record<string, unknown>;
+    for (const nested of Object.values(source)) {
+      if (nested && typeof nested === "object") {
+        const found = walk(nested, depth + 1);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  };
+
+  return walk(payload, 0);
 }
 
 const RESPONSAVEL_REQUIRED_MESSAGE =
@@ -242,7 +260,7 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
         message: data.message || "Ligacao disparada com sucesso.",
       });
 
-      const externalCallId = extractDialCallId(data?.data);
+      const externalCallId = extractDialCallId(data);
       console.log("[POSTCALL_DEBUG] CallId recebido no disparo", {
         leadId: lead.id,
         externalCallId: externalCallId || null,

@@ -106,6 +106,37 @@ function normalizePhoneDigits(value?: string | null) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function parseReferenceTimestamp(value: unknown): number {
+  if (value === null || value === undefined) return Number.NaN;
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 10_000_000_000 ? value : value * 1000;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return Number.NaN;
+
+  const asNumber = Number(raw);
+  if (Number.isFinite(asNumber)) {
+    return asNumber > 10_000_000_000 ? asNumber : asNumber * 1000;
+  }
+
+  const nativeParsed = Date.parse(raw);
+  if (!Number.isNaN(nativeParsed)) return nativeParsed;
+
+  const brMatch = raw.match(
+    /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/,
+  );
+  if (brMatch) {
+    const [, dd, mm, yyyy, hh = "00", min = "00", ss = "00"] = brMatch;
+    const normalized = `${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}`;
+    const parsed = Date.parse(normalized);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  return Number.NaN;
+}
+
 function readActiveSession(): ActiveCallSession | null {
   if (!isBrowser()) return null;
   const session = safeParseJSON<ActiveCallSession | null>(window.localStorage.getItem(ACTIVE_CALL_SESSION_KEY), null);
@@ -202,24 +233,11 @@ function findMatchingCallLog(session: ActiveCallSession, logs: CallLog[]): CallL
 }
 
 function findUniqueRecentEndedCallLogByPhone(session: ActiveCallSession, logs: CallLog[]): CallLog | null {
-  const sessionPhone = normalizePhoneDigits(session.telefone);
-  const sessionStart = Date.parse(session.startedAt);
-  if (!sessionPhone || Number.isNaN(sessionStart)) return null;
-
-  const candidates = logs.filter((log) => {
-    if (!isEndedCallLog(log)) return false;
-    const logPhone = normalizePhoneDigits(log.telefone || log.called || log.caller || "");
-    if (!logPhone) return false;
-    if (!(logPhone.endsWith(sessionPhone) || sessionPhone.endsWith(logPhone))) return false;
-    const reference = Date.parse(log.endedAt || log.startedAt || log.updatedAt || log.createdAt || "");
-    if (Number.isNaN(reference)) return false;
-    return reference >= sessionStart - 1000 * 30 && reference <= sessionStart + 1000 * 60 * 15;
-  });
-
+  const candidates = findRecentEndedCallLogCandidatesByPhone(session, logs);
   if (candidates.length !== 1) {
     debugLog("Fallback interno por telefone nao aplicado (ambiguidade/ausencia)", {
       sessionId: session.sessionId,
-      sessionPhone,
+      sessionPhone: normalizePhoneDigits(session.telefone),
       candidates: candidates.map((item) => item.id),
     });
     return null;
@@ -230,6 +248,23 @@ function findUniqueRecentEndedCallLogByPhone(session: ActiveCallSession, logs: C
     callId: candidates[0].id,
   });
   return candidates[0];
+}
+
+function findRecentEndedCallLogCandidatesByPhone(session: ActiveCallSession, logs: CallLog[]): CallLog[] {
+  const sessionPhone = normalizePhoneDigits(session.telefone);
+  const sessionStart = parseReferenceTimestamp(session.startedAt);
+  if (!sessionPhone || Number.isNaN(sessionStart)) return [];
+
+  const candidates = logs.filter((log) => {
+    if (!isEndedCallLog(log)) return false;
+    const logPhone = normalizePhoneDigits(log.telefone || log.called || log.caller || "");
+    if (!logPhone) return false;
+    if (!(logPhone.endsWith(sessionPhone) || sessionPhone.endsWith(logPhone))) return false;
+    const reference = parseReferenceTimestamp(log.endedAt || log.startedAt || log.updatedAt || log.createdAt || "");
+    if (Number.isNaN(reference)) return false;
+    return reference >= sessionStart - 1000 * 30 && reference <= sessionStart + 1000 * 60 * 15;
+  });
+  return candidates;
 }
 
 function findMatchingApi4ComHistoryCall(
@@ -261,6 +296,14 @@ function findMatchingApi4ComHistoryCall(
       "no answer",
       "no-answer",
       "answered",
+      "ended",
+      "terminated",
+      "closed",
+      "done",
+      "disconnect",
+      "disconnected",
+      "drop",
+      "abandoned",
     ];
     const hasTerminalState = terminalStateTokens.some(
       (token) => state.includes(token) || disposition.includes(token),
@@ -328,12 +371,31 @@ function findUniqueRecentApi4ComHistoryCallByPhone(
   session: ActiveCallSession,
   items: Array<Record<string, unknown>>,
 ): { id?: string } | null {
-  const sessionPhone = normalizePhoneDigits(session.telefone);
-  const sessionStart = Date.parse(session.startedAt);
-  if (!sessionPhone || Number.isNaN(sessionStart)) return null;
+  const matches = findRecentEndedApi4ComHistoryCandidatesByPhone(session, items);
+  if (matches.length !== 1) {
+    debugLog("Fallback externo por telefone nao aplicado (ambiguidade/ausencia)", {
+      sessionId: session.sessionId,
+      sessionPhone: normalizePhoneDigits(session.telefone),
+      candidateIds: matches.map((item) => String(item.id || item.uniqueid || item.call_id || "").trim()).filter(Boolean),
+    });
+    return null;
+  }
 
-  const getItemId = (item: Record<string, unknown>) =>
-    String(item.id || item.uniqueid || item.call_id || "").trim() || undefined;
+  const id = String(matches[0].id || matches[0].uniqueid || matches[0].call_id || "").trim() || undefined;
+  debugLog("Fallback externo por telefone aplicado por unicidade", {
+    sessionId: session.sessionId,
+    callId: id,
+  });
+  return { id };
+}
+
+function findRecentEndedApi4ComHistoryCandidatesByPhone(
+  session: ActiveCallSession,
+  items: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const sessionPhone = normalizePhoneDigits(session.telefone);
+  const sessionStart = parseReferenceTimestamp(session.startedAt);
+  if (!sessionPhone || Number.isNaN(sessionStart)) return [];
 
   const isExternallyEnded = (item: Record<string, unknown>) => {
     const endedAt = String(item.ended_at || item.endedAt || "").trim();
@@ -341,7 +403,25 @@ function findUniqueRecentApi4ComHistoryCallByPhone(
     const duration = Number(item.duration);
     const state = String(item.state || item.call_state || item.callStatus || item.status || "").toLowerCase().trim();
     const disposition = String(item.disposition || item.call_disposition || "").toLowerCase().trim();
-    const terminalTokens = ["hangup", "finished", "completed", "cancel", "busy", "failed", "no answer", "no-answer", "answered"];
+    const terminalTokens = [
+      "hangup",
+      "finished",
+      "completed",
+      "cancel",
+      "busy",
+      "failed",
+      "no answer",
+      "no-answer",
+      "answered",
+      "ended",
+      "terminated",
+      "closed",
+      "done",
+      "disconnect",
+      "disconnected",
+      "drop",
+      "abandoned",
+    ];
     const hasTerminalState = terminalTokens.some((token) => state.includes(token) || disposition.includes(token));
     return Boolean(endedAt || hangup || (Number.isFinite(duration) && duration > 0) || hasTerminalState);
   };
@@ -360,7 +440,7 @@ function findUniqueRecentApi4ComHistoryCallByPhone(
     for (const candidate of candidates) {
       const raw = String(candidate || "").trim();
       if (!raw) continue;
-      const ts = Date.parse(raw);
+      const ts = parseReferenceTimestamp(raw);
       if (!Number.isNaN(ts)) return ts;
     }
     return Number.NaN;
@@ -384,6 +464,15 @@ function findUniqueRecentApi4ComHistoryCallByPhone(
       item.src,
       item.phone,
       item.destination,
+      item.destination_number,
+      item.destinationNumber,
+      item.called_number,
+      item.calledNumber,
+      item.callee,
+      item.callee_number,
+      item.calleeNumber,
+      item.customer_number,
+      item.customerNumber,
       metadata.telefone,
     ]
       .map((value) => normalizePhoneDigits(String(value || "")))
@@ -394,22 +483,7 @@ function findUniqueRecentApi4ComHistoryCallByPhone(
     if (Number.isNaN(ts)) return false;
     return ts >= sessionStart - 1000 * 30 && ts <= sessionStart + 1000 * 60 * 15;
   });
-
-  if (matches.length !== 1) {
-    debugLog("Fallback externo por telefone nao aplicado (ambiguidade/ausencia)", {
-      sessionId: session.sessionId,
-      sessionPhone,
-      candidateIds: matches.map((item) => getItemId(item)).filter(Boolean),
-    });
-    return null;
-  }
-
-  const id = getItemId(matches[0]);
-  debugLog("Fallback externo por telefone aplicado por unicidade", {
-    sessionId: session.sessionId,
-    callId: id,
-  });
-  return { id };
+  return matches;
 }
 
 export function getActiveCallSession() {
@@ -455,7 +529,13 @@ export async function resolveBlockingStateBeforeNewDial(signal?: AbortSignal): P
   }
 
   if (current.status === "ended_detected") {
-    debugLog("NEW CALL BLOCKED", { reason: "pending_wrapup", sessionId: current.sessionId });
+    debugLog("NEW CALL BLOCKED", {
+      reason: "pending_wrapup",
+      sessionId: current.sessionId,
+      externalCallId: current.externalCallId || null,
+      callId: current.matchedCallId || null,
+      sessionStatus: current.status,
+    });
     return { blocked: true, reason: "pending_wrapup", session: current };
   }
 
@@ -475,7 +555,13 @@ export async function resolveBlockingStateBeforeNewDial(signal?: AbortSignal): P
     return { blocked: true, reason: "pending_wrapup", session: updated || current };
   }
 
-  debugLog("NEW CALL BLOCKED", { reason: "active_call", sessionId: current.sessionId });
+  debugLog("NEW CALL BLOCKED", {
+    reason: "active_call",
+    sessionId: current.sessionId,
+    externalCallId: current.externalCallId || null,
+    callId: current.matchedCallId || null,
+    sessionStatus: current.status,
+  });
   return { blocked: true, reason: "active_call", session: current };
 }
 
@@ -769,6 +855,12 @@ export async function detectCallEnd(session: ActiveCallSession, signal?: AbortSi
         success: data.success,
         logsCount: logs.length,
       });
+      debugLog("POLLING SNAPSHOT RECEIVED", {
+        source: "webhook",
+        sessionId: session.sessionId,
+        externalCallId: session.externalCallId || null,
+        logsCount: logs.length,
+      });
       const match = findMatchingCallLog(session, logs);
       if (match) {
         debugLog("Fim detectado na fonte primaria", { callId: match.id });
@@ -785,6 +877,26 @@ export async function detectCallEnd(session: ActiveCallSession, signal?: AbortSi
         return {
           matched: true,
           callId: uniqueByPhone.id,
+          detectionSource: "webhook",
+        };
+      }
+
+      const endedCandidates = findRecentEndedCallLogCandidatesByPhone(session, logs);
+      if (endedCandidates.length > 0) {
+        debugLog("POLLING SNAPSHOT TERMINAL CANDIDATES", {
+          source: "webhook",
+          sessionId: session.sessionId,
+          candidateCallIds: endedCandidates.map((item) => item.id),
+        });
+      }
+      if (endedCandidates.length > 1) {
+        debugLog("TERMINAL CALL DETECTED (AMBIGUOUS) na fonte primaria", {
+          sessionId: session.sessionId,
+          candidateCallIds: endedCandidates.map((item) => item.id),
+        });
+        return {
+          matched: true,
+          callId: undefined,
           detectionSource: "webhook",
         };
       }
@@ -818,11 +930,33 @@ export async function detectCallEnd(session: ActiveCallSession, signal?: AbortSi
       }
 
       debugLog("Fonte fallback respondeu", { itemsCount: data.items.length, fallbackUrl });
+      debugLog("POLLING SNAPSHOT RECEIVED", {
+        source: "api4com-history",
+        sessionId: session.sessionId,
+        externalCallId: session.externalCallId || null,
+        itemsCount: data.items.length,
+        fallbackUrl,
+      });
 
       const match = findMatchingApi4ComHistoryCall(session, data.items);
       if (!match) {
         const uniqueByPhone = findUniqueRecentApi4ComHistoryCallByPhone(session, data.items);
         if (!uniqueByPhone) {
+          const ambiguousEnded = findRecentEndedApi4ComHistoryCandidatesByPhone(session, data.items);
+          if (ambiguousEnded.length > 1) {
+            debugLog("TERMINAL CALL DETECTED (AMBIGUOUS) no fallback externo", {
+              sessionId: session.sessionId,
+              fallbackUrl,
+              candidateCallIds: ambiguousEnded
+                .map((item) => String(item.id || item.uniqueid || item.call_id || "").trim())
+                .filter(Boolean),
+            });
+            return {
+              matched: true,
+              callId: undefined,
+              detectionSource: "api4com-history",
+            };
+          }
           debugLog("Nenhum fim detectado no fallback desta rodada", { fallbackUrl });
           continue;
         }
