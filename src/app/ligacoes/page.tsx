@@ -64,6 +64,7 @@ type MappedCall = {
   durationSeconds: number;
   status: string;
   finalizacao: string;
+  subfinalizacao: string;
   atendente: string;
   origem: string;
   raw: Api4ComCallItem;
@@ -423,6 +424,7 @@ function mapApiCallToRow(
     }
   }
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
+  const subfinalizacao = matchedWrapup?.nextAction?.trim() ? matchedWrapup.nextAction.trim() : "-";
   const atendenteFromWrapupResponsavelId =
     matchedWrapup?.responsavelId ? context.responsavelById.get(matchedWrapup.responsavelId) : undefined;
   const atendenteFromResponsavelId = metadataResponsavelId
@@ -444,6 +446,7 @@ function mapApiCallToRow(
     durationSeconds: Number(internal?.durationSeconds ?? durationSeconds),
     status: resolvedStatus,
     finalizacao,
+    subfinalizacao,
     atendente,
     origem: "api4com",
     raw: item,
@@ -1414,6 +1417,7 @@ export default function LigacoesPage() {
                   <th className="whitespace-nowrap px-3 py-2.5">Duracao</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Status</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Finalizacao</th>
+                  <th className="whitespace-nowrap px-3 py-2.5">Subfinalizacao</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Origem</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Acao</th>
                 </tr>
@@ -1421,7 +1425,7 @@ export default function LigacoesPage() {
               <tbody>
                 {filteredCalls.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-sm text-slate-400" colSpan={12}>
+                    <td className="px-3 py-4 text-sm text-slate-400" colSpan={13}>
                       Nenhuma ligacao encontrada.
                     </td>
                   </tr>
@@ -1449,6 +1453,11 @@ export default function LigacoesPage() {
                               {call.finalizacao || "-"}
                             </span>
                           </td>
+                          <td className="whitespace-nowrap px-3 py-3">
+                            <span className="rounded-md border border-border/70 bg-slate-900/60 px-2 py-1 text-[11px] text-slate-200">
+                              {call.subfinalizacao || "-"}
+                            </span>
+                          </td>
                           <td className="whitespace-nowrap px-3 py-3">{call.origem}</td>
                           <td className="whitespace-nowrap px-3 py-3">
                             <button
@@ -1462,7 +1471,7 @@ export default function LigacoesPage() {
                         </tr>
                         {isOpen ? (
                           <tr className="border-b border-border/70 bg-slate-950/40">
-                            <td colSpan={12} className="px-3 py-3">
+                            <td colSpan={13} className="px-3 py-3">
                               <div className="grid gap-3 rounded-lg border border-border bg-slate-900/50 p-4 md:grid-cols-2 xl:grid-cols-4">
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Nome</p>
@@ -1507,6 +1516,10 @@ export default function LigacoesPage() {
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Finalizacao</p>
                                   <p className="mt-1 text-sm text-slate-100">{call.finalizacao || "-"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Subfinalizacao</p>
+                                  <p className="mt-1 text-sm text-slate-100">{call.subfinalizacao || "-"}</p>
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Ramal/Origem</p>
