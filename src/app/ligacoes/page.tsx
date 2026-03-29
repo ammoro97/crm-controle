@@ -372,6 +372,14 @@ function parseDateMaybe(value: unknown): string | null {
   return value.trim();
 }
 
+function isWrapupTemporallyCompatible(wrapup: PostCallWrapup | undefined, callStartedAt: string | null) {
+  if (!wrapup || !callStartedAt) return true;
+  const wrapupTs = Date.parse(String(wrapup.createdAt || "").trim());
+  const callTs = Date.parse(String(callStartedAt || "").trim());
+  if (Number.isNaN(wrapupTs) || Number.isNaN(callTs)) return true;
+  return Math.abs(wrapupTs - callTs) <= 1000 * 60 * 3;
+}
+
 function humanizeHangupCause(value: string): string {
   const normalized = value.trim();
   if (!normalized) return "Nao atendida";
@@ -441,19 +449,24 @@ function mapApiCallToRow(
   const resolvedStatus = internal?.status || status;
   const resolvedStartedAt = internal?.startedAt || startedAt;
 
+  let matchSource: "callId" | "externalCallId" | "metadataExternalCallId" | "sessionId" | "fallbackMinute" | null = null;
   let matchedWrapup: PostCallWrapup | undefined = rawId ? context.wrapupsIndexes.byCallId.get(rawId) : undefined;
+  if (matchedWrapup) matchSource = "callId";
   if (!matchedWrapup && rawId) {
     matchedWrapup = context.wrapupsIndexes.byExternalCallId.get(rawId);
+    if (matchedWrapup) matchSource = "externalCallId";
   }
   if (!matchedWrapup && metadataExternalCallId) {
     matchedWrapup =
       context.wrapupsIndexes.byExternalCallId.get(metadataExternalCallId) ||
       context.wrapupsIndexes.byCallId.get(metadataExternalCallId);
+    if (matchedWrapup) matchSource = "metadataExternalCallId";
   }
   if (!matchedWrapup) {
     const sessionIdCandidate = metadataSessionId || internal?.sessionId || "";
     if (sessionIdCandidate) {
       matchedWrapup = context.wrapupsIndexes.bySessionId.get(sessionIdCandidate);
+      if (matchedWrapup) matchSource = "sessionId";
     }
   }
   if (!matchedWrapup) {
@@ -469,7 +482,17 @@ function mapApiCallToRow(
           ? context.wrapupsIndexes.byExternalCallId.get(internalCandidate.externalCallId)
           : undefined) ||
         (internalCandidate.sessionId ? context.wrapupsIndexes.bySessionId.get(internalCandidate.sessionId) : undefined);
+      if (matchedWrapup) matchSource = "fallbackMinute";
     }
+  }
+  if (
+    matchedWrapup &&
+    (matchSource === "callId" || matchSource === "externalCallId" || matchSource === "metadataExternalCallId") &&
+    !metadataSessionId &&
+    !internal?.sessionId &&
+    !isWrapupTemporallyCompatible(matchedWrapup, resolvedStartedAt || startedAt)
+  ) {
+    matchedWrapup = undefined;
   }
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
   const subfinalizacao = matchedWrapup?.nextAction?.trim() ? matchedWrapup.nextAction.trim() : "-";
@@ -764,6 +787,11 @@ export default function LigacoesPage() {
     void runWrapupReconciliation();
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (responsavelById.size === 0) return;
+    void loadCalls();
+  }, [responsavelById]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {

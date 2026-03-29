@@ -232,6 +232,7 @@ function findMatchingApi4ComHistoryCall(
   const sessionStart = Date.parse(session.startedAt);
   const sessionExternalCallId = String(session.externalCallId || "").trim();
   const MAX_EXTERNAL_MATCH_DISTANCE_MS = 1000 * 60 * 60 * 12; // 12h (tolerancia para timezone/formatos diferentes)
+  const MAX_PAST_FALLBACK_MS = 1000 * 60 * 1; // 1 min para evitar casar com ligacao anterior
   debugLog("Iniciando matching com historico externo API4Com", {
     sessionId: session.sessionId,
     leadId: session.leadId,
@@ -245,6 +246,15 @@ function findMatchingApi4ComHistoryCall(
   const broadPhoneEndedCandidates: Array<Record<string, unknown>> = [];
   const broadPhoneCandidates: Array<Record<string, unknown>> = [];
   const recentGlobalEndedCandidates: Array<Record<string, unknown>> = [];
+  const strictCandidates: Array<{
+    item: Record<string, unknown>;
+    distance: number;
+    ended: boolean;
+    id?: string;
+    hardMatch: boolean;
+    isPastBeyondTolerance: boolean;
+    referenceTs: number;
+  }> = [];
 
   const isExternallyEnded = (item: Record<string, unknown>) => {
     const endedAt = String(item.ended_at || item.endedAt || "").trim();
@@ -317,7 +327,9 @@ function findMatchingApi4ComHistoryCall(
 
     const metadata = item.metadata && typeof item.metadata === "object" ? (item.metadata as Record<string, unknown>) : {};
     const metaLeadId = String(metadata.leadId || "").trim();
+    const metaSessionId = String(metadata.sessionId || "").trim();
     const hasLeadMatch = Boolean(session.leadId && metaLeadId && session.leadId === metaLeadId);
+    const hasSessionMatch = Boolean(metaSessionId && metaSessionId === session.sessionId);
 
     const phoneCandidates = [
       item.telefone,
@@ -362,6 +374,19 @@ function findMatchingApi4ComHistoryCall(
     const startedAt = String(item.started_at || item.startedAt || "");
     const endedAt = String(item.ended_at || item.endedAt || "");
     const reference = getExternalReferenceDate(item);
+    const hardMatch = hasSessionMatch || Boolean(sessionExternalCallId && itemId && itemId === sessionExternalCallId);
+    const isPastBeyondTolerance =
+      !Number.isNaN(reference.ts) && !Number.isNaN(sessionStart) && reference.ts < sessionStart - MAX_PAST_FALLBACK_MS;
+
+    if (!hardMatch && isPastBeyondTolerance) {
+      debugLog("Registro externo rejeitado por ser anterior a sessao (tolerancia curta)", {
+        itemId,
+        referenceAt: reference.raw,
+        sessionStart: session.startedAt,
+      });
+      continue;
+    }
+
     if (!Number.isNaN(reference.ts) && !Number.isNaN(sessionStart)) {
       const distance = Math.abs(reference.ts - sessionStart);
       if (distance > MAX_EXTERNAL_MATCH_DISTANCE_MS) {
@@ -373,7 +398,7 @@ function findMatchingApi4ComHistoryCall(
         continue;
       }
 
-      if (reference.ts >= sessionStart - 1000 * 60 * 10) {
+      if (reference.ts >= sessionStart - MAX_PAST_FALLBACK_MS) {
         recentCandidates.push(item);
         if (isExternallyEnded(item)) {
           recentEndedCandidates.push(item);
@@ -383,7 +408,7 @@ function findMatchingApi4ComHistoryCall(
       // Fallback global: chamada encerrada em janela proxima da sessao, mesmo sem metadados/telefone confiaveis.
       if (
         isExternallyEnded(item) &&
-        reference.ts >= sessionStart - 1000 * 60 * 10 &&
+        reference.ts >= sessionStart - MAX_PAST_FALLBACK_MS &&
         reference.ts <= sessionStart + 1000 * 60 * 120
       ) {
         recentGlobalEndedCandidates.push(item);
@@ -400,7 +425,40 @@ function findMatchingApi4ComHistoryCall(
       hangup: item.hangup_cause || item.hangupCause,
       duration: item.duration,
     });
-    return { id };
+
+    const distance =
+      Number.isNaN(reference.ts) || Number.isNaN(sessionStart) ? Number.POSITIVE_INFINITY : Math.abs(reference.ts - sessionStart);
+    strictCandidates.push({
+      item,
+      id,
+      ended: isExternallyEnded(item),
+      distance,
+      hardMatch,
+      isPastBeyondTolerance,
+      referenceTs: reference.ts,
+    });
+    continue;
+  }
+
+  if (strictCandidates.length > 0) {
+    const best = strictCandidates
+      .sort((a, b) => {
+        if (a.hardMatch !== b.hardMatch) return a.hardMatch ? -1 : 1;
+        if (a.ended !== b.ended) return a.ended ? -1 : 1;
+        if (a.isPastBeyondTolerance !== b.isPastBeyondTolerance) return a.isPastBeyondTolerance ? 1 : -1;
+        const aIsPast = Number.isFinite(a.referenceTs) && Number.isFinite(sessionStart) && a.referenceTs < sessionStart;
+        const bIsPast = Number.isFinite(b.referenceTs) && Number.isFinite(sessionStart) && b.referenceTs < sessionStart;
+        if (aIsPast !== bIsPast) return aIsPast ? 1 : -1;
+        return a.distance - b.distance;
+      })[0];
+    debugLog("Candidato externo escolhido por ranking estrito", {
+      id: best.id,
+      ended: best.ended,
+      distanceMs: best.distance,
+      hardMatch: best.hardMatch,
+      totalCandidates: strictCandidates.length,
+    });
+    return { id: best.id };
   }
 
   if (recentCandidates.length === 1) {
