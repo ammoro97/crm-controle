@@ -1275,6 +1275,7 @@ export default function LigacoesPage() {
     }
 
     const agendamentos = meetingsSnapshot.filter((meeting) => {
+      if (String(meeting.reason || "").toLowerCase() !== "follow-up") return false;
       const meetingPerson = normalizeMeetingPersonName(meeting.personName);
       if (contactedNames.has(meetingPerson)) return true;
       const meetingNotesDigits = normalizeDigits(meeting.notes || "");
@@ -1294,6 +1295,13 @@ export default function LigacoesPage() {
       baseContatada: contactedBase.size,
     };
   }, [filteredCalls, leadsSnapshot, meetingsSnapshot]);
+
+  const followUpRates = useMemo(() => {
+    const vsContatosPositivos =
+      contactQuality.cpcPositive > 0 ? Math.round((conversion.agendamentos / contactQuality.cpcPositive) * 100) : 0;
+    const vsLigacoesGerais = filteredCalls.length > 0 ? Math.round((conversion.agendamentos / filteredCalls.length) * 100) : 0;
+    return { vsContatosPositivos, vsLigacoesGerais };
+  }, [contactQuality.cpcPositive, conversion.agendamentos, filteredCalls.length]);
 
   const finalizacaoChart = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1790,7 +1798,13 @@ export default function LigacoesPage() {
             <article className="rounded-md border border-teal-500/40 bg-teal-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-teal-200">Agendamentos de Follow-up</p>
               <p className="mt-1 text-3xl font-semibold leading-none text-teal-100">{conversion.agendamentos}</p>
-              <p className="mt-1 text-[11px] text-teal-200/90">Baseado em eventos de follow-up</p>
+              <p className="mt-1 text-[11px] text-teal-200/90">Somente agendamentos com motivo follow-up</p>
+              <p className="mt-0.5 text-[11px] text-teal-200/80">
+                {followUpRates.vsContatosPositivos}% dos contatos positivos
+              </p>
+              <p className="mt-0.5 text-[11px] text-teal-200/80">
+                {followUpRates.vsLigacoesGerais}% das ligacoes gerais
+              </p>
             </article>
             <article className="rounded-md border border-fuchsia-500/40 bg-fuchsia-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-fuchsia-200">Conversao</p>
