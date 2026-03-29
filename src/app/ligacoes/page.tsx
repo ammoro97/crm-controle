@@ -1687,14 +1687,6 @@ export default function LigacoesPage() {
             >
               {loading ? "Atualizando..." : "Atualizar"}
             </button>
-            <button
-              type="button"
-              className="h-9 rounded-md border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={deleteSelectedCalls}
-              disabled={selectedIds.length === 0}
-            >
-              Excluir selecionadas
-            </button>
           </div>
         </div>
         {wrapupMessage ? <p className="mt-2 text-xs text-emerald-300">{wrapupMessage}</p> : null}
@@ -1842,6 +1834,16 @@ export default function LigacoesPage() {
       </div>
 
       <div className="panel overflow-hidden">
+        <div className="flex items-center justify-end border-b border-border/70 px-3 py-2.5">
+          <button
+            type="button"
+            className="h-9 rounded-md border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={deleteSelectedCalls}
+            disabled={selectedIds.length === 0}
+          >
+            Excluir selecionadas
+          </button>
+        </div>
         {loading ? <p className="px-4 py-4 text-sm text-slate-400">Carregando ligacoes...</p> : null}
         {error ? <p className="px-4 py-4 text-sm text-rose-300">{error}</p> : null}
 
