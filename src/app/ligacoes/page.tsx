@@ -1247,37 +1247,13 @@ export default function LigacoesPage() {
   }, [filteredCalls]);
 
   const conversion = useMemo(() => {
-    const contactedLeadIds = new Set<string>();
-    const contactedPhones = new Set<string>();
-    const contactedNames = new Set<string>();
+    const isAnsweredCall = (call: MappedCall) => isTechnicalAnswered(call.status, Number(call.durationSeconds || 0));
 
-    for (const call of filteredCalls) {
-      if (call.leadId) contactedLeadIds.add(call.leadId);
-      const phoneDigits = normalizeDigits(call.telefone);
-      if (phoneDigits) contactedPhones.add(phoneDigits);
-      const callName = normalizeMeetingPersonName(call.nome);
-      if (callName) contactedNames.add(callName);
-    }
-
-    const leadStatusAvanco = new Set(["Qualificado", "Reuniao marcada", "Proposta enviada", "Fechado"]);
-    const advancedByLead = leadsSnapshot.filter((lead) => {
-      const phoneDigits = normalizeDigits(lead.phone);
-      const leadName = normalizeMeetingPersonName(lead.name);
-      const isContacted =
-        contactedLeadIds.has(lead.id) || (phoneDigits ? contactedPhones.has(phoneDigits) : false) || contactedNames.has(leadName);
-      if (!isContacted) return false;
-      return leadStatusAvanco.has(lead.status);
-    });
-
-    const contactedBase = new Set<string>();
-    for (const call of filteredCalls) {
-      if (call.leadId) {
-        contactedBase.add(`lead:${call.leadId}`);
-        continue;
-      }
-      const phoneDigits = normalizeDigits(call.telefone);
-      if (phoneDigits) contactedBase.add(`phone:${phoneDigits}`);
-    }
+    const cpcPositiveBase = filteredCalls.filter((call) => {
+      if (!isAnsweredCall(call)) return false;
+      const normalized = normalizeFinalizacaoKey(call.finalizacao);
+      return CPC_POSITIVE_FINALIZACOES.has(normalized);
+    }).length;
 
     const agendamentos = filteredCalls.filter((call) => {
       const finalizacao = normalizeFinalizacaoKey(call.finalizacao);
@@ -1298,15 +1274,20 @@ export default function LigacoesPage() {
       return false;
     }).length;
 
-    const conversionRate = contactedBase.size > 0 ? Math.round((advancedByLead.length / contactedBase.size) * 100) : 0;
+    const videoCalls = filteredCalls.filter((call) => {
+      if (!isAnsweredCall(call)) return false;
+      return normalizeFinalizacaoKey(call.subfinalizacao) === "agendar video chamada";
+    }).length;
+
+    const conversionRate = cpcPositiveBase > 0 ? Math.round((videoCalls / cpcPositiveBase) * 100) : 0;
 
     return {
       conversionRate,
       agendamentos,
-      leadsAvancaram: advancedByLead.length,
-      baseContatada: contactedBase.size,
+      videoCalls,
+      cpcPositiveBase,
     };
-  }, [filteredCalls, leadsSnapshot]);
+  }, [filteredCalls]);
 
   const followUpRates = useMemo(() => {
     const vsContatosPositivos =
@@ -1822,9 +1803,9 @@ export default function LigacoesPage() {
               <p className="text-[10px] uppercase tracking-[0.12em] text-fuchsia-200">Conversao</p>
               <p className="mt-1 text-3xl font-semibold leading-none text-fuchsia-100">{conversion.conversionRate}%</p>
               <p className="mt-1 text-[11px] text-fuchsia-200/90">
-                {conversion.leadsAvancaram} de {conversion.baseContatada}
+                {conversion.videoCalls} de {conversion.cpcPositiveBase}
               </p>
-              <p className="mt-0.5 text-[11px] text-fuchsia-200/80">Baseado nos contatos realizados</p>
+              <p className="mt-0.5 text-[11px] text-fuchsia-200/80">Baseado em chamadas de video / CPC positivo</p>
             </article>
           </div>
         </div>
