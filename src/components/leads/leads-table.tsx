@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Modal } from "@/components/ui/modal";
 import { useResponsaveis } from "@/lib/responsaveis-store";
-import { getResponsavelByEmailSnapshot } from "@/lib/responsaveis-store";
+import { resolveResponsavelFromUser } from "@/lib/responsavel-resolver";
 import { createDialSession } from "@/lib/post-call-flow";
 import { Lead } from "@/types/crm";
 
@@ -71,6 +71,9 @@ function extractDialCallId(payload: unknown): string | undefined {
   const nestedId = String(nested.id || nested.call_id || nested.callId || nested.uniqueid || "").trim();
   return nestedId || undefined;
 }
+
+const RESPONSAVEL_REQUIRED_MESSAGE =
+  "Seu usuario ainda nao esta vinculado a um responsavel no CRM. Cadastre esse e-mail em Configuracoes > Responsaveis antes de realizar ligacoes.";
 
 export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) {
   const { currentUser } = useAuth();
@@ -157,12 +160,11 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
       return;
     }
 
-    const normalizedEmail = String(currentUser?.email || "").trim().toLowerCase();
-    const responsavelLinked = getResponsavelByEmailSnapshot(normalizedEmail);
-    if (!currentUser || !responsavelLinked) {
+    const resolvedResponsavel = resolveResponsavelFromUser(currentUser);
+    if (!currentUser || !resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {
       setCallFeedback(lead.id, {
         type: "error",
-        message: "Seu usuario ainda nao esta cadastrado em Responsaveis. Faca esse cadastro antes de realizar ligacoes.",
+        message: RESPONSAVEL_REQUIRED_MESSAGE,
       });
       setResponsavelMissingModalOpen(true);
       return;
@@ -187,8 +189,8 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
           nome: lead.name,
           empresa: lead.company,
           userId: currentUser?.id,
-          responsavelId: responsavelLinked.id,
-          atendenteNome: responsavelLinked.nome,
+          responsavelId: resolvedResponsavel.responsavel.id,
+          atendenteNome: resolvedResponsavel.responsavel.nome,
         }),
       });
 
@@ -225,8 +227,8 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
         telefone: lead.phone,
         externalCallId,
         userId: currentUser?.id,
-        responsavelId: responsavelLinked.id,
-        atendenteNome: responsavelLinked.nome,
+        responsavelId: resolvedResponsavel.responsavel.id,
+        atendenteNome: resolvedResponsavel.responsavel.nome,
         sourcePath: typeof window !== "undefined" ? window.location.pathname : "/leads",
       });
       console.log("[POSTCALL_DEBUG] Sessao criada apos discagem", session);
@@ -541,7 +543,7 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
       >
         <div className="space-y-3">
           <p className="text-sm text-slate-200">
-            Seu usuario ainda nao esta cadastrado em Responsaveis. Faca esse cadastro antes de realizar ligacoes.
+            {RESPONSAVEL_REQUIRED_MESSAGE}
           </p>
           <div className="flex items-center gap-2">
             <button type="button" className="btn-primary" onClick={() => setResponsavelMissingModalOpen(false)}>

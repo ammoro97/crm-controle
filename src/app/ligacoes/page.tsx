@@ -11,6 +11,7 @@ import {
   subscribeLeadsSnapshot,
 } from "@/lib/crm-data-store";
 import { useResponsaveisRecords } from "@/lib/responsaveis-store";
+import { resolveResponsavelFromUser } from "@/lib/responsavel-resolver";
 import {
   ActiveCallSession,
   PostCallWrapup,
@@ -433,14 +434,17 @@ function mapApiCallToRow(
     }
   }
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
+  const atendenteFromWrapupResponsavelId =
+    matchedWrapup?.responsavelId ? context.responsavelById.get(matchedWrapup.responsavelId) : undefined;
   const atendenteFromResponsavelId = metadataResponsavelId
     ? context.responsavelById.get(metadataResponsavelId)
     : undefined;
   const atendente =
+    atendenteFromWrapupResponsavelId ||
     matchedWrapup?.atendenteNome?.trim() ||
     metadataAtendenteNome ||
     atendenteFromResponsavelId ||
-    "Nao definido";
+    "Responsavel nao vinculado";
 
   return {
     id: rawId || `api4com-${index}-${Date.now()}`,
@@ -754,7 +758,12 @@ export default function LigacoesPage() {
     };
   }, [filteredCalls]);
 
-  const applyWrapupToLead = (session: ActiveCallSession, formState: PostCallFormState, callEvidence?: CurrentCallEvidence) => {
+  const applyWrapupToLead = (
+    session: ActiveCallSession,
+    formState: PostCallFormState,
+    ownerName: string,
+    callEvidence?: CurrentCallEvidence,
+  ) => {
     const leads = getLeadsSnapshot();
     const now = nowDateAndTime();
     const normalizedSessionPhone = normalizeDigits(session.telefone);
@@ -775,12 +784,6 @@ export default function LigacoesPage() {
     }
 
     const lead = leads[leadIndex];
-    const ownerName =
-      (session.responsavelId ? responsavelById.get(session.responsavelId) : undefined) ||
-      session.atendenteNome?.trim() ||
-      (currentUser?.responsavelVinculado ? currentUser.nome : "") ||
-      lead.owner ||
-      "Time Comercial";
     const observationId = `OBS-CALL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const resultLabel = normalizeFinalizacaoLabel(formState.result) || "Finalizacao registrada";
     const durationText = formatDurationHuman(callEvidence?.durationSeconds);
@@ -846,7 +849,11 @@ export default function LigacoesPage() {
     setLeadsSnapshotState(nextLeads);
   };
 
-  const createFollowUpMeetingIfNeeded = (session: ActiveCallSession, formState: PostCallFormState) => {
+  const createFollowUpMeetingIfNeeded = (
+    session: ActiveCallSession,
+    formState: PostCallFormState,
+    ownerName: string,
+  ) => {
     if (!formState.followUpDate || !formState.followUpTime) return;
 
     const leads = getLeadsSnapshot();
@@ -858,13 +865,6 @@ export default function LigacoesPage() {
         return Boolean(sessionPhone && leadPhone && (leadPhone.endsWith(sessionPhone) || sessionPhone.endsWith(leadPhone)));
       }) ||
       null;
-
-    const ownerName =
-      (session.responsavelId ? responsavelById.get(session.responsavelId) : undefined) ||
-      session.atendenteNome?.trim() ||
-      (currentUser?.responsavelVinculado ? currentUser.nome.trim() : "") ||
-      lead?.owner ||
-      "Time Comercial";
 
     const sessionMarker = `[POSTCALL:${session.sessionId}]`;
     const meetings = getMeetingsSnapshot();
@@ -931,6 +931,16 @@ export default function LigacoesPage() {
     setWrapupMessage(null);
 
     try {
+      const resolvedResponsavel = resolveResponsavelFromUser(currentUser);
+      if (!resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {
+        setWrapupError(
+          "Seu usuario ainda nao esta vinculado a um responsavel no CRM. Cadastre esse e-mail em Configuracoes > Responsaveis antes de finalizar ligacoes.",
+        );
+        return;
+      }
+
+      const ownerName = resolvedResponsavel.responsavel.nome;
+      const ownerId = resolvedResponsavel.responsavel.id;
       const currentCallEvidence: CurrentCallEvidence | undefined = activeSession.matchedCallId
         ? (() => {
             const fromTable = calls.find((item) => item.id === activeSession.matchedCallId);
@@ -964,13 +974,8 @@ export default function LigacoesPage() {
         empresa: activeSession.empresa,
         telefone: activeSession.telefone,
         userId: activeSession.userId,
-        responsavelId:
-          activeSession.responsavelId ||
-          (currentUser?.responsavelVinculado ? currentUser.responsavelId : undefined),
-        atendenteNome:
-          (activeSession.responsavelId ? responsavelById.get(activeSession.responsavelId) : undefined) ||
-          activeSession.atendenteNome ||
-          (currentUser?.responsavelVinculado ? currentUser.nome : undefined),
+        responsavelId: ownerId,
+        atendenteNome: ownerName,
         result: postCallForm.result,
         reason: postCallForm.reason || undefined,
         observations: postCallForm.observations.trim(),
@@ -980,8 +985,8 @@ export default function LigacoesPage() {
         callId: activeSession.matchedCallId,
         conciliationStatus: activeSession.matchedCallId ? "conciliated" : "pending_conciliation",
       });
-      applyWrapupToLead(activeSession, postCallForm, currentCallEvidence);
-      createFollowUpMeetingIfNeeded(activeSession, postCallForm);
+      applyWrapupToLead(activeSession, postCallForm, ownerName, currentCallEvidence);
+      createFollowUpMeetingIfNeeded(activeSession, postCallForm, ownerName);
 
       markCallSessionWrapped(activeSession.sessionId);
       console.log("[POSTCALL_DEBUG] Wrapup salvo e sessao marcada como wrapped", {
@@ -1109,7 +1114,7 @@ export default function LigacoesPage() {
                           <td className="whitespace-nowrap px-3 py-3">{call.nome}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.empresa}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.telefone}</td>
-                          <td className="whitespace-nowrap px-3 py-3">{call.atendente || "Nao definido"}</td>
+                          <td className="whitespace-nowrap px-3 py-3">{call.atendente || "Responsavel nao vinculado"}</td>
                           <td className="whitespace-nowrap px-3 py-3">{formatDate(call.startedAt)}</td>
                           <td className="whitespace-nowrap px-3 py-3">{formatTime(call.startedAt)}</td>
                           <td className="whitespace-nowrap px-3 py-3">{formatTime(call.endedAt)}</td>
@@ -1153,7 +1158,7 @@ export default function LigacoesPage() {
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Atendente</p>
-                                  <p className="mt-1 text-sm text-slate-100">{call.atendente || "Nao definido"}</p>
+                                  <p className="mt-1 text-sm text-slate-100">{call.atendente || "Responsavel nao vinculado"}</p>
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Data</p>

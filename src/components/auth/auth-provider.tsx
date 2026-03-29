@@ -3,7 +3,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase-client";
-import { getResponsavelByEmailSnapshot } from "@/lib/responsaveis-store";
+import { normalizeEmailForMatch, resolveResponsavelByEmail } from "@/lib/responsavel-resolver";
 import { PublicUser } from "@/types/auth";
 
 type AuthContextValue = {
@@ -16,22 +16,18 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function normalizeEmail(value: string) {
-  return String(value || "").trim().toLowerCase();
-}
-
 function toPublicUserFromSupabase(user: User): PublicUser {
-  const email = normalizeEmail(user.email || "");
-  const mappedResponsavel = getResponsavelByEmailSnapshot(email);
-  const nome = mappedResponsavel?.nome || "Responsavel nao cadastrado";
-  const responsavelId = mappedResponsavel?.id || "";
+  const email = normalizeEmailForMatch(user.email || "");
+  const resolved = resolveResponsavelByEmail(email);
+  const nome = resolved.responsavel?.nome || "Responsavel nao vinculado";
+  const responsavelId = resolved.responsavel?.id || "";
 
   return {
     id: user.id,
     email,
     nome,
     responsavelId,
-    responsavelVinculado: Boolean(mappedResponsavel),
+    responsavelVinculado: resolved.linked,
   };
 }
 
