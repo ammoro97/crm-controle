@@ -1274,15 +1274,22 @@ export default function LigacoesPage() {
       if (phoneDigits) contactedBase.add(`phone:${phoneDigits}`);
     }
 
-    const agendamentos = meetingsSnapshot.filter((meeting) => {
-      if (String(meeting.reason || "").toLowerCase() !== "follow-up") return false;
-      const meetingPerson = normalizeMeetingPersonName(meeting.personName);
-      if (contactedNames.has(meetingPerson)) return true;
-      const meetingNotesDigits = normalizeDigits(meeting.notes || "");
-      if (!meetingNotesDigits) return false;
-      for (const phone of contactedPhones) {
-        if (meetingNotesDigits.includes(phone) || phone.includes(meetingNotesDigits)) return true;
+    const agendamentos = filteredCalls.filter((call) => {
+      const finalizacao = normalizeFinalizacaoKey(call.finalizacao);
+      const subfinalizacao = normalizeFinalizacaoKey(call.subfinalizacao);
+
+      if (finalizacao === "falou com cliente") {
+        return (
+          subfinalizacao === "agendar video chamada" ||
+          subfinalizacao === "agendar ligacao" ||
+          subfinalizacao === "agendar whatsapp"
+        );
       }
+
+      if (finalizacao === "falou com secretaria") {
+        return subfinalizacao === "confirmou possibilidade de contato";
+      }
+
       return false;
     }).length;
 
@@ -1294,7 +1301,7 @@ export default function LigacoesPage() {
       leadsAvancaram: advancedByLead.length,
       baseContatada: contactedBase.size,
     };
-  }, [filteredCalls, leadsSnapshot, meetingsSnapshot]);
+  }, [filteredCalls, leadsSnapshot]);
 
   const followUpRates = useMemo(() => {
     const vsContatosPositivos =
@@ -1798,7 +1805,7 @@ export default function LigacoesPage() {
             <article className="rounded-md border border-teal-500/40 bg-teal-500/10 p-3">
               <p className="text-[10px] uppercase tracking-[0.12em] text-teal-200">Agendamentos de Follow-up</p>
               <p className="mt-1 text-3xl font-semibold leading-none text-teal-100">{conversion.agendamentos}</p>
-              <p className="mt-1 text-[11px] text-teal-200/90">Somente agendamentos com motivo follow-up</p>
+              <p className="mt-1 text-[11px] text-teal-200/90">Baseado apenas em finalizacoes/subfinalizacoes</p>
               <p className="mt-0.5 text-[11px] text-teal-200/80">
                 {followUpRates.vsContatosPositivos}% dos contatos positivos
               </p>
