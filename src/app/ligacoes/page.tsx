@@ -775,7 +775,8 @@ export default function LigacoesPage() {
 
     const lead = leads[leadIndex];
     const observationId = `OBS-CALL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      const resultLabel = normalizeFinalizacaoLabel(formState.result) || "Finalizacao registrada";
+    const freeTextObservationId = `OBS-CALL-TEXT-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const resultLabel = normalizeFinalizacaoLabel(formState.result) || "Finalizacao registrada";
     const durationText = formatDurationHuman(callEvidence?.durationSeconds);
     const callDate = formatDate(callEvidence?.startedAt || now.date);
     const callTime = formatTime(callEvidence?.startedAt || `${now.date}T${now.time}:00`);
@@ -795,11 +796,7 @@ export default function LigacoesPage() {
       `Data/Hora da ligacao: ${callDate} ${callTime !== "-" ? `- ${callTime}` : ""}`.trim(),
     ];
 
-    if (formState.observations.trim()) {
-      structuredLines.push(`Observacoes: ${formState.observations.trim()}`);
-    }
-
-    const observation: LeadObservation = {
+    const structuredObservation: LeadObservation = {
       id: observationId,
       date: now.date,
       time: now.time,
@@ -807,6 +804,20 @@ export default function LigacoesPage() {
       type: "contato",
       content: structuredLines.join("\n"),
     };
+
+    const freeTextObservation =
+      formState.observations.trim().length > 0
+        ? ({
+            id: freeTextObservationId,
+            date: now.date,
+            time: now.time,
+            owner: ownerName,
+            type: "informacao interna",
+            content: formState.observations.trim(),
+          } as LeadObservation)
+        : null;
+
+    const linkedObservationId = freeTextObservation?.id || structuredObservation.id;
 
     const historyEventDescription = `Ligacao realizada com o lead. Finalizacao: ${resultLabel}.`;
 
@@ -821,11 +832,13 @@ export default function LigacoesPage() {
           eventType: "LIGACAO",
           description: historyEventDescription,
           owner: ownerName,
-          linkedObservationId: observationId,
+          linkedObservationId,
           linkedTab: "observacoes",
         },
       ],
-      observationLog: [...lead.observationLog, observation],
+      observationLog: freeTextObservation
+        ? [...lead.observationLog, structuredObservation, freeTextObservation]
+        : [...lead.observationLog, structuredObservation],
       lastInteraction: `${now.date} ${now.time}`,
       nextAction: formState.nextAction.trim() || lead.nextAction,
       nextActionDate: formState.followUpDate ? formState.followUpDate : lead.nextActionDate,
