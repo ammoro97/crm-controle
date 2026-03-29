@@ -1212,17 +1212,22 @@ export default function LigacoesPage() {
   );
 
   const contactQuality = useMemo(() => {
+    const isAnsweredCall = (call: MappedCall) => isTechnicalAnswered(call.status, Number(call.durationSeconds || 0));
+
     const cpc = filteredCalls.filter((call) => {
+      if (!isAnsweredCall(call)) return false;
       const normalized = normalizeFinalizacaoKey(call.finalizacao);
       return normalized === "falou com cliente";
     }).length;
 
     const cpcPositive = filteredCalls.filter((call) => {
+      if (!isAnsweredCall(call)) return false;
       const normalized = normalizeFinalizacaoKey(call.finalizacao);
       return CPC_POSITIVE_FINALIZACOES.has(normalized);
     }).length;
 
     const cpcNegative = filteredCalls.filter((call) => {
+      if (!isAnsweredCall(call)) return false;
       const normalized = normalizeFinalizacaoKey(call.finalizacao);
       return CPC_NEGATIVE_FINALIZACOES.has(normalized);
     }).length;
