@@ -1295,24 +1295,6 @@ export default function LigacoesPage() {
         </div>
 
         <div className="panel p-3">
-          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-300">Eficiencia</p>
-          <div className="mt-2 grid gap-2 md:grid-cols-2">
-            <article className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200">Taxa de Atendimento</p>
-              <p className="mt-1 text-4xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
-              <p className="mt-1 text-[11px] text-emerald-200/90">
-                {summary.answered}/{filteredCalls.length} atendidas
-              </p>
-            </article>
-            <article className="rounded-md border border-blue-500/40 bg-blue-500/10 p-3">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-blue-200">TMA</p>
-              <p className="mt-1 text-4xl font-semibold leading-none text-blue-100">{tmaValue}</p>
-              <p className="mt-1 text-[11px] text-blue-200/90">Tempo medio de atendimento</p>
-            </article>
-          </div>
-        </div>
-
-        <div className="panel p-3">
           <p className="text-[10px] uppercase tracking-[0.12em] text-slate-300">Qualidade (CPC)</p>
           <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
             <article className="rounded-md border border-violet-500/40 bg-violet-500/10 p-3">
@@ -1348,6 +1330,24 @@ export default function LigacoesPage() {
                 <p className="text-xl font-semibold leading-none text-orange-100">{contactQuality.improdutivas}</p>
               </div>
               <p className="mt-1 text-[11px] text-orange-200/90">Sem conexao/base</p>
+            </article>
+          </div>
+        </div>
+
+        <div className="panel p-3">
+          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-300">Eficiencia</p>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <article className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200">Taxa de Atendimento</p>
+              <p className="mt-1 text-4xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
+              <p className="mt-1 text-[11px] text-emerald-200/90">
+                {summary.answered}/{filteredCalls.length} atendidas
+              </p>
+            </article>
+            <article className="rounded-md border border-blue-500/40 bg-blue-500/10 p-3">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-blue-200">TMA</p>
+              <p className="mt-1 text-4xl font-semibold leading-none text-blue-100">{tmaValue}</p>
+              <p className="mt-1 text-[11px] text-blue-200/90">Tempo medio de atendimento</p>
             </article>
           </div>
         </div>
