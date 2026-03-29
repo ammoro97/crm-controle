@@ -142,6 +142,27 @@ function LeadObservationsTab({ draftLead, onDraftChange, onPersist, targetObserv
     return () => window.clearTimeout(clearId);
   }, [highlightedObservationId]);
 
+  const visibleObservations = useMemo(
+    () =>
+      draftLead.observationLog
+        .filter((item) => {
+          const content = String(item.content || "").trim();
+          if (!content) return false;
+
+          const lower = content.toLowerCase();
+          if (lower.includes("finalizacao:")) return false;
+          if (lower.includes("proxima acao:")) return false;
+          if (lower.includes("follow-up:")) return false;
+          if (lower.includes("duracao:")) return false;
+          if (lower.includes("data/hora da ligacao:")) return false;
+          if (lower.includes("motivo:")) return false;
+          return true;
+        })
+        .slice()
+        .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)),
+    [draftLead.observationLog],
+  );
+
   const addObservation = () => {
     const content = noteText.trim();
     if (!content) return;
@@ -209,13 +230,10 @@ function LeadObservationsTab({ draftLead, onDraftChange, onPersist, targetObserv
       </div>
 
       <div className="space-y-2">
-        {draftLead.observationLog.length === 0 ? (
+        {visibleObservations.length === 0 ? (
           <div className="rounded-xl border border-border bg-slate-900/50 p-4 text-sm text-muted">Nenhuma observacao registrada.</div>
         ) : (
-          draftLead.observationLog
-            .slice()
-            .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
-            .map((item) => (
+          visibleObservations.map((item) => (
               <article
                 id={`lead-observation-${item.id}`}
                 key={item.id}

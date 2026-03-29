@@ -1,10 +1,7 @@
 import { Lead } from "@/types/crm";
 import {
   businessTypeOptions,
-  buyingMomentOptions,
-  decisionOptions,
   getLeadCommercialData,
-  icpOptions,
   revenueOptions,
   updateCommercialField,
 } from "./lead-detail-shared";
@@ -73,41 +70,6 @@ export function LeadIntelligenceTab({
             isEditing={isEditing}
             onActivateEdit={onActivateEdit}
             onChange={(value) => applyUpdate("averageLeadsPerMonth", value)}
-          />
-        </div>
-      </LeadSectionCard>
-
-      <LeadSectionCard title="Comercial" subtitle="Indicadores de maturidade e decisao">
-        <div className="grid gap-2 md:grid-cols-2">
-          <LeadInlineField
-            label="Decisor identificado"
-            value={commercial.decisionMakerIdentified}
-            editable
-            isEditing={isEditing}
-            type="select"
-            selectOptions={decisionOptions}
-            onActivateEdit={onActivateEdit}
-            onChange={(value) => applyUpdate("decisionMakerIdentified", value)}
-          />
-          <LeadInlineField
-            label="Momento de compra"
-            value={commercial.buyingMoment}
-            editable
-            isEditing={isEditing}
-            type="select"
-            selectOptions={buyingMomentOptions}
-            onActivateEdit={onActivateEdit}
-            onChange={(value) => applyUpdate("buyingMoment", value)}
-          />
-          <LeadInlineField
-            label="Fit ICP"
-            value={commercial.icpFit}
-            editable
-            isEditing={isEditing}
-            type="select"
-            selectOptions={icpOptions}
-            onActivateEdit={onActivateEdit}
-            onChange={(value) => applyUpdate("icpFit", value)}
           />
         </div>
       </LeadSectionCard>
