@@ -14,18 +14,19 @@ export function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const { currentUser, loading } = useAuth();
   const [open, setOpen] = useState(false);
-  const isLoginPage = pathname === "/login";
+  const normalizedPath = (pathname || "/").replace(/\/+$/, "") || "/";
+  const isAuthRoute = normalizedPath === "/login" || normalizedPath === "/cadastro";
 
   useEffect(() => {
     if (loading) return;
-    if (!currentUser && !isLoginPage) {
+    if (!currentUser && !isAuthRoute) {
       router.replace("/login");
       return;
     }
-    if (currentUser && isLoginPage) {
+    if (currentUser && isAuthRoute) {
       router.replace("/leads");
     }
-  }, [currentUser, isLoginPage, loading, router]);
+  }, [currentUser, isAuthRoute, loading, router]);
 
   if (loading) {
     return (
@@ -35,7 +36,7 @@ export function AppShell({ children }: AppShellProps) {
     );
   }
 
-  if (!currentUser && !isLoginPage) {
+  if (!currentUser && !isAuthRoute) {
     return (
       <div className="min-h-screen px-4 py-6 md:px-7">
         <div className="panel p-5 text-sm text-slate-300">Redirecionando para login...</div>
@@ -43,7 +44,7 @@ export function AppShell({ children }: AppShellProps) {
     );
   }
 
-  if (isLoginPage) {
+  if (isAuthRoute) {
     return <main className="px-4 py-6 md:px-7">{children}</main>;
   }
 

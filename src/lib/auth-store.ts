@@ -9,8 +9,6 @@ const USERS_FILE = path.join(DATA_DIR, "users.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "auth-sessions.json");
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
-const DEFAULT_USER_EMAIL = "admin@crm.local";
-const DEFAULT_USER_PASSWORD = "123456";
 
 let usersCache: UserRecord[] | null = null;
 let sessionsCache: AuthSessionRecord[] | null = null;
@@ -26,6 +24,14 @@ function toPublicUser(user: UserRecord): PublicUser {
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
+}
+
+function toDefaultNameFromEmail(email: string) {
+  const localPart = normalizeEmail(email).split("@")[0] || "usuario";
+  return localPart
+    .replace(/[._-]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function toResponsavelId(value: string) {
@@ -55,29 +61,11 @@ async function writeJSONFile<T>(filePath: string, value: T) {
   await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
 }
 
-async function bootstrapDefaultUser() {
-  const id = "U-ADMIN-001";
-  const nome = "Rafael";
-  const responsavelId = toResponsavelId(nome);
-  const senhaHash = await bcrypt.hash(DEFAULT_USER_PASSWORD, 10);
-  const next: UserRecord[] = [
-    {
-      id,
-      nome,
-      email: DEFAULT_USER_EMAIL,
-      senhaHash,
-      responsavelId,
-    },
-  ];
-  await writeJSONFile(USERS_FILE, next);
-  return next;
-}
-
 async function loadUsers(): Promise<UserRecord[]> {
   if (usersCache) return usersCache;
   const parsed = await readJSONFile<UserRecord[]>(USERS_FILE, []);
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    usersCache = await bootstrapDefaultUser();
+    usersCache = [];
     return usersCache;
   }
   usersCache = parsed
@@ -123,6 +111,46 @@ export async function findUserByEmail(email: string): Promise<UserRecord | null>
   const users = await loadUsers();
   const normalized = normalizeEmail(email);
   return users.find((user) => normalizeEmail(user.email) === normalized) || null;
+}
+
+export async function registerUser(input: {
+  email: string;
+  password: string;
+  nome?: string;
+  responsavelId?: string;
+}): Promise<{ success: true; user: PublicUser } | { success: false; message: string }> {
+  const email = normalizeEmail(input.email);
+  const password = String(input.password || "");
+
+  if (!email) {
+    return { success: false, message: "Informe um email valido." };
+  }
+
+  if (!password) {
+    return { success: false, message: "Informe uma senha valida." };
+  }
+
+  const existing = await findUserByEmail(email);
+  if (existing) {
+    return { success: false, message: "Ja existe um usuario cadastrado com este email." };
+  }
+
+  const nome = String(input.nome || "").trim() || toDefaultNameFromEmail(email);
+  const id = `USR-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const senhaHash = await bcrypt.hash(password, 10);
+  const responsavelId = String(input.responsavelId || "").trim() || toResponsavelId(`${nome}-${id.slice(-4)}`);
+
+  const nextUser: UserRecord = {
+    id,
+    nome,
+    email,
+    senhaHash,
+    responsavelId,
+  };
+
+  const users = await loadUsers();
+  await saveUsers([nextUser, ...users]);
+  return { success: true, user: toPublicUser(nextUser) };
 }
 
 export async function validateCredentials(email: string, password: string): Promise<PublicUser | null> {
