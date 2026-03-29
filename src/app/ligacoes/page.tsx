@@ -1181,8 +1181,7 @@ export default function LigacoesPage() {
       const duration = Number(call.durationSeconds || 0);
       if ((call.startedAt || "").slice(0, 10) === today) todayCalls += 1;
       totalCallSeconds += Math.max(0, duration);
-      const classification = getFinalizacaoClassification(call.finalizacao);
-      const connected = classification ? classification.conectado : isTechnicalAnswered(call.status, duration);
+      const connected = String(call.status || "").trim().toLowerCase() === "atendida";
       if (connected) {
         answered += 1;
         totalAnsweredSeconds += duration;
