@@ -16,6 +16,8 @@ type LeadDetailDrawerProps = {
   open: boolean;
   onSave: (lead: Lead) => void;
   onClose: () => void;
+  initialTab?: DetailTab;
+  initialObservationId?: string | null;
 };
 
 type DetailTab = "resumo" | "historico" | "qualificacao" | "observacoes";
@@ -133,19 +135,11 @@ function LeadObservationsTab({ draftLead, onDraftChange, onPersist, targetObserv
     setHighlightedObservationId(targetObservationId);
   }, [targetObservationId]);
 
-  useEffect(() => {
-    if (!highlightedObservationId) return;
-    const element = document.getElementById(`lead-observation-${highlightedObservationId}`);
-    if (!element) return;
-    element.scrollIntoView({ behavior: "smooth", block: "center" });
-    const clearId = window.setTimeout(() => setHighlightedObservationId(null), 1800);
-    return () => window.clearTimeout(clearId);
-  }, [highlightedObservationId]);
-
   const visibleObservations = useMemo(
     () =>
       draftLead.observationLog
         .filter((item) => {
+          if (item.type === "analise ia") return true;
           const content = String(item.content || "").trim();
           if (!content) return false;
 
@@ -162,6 +156,15 @@ function LeadObservationsTab({ draftLead, onDraftChange, onPersist, targetObserv
         .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)),
     [draftLead.observationLog],
   );
+
+  useEffect(() => {
+    if (!highlightedObservationId) return;
+    const element = document.getElementById(`lead-observation-${highlightedObservationId}`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    const clearId = window.setTimeout(() => setHighlightedObservationId(null), 1800);
+    return () => window.clearTimeout(clearId);
+  }, [highlightedObservationId, visibleObservations]);
 
   const addObservation = () => {
     const content = noteText.trim();
@@ -259,7 +262,14 @@ function LeadObservationsTab({ draftLead, onDraftChange, onPersist, targetObserv
   );
 }
 
-export function LeadDetailDrawer({ lead, open, onSave, onClose }: LeadDetailDrawerProps) {
+export function LeadDetailDrawer({
+  lead,
+  open,
+  onSave,
+  onClose,
+  initialTab,
+  initialObservationId,
+}: LeadDetailDrawerProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>("resumo");
   const [isEditing, setIsEditing] = useState(false);
   const [draftLead, setDraftLead] = useState<Lead | null>(lead);
@@ -268,9 +278,9 @@ export function LeadDetailDrawer({ lead, open, onSave, onClose }: LeadDetailDraw
   useEffect(() => {
     setDraftLead(lead);
     setIsEditing(false);
-    setActiveTab("resumo");
-    setTargetObservationId(null);
-  }, [lead?.id]);
+    setActiveTab(initialTab || "resumo");
+    setTargetObservationId(initialObservationId || null);
+  }, [initialObservationId, initialTab, lead?.id]);
 
   if (!open || !lead || !draftLead) return null;
 

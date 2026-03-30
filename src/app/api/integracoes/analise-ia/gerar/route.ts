@@ -1,10 +1,12 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getUserBySessionToken } from "@/lib/auth-store";
+import { saveCallAnalysisRequest, updateCallAnalysisRequest } from "@/lib/call-analysis-store";
 import { getCallLogs, upsertCallLog } from "@/lib/calls-store";
 import { getWebhookOutConfig, isWebhookOutConfigured } from "@/lib/webhook-out-config-store";
 import {
   CALL_ANALYSIS_EVENT,
+  CALL_ANALYSIS_RESULT_EVENT,
   CALL_ANALYSIS_SECRET_HEADER,
   CallAnalysisCallPayload,
   CallAnalysisRequestedPayload,
@@ -32,6 +34,14 @@ function normalizeWebhookUrl(value?: string) {
   return raw;
 }
 
+function normalizeDigits(value?: string | null) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function generateAnalysisRequestId() {
+  return `ANL-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function normalizeCallPayload(input?: CallAnalysisCallPayload): CallAnalysisCallPayload | null {
   if (!input) return null;
   const id = String(input.id || "").trim();
@@ -49,6 +59,8 @@ function normalizeCallPayload(input?: CallAnalysisCallPayload): CallAnalysisCall
 }
 
 export async function POST(request: Request) {
+  let createdRequestId = "";
+  let createdCallId = "";
   try {
     const body = (await request.json()) as GenerateAnalysisBody;
     let config = await getWebhookOutConfig();
@@ -83,13 +95,29 @@ export async function POST(request: Request) {
     }
 
     const allCalls = await getCallLogs();
-    const matchedCallLog = allCalls.find((entry) => entry.id === normalizedCall.id);
+    const matchedCallLog =
+      allCalls.find((entry) => entry.id === normalizedCall.id) ||
+      allCalls.find((entry) => String(entry.externalCallId || "").trim() === normalizedCall.id) ||
+      null;
 
+    const canonicalCallId = String(matchedCallLog?.id || normalizedCall.id).trim();
     const recordingUrl = normalizedCall.recordingUrl || matchedCallLog?.recordUrl || null;
-    const leadId = normalizedCall.leadId || matchedCallLog?.leadId || null;
-    const externalCallId = normalizedCall.externalCallId || matchedCallLog?.externalCallId || null;
-    const sessionId = normalizedCall.sessionId || matchedCallLog?.sessionId || null;
+    const leadId = String(normalizedCall.leadId || matchedCallLog?.leadId || "").trim();
+    const externalCallId = String(normalizedCall.externalCallId || matchedCallLog?.externalCallId || "").trim() || null;
+    const sessionId = String(normalizedCall.sessionId || matchedCallLog?.sessionId || "").trim() || null;
     const ramal = normalizedCall.ramal || matchedCallLog?.gateway || null;
+    const phoneDigits = normalizeDigits(normalizedCall.phone || matchedCallLog?.telefone || matchedCallLog?.called || "");
+
+    if (!canonicalCallId || !leadId || !phoneDigits) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Ligacao sem vinculo deterministico para analise. Verifique callId, leadId e telefone.",
+          code: "CALL_ANALYSIS_CORRELATION_REQUIRED",
+        },
+        { status: 400 },
+      );
+    }
 
     const cookieStore = await cookies();
     const token = cookieStore.get(SESSION_COOKIE)?.value || "";
@@ -98,15 +126,50 @@ export async function POST(request: Request) {
     const triggeredByUserId = sessionUser?.id || body.triggeredByUserId || undefined;
     const triggeredByName = sessionUser?.nome || body.triggeredByName || undefined;
     const triggeredByEmail = sessionUser?.email || body.triggeredByEmail || undefined;
+    const requestId = generateAnalysisRequestId();
+    const callbackUrl = `${new URL(request.url).origin}/api/integracoes/analise-ia/retorno`;
+    const triggeredAt = new Date().toISOString();
+    createdRequestId = requestId;
+    createdCallId = canonicalCallId;
 
-    const payload: CallAnalysisRequestedPayload = {
-      event: CALL_ANALYSIS_EVENT,
-      triggeredAt: new Date().toISOString(),
+    await saveCallAnalysisRequest({
+      requestId,
+      callId: canonicalCallId,
+      leadId,
+      phoneDigits,
+      externalCallId,
+      sessionId,
+      triggeredAt,
       triggeredByUserId,
       triggeredByName,
       triggeredByEmail,
+      status: "processing",
+      observationId: null,
+      analysisText: null,
+      errorMessage: null,
+      completedAt: null,
+    });
+    console.log("[ANALISE_IA] REQUEST_CREATED", {
+      requestId,
+      callId: canonicalCallId,
+      leadId,
+      phoneDigits,
+      externalCallId,
+      sessionId,
+    });
+
+    const payload: CallAnalysisRequestedPayload = {
+      event: CALL_ANALYSIS_EVENT,
+      triggeredAt,
+      triggeredByUserId,
+      triggeredByName,
+      triggeredByEmail,
+      requestId,
+      callbackUrl,
       call: {
         ...normalizedCall,
+        id: canonicalCallId,
+        callId: canonicalCallId,
         leadId,
         externalCallId,
         sessionId,
@@ -128,6 +191,17 @@ export async function POST(request: Request) {
 
     if (!webhookResponse.ok) {
       const detail = await webhookResponse.text();
+      await updateCallAnalysisRequest(requestId, {
+        status: "error",
+        errorMessage: `Webhook status ${webhookResponse.status}${detail ? `: ${detail}` : ""}`,
+        completedAt: new Date().toISOString(),
+      });
+      await upsertCallLog({
+        id: canonicalCallId,
+        processingStatus: "error",
+        analysisRequestId: requestId,
+        analysisError: "Falha no envio ao processamento externo",
+      });
       return NextResponse.json(
         {
           success: false,
@@ -138,22 +212,60 @@ export async function POST(request: Request) {
         { status: 502 },
       );
     }
+    console.log("[ANALISE_IA] REQUEST_DISPATCHED", {
+      requestId,
+      callId: canonicalCallId,
+      webhookUrl: config.url,
+    });
 
-    if (matchedCallLog) {
-      await upsertCallLog({
-        id: matchedCallLog.id,
-        processingStatus: "processing",
-      });
-    }
+    await upsertCallLog({
+      id: canonicalCallId,
+      externalCallId,
+      sessionId,
+      leadId,
+      telefone: normalizedCall.phone || matchedCallLog?.telefone || "",
+      nome: normalizedCall.contactName || matchedCallLog?.nome || "",
+      empresa: normalizedCall.companyName || matchedCallLog?.empresa || "",
+      startedAt: normalizedCall.startedAt || matchedCallLog?.startedAt || null,
+      endedAt: normalizedCall.endedAt || matchedCallLog?.endedAt || null,
+      durationSeconds: Number(normalizedCall.durationSeconds || matchedCallLog?.durationSeconds || 0),
+      status: normalizedCall.status || matchedCallLog?.status || "Nao atendida",
+      gateway: normalizedCall.ramal || matchedCallLog?.gateway || null,
+      recordUrl: recordingUrl,
+      processingStatus: "processing",
+      analysisRequestId: requestId,
+      analysisObservationId: null,
+      analysisError: null,
+    });
 
     return NextResponse.json({
       success: true,
       message: "Solicitacao de analise enviada com sucesso.",
       event: CALL_ANALYSIS_EVENT,
-      callId: normalizedCall.id,
-      triggeredAt: payload.triggeredAt,
+      callbackEvent: CALL_ANALYSIS_RESULT_EVENT,
+      callId: canonicalCallId,
+      requestId,
+      triggeredAt,
     });
   } catch (error) {
+    if (createdRequestId && createdCallId) {
+      await updateCallAnalysisRequest(createdRequestId, {
+        status: "error",
+        errorMessage: error instanceof Error ? error.message : "Erro desconhecido",
+        completedAt: new Date().toISOString(),
+      });
+      await upsertCallLog({
+        id: createdCallId,
+        processingStatus: "error",
+        analysisRequestId: createdRequestId,
+        analysisError: "Erro interno ao iniciar analise",
+      });
+    }
+    console.error("[ANALISE_IA] REQUEST_FAILED", {
+      requestId: createdRequestId || null,
+      callId: createdCallId || null,
+      message: error instanceof Error ? error.message : "Erro desconhecido",
+    });
     return NextResponse.json(
       {
         success: false,

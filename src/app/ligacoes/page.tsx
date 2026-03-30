@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Modal } from "@/components/ui/modal";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
@@ -73,6 +73,11 @@ type MappedCall = {
   atendente: string;
   origem: string;
   ramal?: string | null;
+  aiAnalysis?: string | null;
+  processingStatus?: "pending" | "processing" | "done" | "error";
+  analysisRequestId?: string | null;
+  analysisObservationId?: string | null;
+  analysisError?: string | null;
   raw: Api4ComCallItem;
 };
 
@@ -100,6 +105,8 @@ type GenerateAnaliseIaResponse = {
   message?: string;
   error?: string;
   detail?: string | null;
+  requestId?: string;
+  callId?: string;
 };
 
 type AnalysisFeedbackEntry = {
@@ -545,6 +552,8 @@ function mapApiCallToRow(
   const rawStatus = String(item.hangup_cause ?? item.hangupCause ?? "").trim();
   const status = rawStatus ? humanizeHangupCause(rawStatus) : durationSeconds > 0 ? "Atendida" : "Não atendida";
   const rawId = String(item.id ?? item.uniqueid ?? item.call_id ?? "").trim();
+  const fallbackLookupId = `api4com-${normalizeDigits(String(item.telefone ?? item.to ?? "semfone"))}-${(startedAt || String(index)).replace(/[^0-9A-Za-z_-]/g, "")}`;
+  const callLookupId = rawId || fallbackLookupId;
   const metadata =
     item.metadata && typeof item.metadata === "object" ? (item.metadata as Record<string, unknown>) : null;
   const metadataLeadId = String(metadata?.leadId ?? "").trim();
@@ -556,7 +565,7 @@ function mapApiCallToRow(
   const metadataExternalCallId = String(metadata?.externalCallId ?? "").trim();
   const metadataGateway = String(metadata?.gateway ?? "").trim();
 
-  const internal = rawId ? context.internalById.get(rawId) : undefined;
+  const internal = context.internalById.get(callLookupId);
   const leadFromId =
     (metadataLeadId ? context.leadsIndexes.byId.get(metadataLeadId) : undefined) ||
     (internal?.leadId ? context.leadsIndexes.byId.get(internal.leadId) : undefined);
@@ -615,7 +624,7 @@ function mapApiCallToRow(
 
   if (matchedWrapup) {
     console.log(`${LIGACOES_DEBUG_PREFIX} TABLE_ROW_MATCH`, {
-      tableCallId: rawId || internal?.id || null,
+      tableCallId: callLookupId || internal?.id || null,
       sessionIdCandidate: sessionIdCandidate || null,
       metadataExternalCallId: metadataExternalCallId || null,
       wrapupId: matchedWrapup.id,
@@ -656,6 +665,11 @@ function mapApiCallToRow(
     atendente,
     origem: "api4com",
     ramal: metadataGateway || internal?.gateway || null,
+    aiAnalysis: internal?.aiAnalysis || null,
+    processingStatus: internal?.processingStatus || "pending",
+    analysisRequestId: internal?.analysisRequestId || null,
+    analysisObservationId: internal?.analysisObservationId || null,
+    analysisError: internal?.analysisError || null,
     raw: item,
   };
 }
@@ -708,6 +722,11 @@ function mapInternalCallToRow(
     atendente: atendenteFromWrapupResponsavelId || "Responsável não vinculado",
     origem: "interna",
     ramal: item.gateway || null,
+    aiAnalysis: item.aiAnalysis || null,
+    processingStatus: item.processingStatus || "pending",
+    analysisRequestId: item.analysisRequestId || null,
+    analysisObservationId: item.analysisObservationId || null,
+    analysisError: item.analysisError || null,
     raw: {
       record_url: item.recordUrl || undefined,
       hangup_cause: item.hangupCause || undefined,
@@ -883,6 +902,7 @@ function statusBadgeClass(status?: string) {
 }
 
 export default function LigacoesPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { currentUser } = useAuth();
   const responsaveisRecords = useResponsaveisRecords();
@@ -1166,6 +1186,15 @@ export default function LigacoesPage() {
   }, []);
 
   useEffect(() => {
+    const hasProcessingAnalysis = calls.some((call) => call.processingStatus === "processing");
+    if (!hasProcessingAnalysis) return;
+    const intervalId = window.setInterval(() => {
+      void loadCallsWithRetry("analysis-processing-poll", 1);
+    }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [calls]);
+
+  useEffect(() => {
     let unmounted = false;
 
     const checkCallEnd = async () => {
@@ -1371,8 +1400,34 @@ export default function LigacoesPage() {
     setSelectedIds([]);
   };
 
+  const handleViewAnaliseIa = (call: MappedCall) => {
+    const leadId = String(call.leadId || "").trim();
+    const observationId = String(call.analysisObservationId || "").trim();
+    if (!leadId || !observationId) {
+      setAnalysisFeedbackByCallId((prev) => ({
+        ...prev,
+        [call.id]: {
+          type: "error",
+          message: "Analise concluida sem vinculo completo com o lead. Atualize a tabela e tente novamente.",
+        },
+      }));
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set("leadId", leadId);
+    params.set("tab", "observacoes");
+    params.set("observationId", observationId);
+    params.set("source", "ligacoes");
+    router.push(`/leads?${params.toString()}`);
+  };
+
   const handleGenerateAnaliseIa = async (call: MappedCall) => {
     if (analysisLoadingCallId) return;
+    if (call.processingStatus === "done" && call.analysisObservationId) {
+      handleViewAnaliseIa(call);
+      return;
+    }
     const localWebhook = readWebhookOutClientConfig();
 
     if (!webhookOutConfigured && !localWebhook?.url) {
@@ -1394,6 +1449,17 @@ export default function LigacoesPage() {
         message: "Gerando e enviando solicitacao para processamento externo...",
       },
     }));
+    setCalls((prev) =>
+      prev.map((item) =>
+        item.id === call.id
+          ? {
+              ...item,
+              processingStatus: "processing",
+              analysisError: null,
+            }
+          : item,
+      ),
+    );
 
     const recordingUrl = getCallRecordingUrl(call);
     const metadata =
@@ -1447,6 +1513,17 @@ export default function LigacoesPage() {
 
       const data = (await response.json()) as GenerateAnaliseIaResponse;
       if (!response.ok || !data.success) {
+        setCalls((prev) =>
+          prev.map((item) =>
+            item.id === call.id
+              ? {
+                  ...item,
+                  processingStatus: "error",
+                  analysisError: data.message || data.error || "Falha ao enviar analise para processamento externo.",
+                }
+              : item,
+          ),
+        );
         setAnalysisFeedbackByCallId((prev) => ({
           ...prev,
           [call.id]: {
@@ -1461,10 +1538,34 @@ export default function LigacoesPage() {
         ...prev,
         [call.id]: {
           type: "success",
-          message: data.message || "Solicitacao de analise enviada com sucesso.",
+          message: "Solicitacao enviada. Aguarde o processamento para liberar Ver analise.",
         },
       }));
+      setCalls((prev) =>
+        prev.map((item) =>
+          item.id === call.id
+            ? {
+                ...item,
+                processingStatus: "processing",
+                analysisRequestId: data.requestId || item.analysisRequestId || null,
+                analysisError: null,
+              }
+            : item,
+        ),
+      );
+      await loadCallsWithRetry("analysis-requested", 1);
     } catch {
+      setCalls((prev) =>
+        prev.map((item) =>
+          item.id === call.id
+            ? {
+                ...item,
+                processingStatus: "error",
+                analysisError: "Nao foi possivel enviar analise. Verifique a configuracao do webhook.",
+              }
+            : item,
+        ),
+      );
       setAnalysisFeedbackByCallId((prev) => ({
         ...prev,
         [call.id]: {
@@ -2407,6 +2508,13 @@ export default function LigacoesPage() {
                     const recordingUrl = getCallRecordingUrl(call);
                     const analysisFeedback = analysisFeedbackByCallId[call.id];
                     const analysisBusy = analysisLoadingCallId === call.id;
+                    const analysisDone = call.processingStatus === "done" && Boolean(call.analysisObservationId);
+                    const analysisProcessing = analysisBusy || call.processingStatus === "processing";
+                    const analysisButtonLabel = analysisDone
+                      ? "Ver análise"
+                      : analysisProcessing
+                        ? "Gerando análise..."
+                        : "Gerar análise";
                     return (
                       <Fragment key={call.id}>
                         <tr className="border-b border-border/70 text-sm text-slate-200 transition hover:bg-slate-900/40">
@@ -2536,24 +2644,27 @@ export default function LigacoesPage() {
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Análise IA</p>
-                                  {webhookOutLoading ? (
+                                  {webhookOutLoading && !analysisDone ? (
                                     <p className="mt-1 text-sm text-slate-500">Carregando integração...</p>
                                   ) : (
                                     <button
                                       type="button"
                                       className="btn-primary mt-1 h-8 px-2.5 py-1 text-xs"
                                       onClick={() => void handleGenerateAnaliseIa(call)}
-                                      disabled={analysisBusy || !webhookOutConfigured}
+                                      disabled={(analysisProcessing && !analysisDone) || (!webhookOutConfigured && !analysisDone)}
                                     >
-                                      {analysisBusy ? "Gerando..." : "Gerar análise"}
+                                      {analysisButtonLabel}
                                     </button>
                                   )}
-                                  {!webhookOutLoading && !webhookOutConfigured ? (
+                                  {!webhookOutLoading && !webhookOutConfigured && !analysisDone ? (
                                     <p className="mt-1 text-xs text-amber-300">
                                       Configure o webhook de saída em Configurações &gt; Integrações.
                                     </p>
                                   ) : null}
                                   {webhookOutError ? <p className="mt-1 text-xs text-rose-300">{webhookOutError}</p> : null}
+                                  {call.analysisError ? (
+                                    <p className="mt-1 text-xs text-rose-300">{call.analysisError}</p>
+                                  ) : null}
                                   {analysisFeedback ? (
                                     <p
                                       className={`mt-1 text-xs ${
@@ -2565,6 +2676,11 @@ export default function LigacoesPage() {
                                       }`}
                                     >
                                       {analysisFeedback.message}
+                                    </p>
+                                  ) : null}
+                                  {analysisDone && call.aiAnalysis ? (
+                                    <p className="mt-1 text-xs text-emerald-300">
+                                      Analise concluida e vinculada ao lead. Clique em Ver análise.
                                     </p>
                                   ) : null}
                                   <p className="mt-1 text-[11px] text-slate-500">

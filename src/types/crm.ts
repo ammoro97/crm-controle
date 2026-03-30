@@ -36,7 +36,13 @@ export type LeadHistoryEvent = {
   linkedTab?: "observacoes";
 };
 
-export type LeadObservationType = "contato" | "follow-up" | "objecao" | "informacao interna" | "negociacao";
+export type LeadObservationType =
+  | "contato"
+  | "follow-up"
+  | "objecao"
+  | "informacao interna"
+  | "negociacao"
+  | "analise ia";
 
 export type LeadObservation = {
   id: string;
@@ -185,4 +191,7 @@ export type CallLog = {
   transcript?: string | null;
   aiAnalysis?: string | null;
   processingStatus?: "pending" | "processing" | "done" | "error";
+  analysisRequestId?: string | null;
+  analysisObservationId?: string | null;
+  analysisError?: string | null;
 };

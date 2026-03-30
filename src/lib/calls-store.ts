@@ -63,6 +63,9 @@ function normalizeCallLog(input: Partial<CallLog> & Pick<CallLog, "id">): CallLo
     transcript: input.transcript || null,
     aiAnalysis: input.aiAnalysis || null,
     processingStatus: input.processingStatus || "pending",
+    analysisRequestId: input.analysisRequestId || null,
+    analysisObservationId: input.analysisObservationId || null,
+    analysisError: input.analysisError || null,
     createdAt: safeDateValue(input.createdAt) || now,
     updatedAt: safeDateValue(input.updatedAt) || now,
   };

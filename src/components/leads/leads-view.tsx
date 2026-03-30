@@ -1,12 +1,13 @@
 "use client";
 
 import { ChangeEvent, DragEvent, FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PageTopbar } from "@/components/layout/page-topbar";
 import { Modal } from "@/components/ui/modal";
 import { getLeadsSnapshot, setLeadsSnapshot } from "@/lib/crm-data-store";
 import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
-import { Lead, LeadChannel, LeadHistoryEvent, LeadStatus } from "@/types/crm";
+import { Lead, LeadChannel, LeadHistoryEvent, LeadObservation, LeadStatus } from "@/types/crm";
 import { LeadDetailDrawer } from "./lead-detail-drawer";
 import { LeadsTable } from "./leads-table";
 
@@ -33,6 +34,23 @@ type ImportedLeadRow = {
 type ImportedPreviewRow = ImportedLeadRow & {
   statusType: "valida" | "invalida" | "duplicada";
   statusLabel: string;
+};
+
+type LeadAiObservationItem = {
+  id?: string;
+  leadId?: string;
+  callId?: string;
+  requestId?: string;
+  owner?: string;
+  type?: "analise ia";
+  content?: string;
+  date?: string;
+  time?: string;
+};
+
+type LeadAiObservationResponse = {
+  success?: boolean;
+  observations?: LeadAiObservationItem[];
 };
 
 const statusOptions: LeadStatus[] = [
@@ -106,6 +124,20 @@ function historyEvent(owner: string, eventType: string, description: string): Le
     eventType,
     description,
     owner,
+  };
+}
+
+function toLeadObservationFromAi(item: LeadAiObservationItem): LeadObservation | null {
+  const id = String(item?.id || "").trim();
+  const content = String(item?.content || "").trim();
+  if (!id || !content) return null;
+  return {
+    id,
+    date: String(item?.date || "").trim() || new Date().toISOString().slice(0, 10),
+    time: String(item?.time || "").trim() || "00:00",
+    owner: String(item?.owner || "Analise da IA").trim() || "Analise da IA",
+    type: "analise ia",
+    content,
   };
 }
 
@@ -266,14 +298,21 @@ function buildRowIdentity(row: Pick<ImportedLeadRow, "email" | "phone">): string
 }
 
 export function LeadsView({ title, filter }: LeadsViewProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const responsaveis = useResponsaveis();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const openedFromQueryRef = useRef<string | null>(null);
 
   const [leads, setLeads] = useState<Lead[]>(() => getLeadsSnapshot().map(normalizeLead));
   const [draftLead, setDraftLead] = useState<Lead | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [detailInitialTab, setDetailInitialTab] = useState<"resumo" | "historico" | "qualificacao" | "observacoes">(
+    "resumo",
+  );
+  const [detailInitialObservationId, setDetailInitialObservationId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const deferredSearchTerm = useDeferredValue(searchTerm);
 
@@ -320,6 +359,63 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncAiObservations = async () => {
+      try {
+        const response = await fetch("/api/integracoes/analise-ia/observacoes", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = (await response.json()) as LeadAiObservationResponse;
+        if (!response.ok || !data.success || !Array.isArray(data.observations)) return;
+
+        const byLeadId = new Map<string, LeadObservation[]>();
+        for (const item of data.observations) {
+          const leadId = String(item?.leadId || "").trim();
+          if (!leadId) continue;
+          const observation = toLeadObservationFromAi(item);
+          if (!observation) continue;
+          const current = byLeadId.get(leadId) || [];
+          current.push(observation);
+          byLeadId.set(leadId, current);
+        }
+
+        if (cancelled || byLeadId.size === 0) return;
+
+        setLeads((prev) => {
+          let changed = false;
+          const next = prev.map((lead) => {
+            const incoming = byLeadId.get(lead.id);
+            if (!incoming || incoming.length === 0) return lead;
+            const existingIds = new Set((lead.observationLog || []).map((item) => item.id));
+            const toInsert = incoming.filter((item) => !existingIds.has(item.id));
+            if (toInsert.length === 0) return lead;
+            changed = true;
+            return {
+              ...lead,
+              observationLog: [...(lead.observationLog || []), ...toInsert],
+            };
+          });
+          return changed ? next : prev;
+        });
+      } catch {
+        // ignore background sync failures
+      }
+    };
+
+    void syncAiObservations();
+    const intervalId = window.setInterval(() => {
+      void syncAiObservations();
+    }, 12000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const visibleLeads = useMemo(() => {
     const base = filter === "all" ? leads : leads.filter((lead) => lead.channel === filter);
     const sorted = [...base].sort((a, b) => a.name.localeCompare(b.name));
@@ -341,6 +437,35 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   }, [deferredSearchTerm, filter, leads]);
 
   const detailLead = useMemo(() => leads.find((lead) => lead.id === detailLeadId) ?? null, [detailLeadId, leads]);
+
+  useEffect(() => {
+    const leadId = String(searchParams.get("leadId") || "").trim();
+    if (!leadId) return;
+    const leadExists = leads.some((lead) => lead.id === leadId);
+    if (!leadExists) return;
+
+    const requestedTab = String(searchParams.get("tab") || "").trim().toLowerCase();
+    const safeTab =
+      requestedTab === "observacoes"
+        ? "observacoes"
+        : requestedTab === "historico"
+          ? "historico"
+          : requestedTab === "qualificacao"
+            ? "qualificacao"
+            : "resumo";
+    const observationId = String(searchParams.get("observationId") || "").trim() || null;
+    const queryKey = `${leadId}|${safeTab}|${observationId || ""}`;
+    if (openedFromQueryRef.current === queryKey) return;
+    openedFromQueryRef.current = queryKey;
+
+    setDetailInitialTab(safeTab);
+    setDetailInitialObservationId(observationId);
+    setDetailLeadId(leadId);
+    setDetailOpen(true);
+
+    const pathname = typeof window !== "undefined" ? window.location.pathname : "/leads";
+    router.replace(pathname, { scroll: false });
+  }, [leads, router, searchParams]);
 
   const importPreviewRows = useMemo<ImportedPreviewRow[]>(() => {
     const existingKeys = new Set(leads.map((lead) => buildRowIdentity(lead)).filter(Boolean));
@@ -371,6 +496,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   }, [importPreviewRows]);
 
   const openLeadDetails = (lead: Lead) => {
+    setDetailInitialTab("resumo");
+    setDetailInitialObservationId(null);
     setDetailLeadId(lead.id);
     setDetailOpen(true);
   };
@@ -581,9 +708,13 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         lead={detailLead}
         open={detailOpen}
         onSave={updateLeadById}
+        initialTab={detailInitialTab}
+        initialObservationId={detailInitialObservationId}
         onClose={() => {
           setDetailOpen(false);
           setDetailLeadId(null);
+          setDetailInitialTab("resumo");
+          setDetailInitialObservationId(null);
         }}
       />
 
