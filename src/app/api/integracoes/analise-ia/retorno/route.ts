@@ -57,6 +57,17 @@ type CallbackCorrelationContext = {
   triggeredAt?: string;
 };
 
+type CallLogLookupContext = {
+  requestCallId: string;
+  requestExternalCallId?: string | null;
+  requestSessionId?: string | null;
+  requestLeadId: string;
+  requestPhoneDigits: string;
+  callbackCallId: string;
+  callbackExternalCallId?: string | null;
+  callbackSessionId?: string | null;
+};
+
 function normalizeDigits(value?: string | null) {
   return String(value || "").replace(/\D/g, "");
 }
@@ -186,6 +197,57 @@ function nowDateTime() {
 function createSyntheticRequestId(callId: string) {
   const safeCallId = String(callId || "SEM_CALL").replace(/[^0-9A-Za-z_-]/g, "").slice(0, 32) || "SEM_CALL";
   return `ANL-CB-${safeCallId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function buildUniqueValues(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+function resolveDeterministicCallLog(
+  callLogs: Awaited<ReturnType<typeof getCallLogs>>,
+  context: CallLogLookupContext,
+) {
+  const idCandidates = buildUniqueValues([
+    context.requestCallId,
+    context.requestExternalCallId,
+    context.callbackCallId,
+    context.callbackExternalCallId,
+  ]);
+  const sessionCandidates = buildUniqueValues([context.requestSessionId, context.callbackSessionId]);
+
+  const byStrongId = callLogs.filter((entry) => {
+    const entryId = String(entry.id || "").trim();
+    const entryExternal = String(entry.externalCallId || "").trim();
+    const entrySession = String(entry.sessionId || "").trim();
+    return (
+      (entryId && idCandidates.includes(entryId)) ||
+      (entryExternal && idCandidates.includes(entryExternal)) ||
+      (entrySession && sessionCandidates.includes(entrySession))
+    );
+  });
+
+  const filteredByLeadAndPhone = byStrongId.filter((entry) => {
+    const entryLeadId = String(entry.leadId || "").trim();
+    const entryPhoneDigits = normalizeDigits(entry.telefone || entry.called || entry.caller || "");
+    const leadMatches = !entryLeadId || entryLeadId === context.requestLeadId;
+    const phoneMatches = !entryPhoneDigits || entryPhoneDigits === context.requestPhoneDigits;
+    return leadMatches && phoneMatches;
+  });
+
+  const ordered = [...filteredByLeadAndPhone].sort((a, b) => {
+    const first = String(a.startedAt || a.createdAt || "");
+    const second = String(b.startedAt || b.createdAt || "");
+    return second.localeCompare(first);
+  });
+
+  return {
+    idCandidates,
+    sessionCandidates,
+    strongCandidates: byStrongId,
+    filteredCandidates: filteredByLeadAndPhone,
+    selected: ordered[0] || null,
+    ambiguous: ordered.length > 1,
+  };
 }
 
 export async function POST(request: Request) {
@@ -419,6 +481,18 @@ export async function POST(request: Request) {
       });
     }
 
+    console.log("[ANALISE_IA] CALLBACK_LOOKUP_INPUT", {
+      requestId,
+      callbackCallId: callbackCallId || null,
+      callbackExternalCallId: callbackExternalCallId || null,
+      callbackSessionId: callbackSessionId || null,
+      requestCallId: requestRecord.callId,
+      requestExternalCallId: requestRecord.externalCallId || null,
+      requestSessionId: requestRecord.sessionId || null,
+      requestLeadId: requestRecord.leadId,
+      requestPhoneDigits: requestRecord.phoneDigits,
+    });
+
     const mismatches: string[] = [];
     if (requestRecord.callId !== callbackCallId && requestRecord.externalCallId !== callbackCallId) {
       mismatches.push("callId");
@@ -436,20 +510,67 @@ export async function POST(request: Request) {
       mismatches.push("sessionId");
     }
 
-    const callLog =
-      matchedCallLogs.find((entry) => entry.id === requestRecord.callId) ||
-      allCallLogs.find(
-        (entry) =>
-          entry.id === requestRecord.callId || String(entry.externalCallId || "").trim() === requestRecord.callId,
-      ) ||
-      null;
+    const resolvedCallLog = resolveDeterministicCallLog(allCallLogs, {
+      requestCallId: requestRecord.callId,
+      requestExternalCallId: requestRecord.externalCallId || null,
+      requestSessionId: requestRecord.sessionId || null,
+      requestLeadId: requestRecord.leadId,
+      requestPhoneDigits: requestRecord.phoneDigits,
+      callbackCallId,
+      callbackExternalCallId: callbackExternalCallId || null,
+      callbackSessionId: callbackSessionId || null,
+    });
+
+    console.log("[ANALISE_IA] CALLBACK_CALLLOG_SEARCH", {
+      requestId,
+      idCandidates: resolvedCallLog.idCandidates,
+      sessionCandidates: resolvedCallLog.sessionCandidates,
+      strongCandidatesCount: resolvedCallLog.strongCandidates.length,
+      filteredCandidatesCount: resolvedCallLog.filteredCandidates.length,
+      ambiguous: resolvedCallLog.ambiguous,
+      selectedCallLogId: resolvedCallLog.selected?.id || null,
+    });
+
+    if (resolvedCallLog.ambiguous) {
+      mismatches.push("callLogAmbiguous");
+    }
+
+    let callLog = resolvedCallLog.selected;
     if (!callLog) {
-      mismatches.push("callLogNotFound");
-    } else {
+      const repaired = await upsertCallLog({
+        id: requestRecord.callId,
+        externalCallId: requestRecord.externalCallId || callbackExternalCallId || null,
+        sessionId: requestRecord.sessionId || callbackSessionId || null,
+        leadId: requestRecord.leadId,
+        telefone: callbackPhoneDigits,
+        processingStatus: "processing",
+        analysisRequestId: requestId,
+        analysisError: null,
+      });
+      callLog = repaired.record;
+      console.warn("[ANALISE_IA] CALLBACK_CALLLOG_REPAIRED", {
+        requestId,
+        repairedCallLogId: callLog.id,
+        externalCallId: callLog.externalCallId || null,
+        sessionId: callLog.sessionId || null,
+      });
+    }
+
+    if (callLog) {
       const callLogLeadId = String(callLog.leadId || "").trim();
       const callLogPhoneDigits = normalizeDigits(callLog.telefone || callLog.called || callLog.caller || "");
       if (callLogLeadId && callLogLeadId !== requestRecord.leadId) mismatches.push("callLogLeadMismatch");
       if (callLogPhoneDigits && callLogPhoneDigits !== requestRecord.phoneDigits) mismatches.push("callLogPhoneMismatch");
+      console.log("[ANALISE_IA] CALLBACK_CALLLOG_RESOLVED", {
+        requestId,
+        callLogId: callLog.id,
+        callLogExternalCallId: callLog.externalCallId || null,
+        callLogSessionId: callLog.sessionId || null,
+        callLogLeadId: callLogLeadId || null,
+        callLogPhoneDigits: callLogPhoneDigits || null,
+      });
+    } else {
+      mismatches.push("callLogNotFound");
     }
 
     if (mismatches.length > 0) {
@@ -463,6 +584,13 @@ export async function POST(request: Request) {
         processingStatus: "error",
         analysisRequestId: requestId,
         analysisError: `Falha de correlacao: ${mismatches.join(", ")}`,
+      });
+      console.error("[ANALISE_IA] CALLBACK_CORRELATION_MISMATCH", {
+        requestId,
+        callId: requestRecord.callId,
+        leadId: requestRecord.leadId,
+        phoneDigits: requestRecord.phoneDigits,
+        mismatches,
       });
       return NextResponse.json(
         {

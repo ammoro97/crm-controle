@@ -203,6 +203,32 @@ export async function POST(request: Request) {
       callbackHasSignature: Boolean(callbackSignature),
     });
 
+    await upsertCallLog({
+      id: canonicalCallId,
+      externalCallId,
+      sessionId,
+      leadId,
+      telefone: normalizedCall.phone || matchedCallLog?.telefone || "",
+      nome: normalizedCall.contactName || matchedCallLog?.nome || "",
+      empresa: normalizedCall.companyName || matchedCallLog?.empresa || "",
+      startedAt: normalizedCall.startedAt || matchedCallLog?.startedAt || null,
+      endedAt: normalizedCall.endedAt || matchedCallLog?.endedAt || null,
+      durationSeconds: Number(normalizedCall.durationSeconds || matchedCallLog?.durationSeconds || 0),
+      status: normalizedCall.status || matchedCallLog?.status || "Nao atendida",
+      gateway: normalizedCall.ramal || matchedCallLog?.gateway || null,
+      recordUrl: recordingUrl,
+      processingStatus: "processing",
+      analysisRequestId: requestId,
+      analysisObservationId: null,
+      analysisError: null,
+    });
+    console.log("[ANALISE_IA] REQUEST_CALLLOG_UPSERTED_BEFORE_DISPATCH", {
+      requestId,
+      callId: canonicalCallId,
+      leadId,
+      phoneDigits,
+    });
+
     const payload: CallAnalysisRequestedPayload = {
       event: CALL_ANALYSIS_EVENT,
       triggeredAt,
