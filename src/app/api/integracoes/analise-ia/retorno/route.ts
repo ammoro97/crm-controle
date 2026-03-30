@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   getCallAnalysisObservationByRequestId,
+  getCallAnalysisRequests,
   getCallAnalysisRequestById,
   saveCallAnalysisObservation,
   updateCallAnalysisRequest,
@@ -17,12 +18,15 @@ type AnalysisCallbackBody = {
   request_id?: string;
   analysisRequestId?: string;
   callId?: string;
+  callid?: string;
   leadId?: string;
   phone?: string;
+  telefone?: string;
   externalCallId?: string;
   sessionId?: string;
   analysisText?: string;
-  analysis?: {
+  analise?: string;
+  analysis?: string | {
     text?: string;
     summary?: string;
     result?: string;
@@ -32,8 +36,10 @@ type AnalysisCallbackBody = {
   call?: {
     id?: string;
     callId?: string;
+    callid?: string;
     leadId?: string;
     phone?: string;
+    telefone?: string;
     externalCallId?: string;
     sessionId?: string;
   };
@@ -48,7 +54,7 @@ function extractRequestId(body: AnalysisCallbackBody) {
 }
 
 function extractCallId(body: AnalysisCallbackBody) {
-  return String(body.call?.callId || body.call?.id || body.callId || "").trim();
+  return String(body.call?.callId || body.call?.callid || body.call?.id || body.callId || body.callid || "").trim();
 }
 
 function extractLeadId(body: AnalysisCallbackBody) {
@@ -56,7 +62,7 @@ function extractLeadId(body: AnalysisCallbackBody) {
 }
 
 function extractPhoneDigits(body: AnalysisCallbackBody) {
-  return normalizeDigits(body.call?.phone || body.phone || "");
+  return normalizeDigits(body.call?.phone || body.call?.telefone || body.phone || body.telefone || "");
 }
 
 function extractExternalCallId(body: AnalysisCallbackBody) {
@@ -70,16 +76,18 @@ function extractSessionId(body: AnalysisCallbackBody) {
 function extractAnalysisText(body: AnalysisCallbackBody) {
   const candidates = [
     body.analysisText,
-    body.analysis?.text,
-    body.analysis?.summary,
-    body.analysis?.result,
-    body.analysis?.output,
+    body.analise,
+    typeof body.analysis === "string" ? body.analysis : undefined,
+    typeof body.analysis === "object" ? body.analysis?.text : undefined,
+    typeof body.analysis === "object" ? body.analysis?.summary : undefined,
+    typeof body.analysis === "object" ? body.analysis?.result : undefined,
+    typeof body.analysis === "object" ? body.analysis?.output : undefined,
   ];
   for (const candidate of candidates) {
     const text = String(candidate || "").trim();
     if (text) return text;
   }
-  if (body.analysis && Object.keys(body.analysis).length > 0) {
+  if (body.analysis && typeof body.analysis === "object" && Object.keys(body.analysis).length > 0) {
     return JSON.stringify(body.analysis);
   }
   return "";
@@ -111,9 +119,9 @@ export async function POST(request: Request) {
     }
 
     const body = (await request.json()) as AnalysisCallbackBody;
-    const requestId = extractRequestId(body);
+    let requestId = extractRequestId(body);
     const callbackCallId = extractCallId(body);
-    const callbackLeadId = extractLeadId(body);
+    let callbackLeadId = extractLeadId(body);
     const callbackPhoneDigits = extractPhoneDigits(body);
     const callbackExternalCallId = extractExternalCallId(body);
     const callbackSessionId = extractSessionId(body);
@@ -129,11 +137,33 @@ export async function POST(request: Request) {
       status: callbackStatus || "done",
     });
 
-    if (!requestId || !callbackCallId || !callbackLeadId || !callbackPhoneDigits) {
+    if (!requestId && callbackCallId && callbackPhoneDigits) {
+      const requests = await getCallAnalysisRequests();
+      const candidates = requests.filter(
+        (item) =>
+          item.status === "processing" &&
+          item.callId === callbackCallId &&
+          item.phoneDigits === callbackPhoneDigits,
+      );
+      if (candidates.length === 1) {
+        requestId = candidates[0].requestId;
+      } else if (candidates.length > 1) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Retorno ambiguo: mais de uma solicitacao em processamento para callId+telefone.",
+            code: "CALL_ANALYSIS_AMBIGUOUS_REQUEST",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
+    if (!requestId || !callbackCallId || !callbackPhoneDigits) {
       return NextResponse.json(
         {
           success: false,
-          message: "Retorno de analise sem dados obrigatorios de correlacao (requestId/callId/leadId/phone).",
+          message: "Retorno de analise sem dados obrigatorios de correlacao (requestId/callId/phone).",
           code: "CALL_ANALYSIS_MISSING_CORRELATION_FIELDS",
         },
         { status: 400 },
@@ -152,6 +182,10 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!callbackLeadId) {
+      callbackLeadId = requestRecord.leadId;
+    }
+
     if (requestRecord.status === "done") {
       const existingObservation = await getCallAnalysisObservationByRequestId(requestId);
       return NextResponse.json({
@@ -166,7 +200,9 @@ export async function POST(request: Request) {
     }
 
     const mismatches: string[] = [];
-    if (requestRecord.callId !== callbackCallId) mismatches.push("callId");
+    if (requestRecord.callId !== callbackCallId && requestRecord.externalCallId !== callbackCallId) {
+      mismatches.push("callId");
+    }
     if (requestRecord.leadId !== callbackLeadId) mismatches.push("leadId");
     if (requestRecord.phoneDigits !== callbackPhoneDigits) mismatches.push("phone");
     if (
