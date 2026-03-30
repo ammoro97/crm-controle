@@ -3,6 +3,7 @@ import {
   getCallAnalysisObservationByRequestId,
   getCallAnalysisRequests,
   getCallAnalysisRequestById,
+  saveCallAnalysisRequest,
   saveCallAnalysisObservation,
   updateCallAnalysisRequest,
 } from "@/lib/call-analysis-store";
@@ -102,6 +103,11 @@ function nowDateTime() {
   };
 }
 
+function createSyntheticRequestId(callId: string) {
+  const safeCallId = String(callId || "SEM_CALL").replace(/[^0-9A-Za-z_-]/g, "").slice(0, 32) || "SEM_CALL";
+  return `ANL-CB-${safeCallId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
 export async function POST(request: Request) {
   try {
     const config = await getWebhookOutConfig();
@@ -137,21 +143,35 @@ export async function POST(request: Request) {
       status: callbackStatus || "done",
     });
 
-    if (!requestId && callbackCallId && callbackPhoneDigits) {
-      const requests = await getCallAnalysisRequests();
-      const candidates = requests.filter(
-        (item) =>
-          item.status === "processing" &&
-          (item.callId === callbackCallId || String(item.externalCallId || "").trim() === callbackCallId) &&
-          item.phoneDigits === callbackPhoneDigits,
+    if (!callbackCallId || !callbackPhoneDigits) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Retorno de analise sem dados obrigatorios de correlacao (callId/phone).",
+          code: "CALL_ANALYSIS_MISSING_CORRELATION_FIELDS",
+        },
+        { status: 400 },
       );
-      if (candidates.length === 1) {
-        requestId = candidates[0].requestId;
-      } else if (candidates.length > 1) {
+    }
+
+    const allRequests = await getCallAnalysisRequests();
+    let requestRecord = requestId ? await getCallAnalysisRequestById(requestId) : null;
+
+    if (!requestRecord) {
+      const correlatedByCallAndPhone = allRequests.filter((item) => {
+        if (item.callId !== callbackCallId && String(item.externalCallId || "").trim() !== callbackCallId) return false;
+        if (item.phoneDigits !== callbackPhoneDigits) return false;
+        if (callbackLeadId && item.leadId !== callbackLeadId) return false;
+        return true;
+      });
+      if (correlatedByCallAndPhone.length === 1) {
+        requestRecord = correlatedByCallAndPhone[0];
+        requestId = requestRecord.requestId;
+      } else if (correlatedByCallAndPhone.length > 1) {
         return NextResponse.json(
           {
             success: false,
-            message: "Retorno ambiguo: mais de uma solicitacao em processamento para callId+telefone.",
+            message: "Retorno ambiguo: mais de uma solicitacao para callId+telefone.",
             code: "CALL_ANALYSIS_AMBIGUOUS_REQUEST",
           },
           { status: 409 },
@@ -159,23 +179,69 @@ export async function POST(request: Request) {
       }
     }
 
-    if (!requestId || !callbackCallId || !callbackPhoneDigits) {
+    const allCallLogs = await getCallLogs();
+    const matchedCallLogs = allCallLogs.filter((entry) => {
+      const entryExternalCallId = String(entry.externalCallId || "").trim();
+      if (entry.id !== callbackCallId && entryExternalCallId !== callbackCallId) return false;
+      const entryDigits = normalizeDigits(entry.telefone || entry.called || entry.caller || "");
+      if (entryDigits && entryDigits !== callbackPhoneDigits) return false;
+      if (callbackLeadId && String(entry.leadId || "").trim() !== callbackLeadId) return false;
+      return true;
+    });
+
+    if (!requestRecord && matchedCallLogs.length === 1) {
+      const callLog = matchedCallLogs[0];
+      const resolvedLeadId = String(callbackLeadId || callLog.leadId || "").trim();
+      const resolvedPhoneDigits = callbackPhoneDigits || normalizeDigits(callLog.telefone || callLog.called || callLog.caller || "");
+      if (!resolvedLeadId || !resolvedPhoneDigits) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Ligacao localizada, mas sem lead/telefone suficientes para vinculo seguro.",
+            code: "CALL_ANALYSIS_MISSING_SAFE_BINDING",
+          },
+          { status: 409 },
+        );
+      }
+
+      const syntheticRequestId = requestId || createSyntheticRequestId(callLog.id);
+      requestRecord = await saveCallAnalysisRequest({
+        requestId: syntheticRequestId,
+        callId: callLog.id,
+        leadId: resolvedLeadId,
+        phoneDigits: resolvedPhoneDigits,
+        externalCallId: String(callLog.externalCallId || "").trim() || null,
+        sessionId: String(callLog.sessionId || "").trim() || null,
+        triggeredAt: new Date().toISOString(),
+        status: "processing",
+        observationId: null,
+        analysisText: null,
+        errorMessage: null,
+        completedAt: null,
+      });
+      requestId = syntheticRequestId;
+      console.warn("[ANALISE_IA] CALLBACK_SYNTHETIC_REQUEST_CREATED", {
+        requestId,
+        callId: callLog.id,
+        leadId: resolvedLeadId,
+        reason: "requestId-not-found-fallback-by-call",
+      });
+    } else if (!requestRecord && matchedCallLogs.length > 1) {
       return NextResponse.json(
         {
           success: false,
-          message: "Retorno de analise sem dados obrigatorios de correlacao (requestId/callId/phone).",
-          code: "CALL_ANALYSIS_MISSING_CORRELATION_FIELDS",
+          message: "Retorno ambiguo: mais de uma ligacao candidata para callId+telefone.",
+          code: "CALL_ANALYSIS_AMBIGUOUS_CALLLOG",
         },
-        { status: 400 },
+        { status: 409 },
       );
     }
 
-    const requestRecord = await getCallAnalysisRequestById(requestId);
     if (!requestRecord) {
       return NextResponse.json(
         {
           success: false,
-          message: "Solicitacao de analise nao encontrada para o requestId informado.",
+          message: "Solicitacao de analise nao encontrada para os dados de correlacao informados.",
           code: "CALL_ANALYSIS_REQUEST_NOT_FOUND",
         },
         { status: 404 },
@@ -216,8 +282,13 @@ export async function POST(request: Request) {
       mismatches.push("sessionId");
     }
 
-    const callLogs = await getCallLogs();
-    const callLog = callLogs.find((entry) => entry.id === requestRecord.callId) || null;
+    const callLog =
+      matchedCallLogs.find((entry) => entry.id === requestRecord.callId) ||
+      allCallLogs.find(
+        (entry) =>
+          entry.id === requestRecord.callId || String(entry.externalCallId || "").trim() === requestRecord.callId,
+      ) ||
+      null;
     if (!callLog) {
       mismatches.push("callLogNotFound");
     } else {
