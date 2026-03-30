@@ -160,7 +160,6 @@ export async function POST(request: Request) {
       gateway: metaGateway,
       eventType,
       status,
-      processingStatus: "pending",
     });
 
     console.log("[POSTCALL_DEBUG][WEBHOOK] Registro persistido no call store", {

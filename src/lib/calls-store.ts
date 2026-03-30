@@ -1,7 +1,7 @@
 ﻿import { promises as fs } from "fs";
 import path from "path";
 import { initialLeads } from "@/lib/mock-data";
-import { CallLog } from "@/types/crm";
+import { CallAnalysisStatus, CallLog } from "@/types/crm";
 
 type LeadLastContactOverrides = Record<string, string>;
 
@@ -37,8 +37,35 @@ function normalizePhone(input?: string | null) {
   return input.replace(/\D/g, "");
 }
 
+function normalizeLegacyProcessingStatus(value?: string | null) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "processing") return "processing";
+  if (normalized === "done") return "done";
+  if (normalized === "error") return "error";
+  return "pending";
+}
+
+function normalizeAnalysisStatus(input?: string | null, legacyProcessingStatus?: string | null): CallAnalysisStatus {
+  const normalized = String(input || "").trim().toLowerCase();
+  if (normalized === "processing") return "processing";
+  if (normalized === "done") return "done";
+  if (normalized === "error") return "error";
+
+  const legacy = normalizeLegacyProcessingStatus(legacyProcessingStatus);
+  if (legacy === "processing") return "processing";
+  if (legacy === "done") return "done";
+  if (legacy === "error") return "error";
+  return "idle";
+}
+
 function normalizeCallLog(input: Partial<CallLog> & Pick<CallLog, "id">): CallLog {
   const now = new Date().toISOString();
+  const analysisStatus = normalizeAnalysisStatus(input.analysisStatus, input.processingStatus);
+  const legacyProcessingStatus = normalizeLegacyProcessingStatus(
+    input.processingStatus || (analysisStatus === "idle" ? "pending" : analysisStatus),
+  );
+  const aiAnalysis = String(input.aiAnalysis || "").trim();
+  const explicitAnalysisPreview = String(input.analysisPreview || "").trim();
   return {
     id: input.id,
     externalCallId: input.externalCallId || null,
@@ -61,10 +88,14 @@ function normalizeCallLog(input: Partial<CallLog> & Pick<CallLog, "id">): CallLo
     eventType: input.eventType || "",
     status: input.status || "Nao atendida",
     transcript: input.transcript || null,
-    aiAnalysis: input.aiAnalysis || null,
-    processingStatus: input.processingStatus || "pending",
+    aiAnalysis: aiAnalysis || null,
+    analysisStatus,
+    processingStatus: legacyProcessingStatus,
     analysisRequestId: input.analysisRequestId || null,
     analysisObservationId: input.analysisObservationId || null,
+    analysisLeadId: input.analysisLeadId || input.leadId || null,
+    analysisUpdatedAt: safeDateValue(input.analysisUpdatedAt) || now,
+    analysisPreview: explicitAnalysisPreview || (aiAnalysis ? aiAnalysis.slice(0, 280) : null),
     analysisError: input.analysisError || null,
     createdAt: safeDateValue(input.createdAt) || now,
     updatedAt: safeDateValue(input.updatedAt) || now,

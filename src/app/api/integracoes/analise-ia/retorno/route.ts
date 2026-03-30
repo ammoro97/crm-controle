@@ -470,13 +470,31 @@ export async function POST(request: Request) {
 
     if (requestRecord.status === "done") {
       const existingObservation = await getCallAnalysisObservationByRequestId(requestId);
+      const observationId = existingObservation?.id || requestRecord.observationId || null;
+      const analysisTextFromStore = String(existingObservation?.content || requestRecord.analysisText || "").trim() || null;
+      await upsertCallLog({
+        id: requestRecord.callId,
+        externalCallId: requestRecord.externalCallId || callbackExternalCallId || null,
+        sessionId: requestRecord.sessionId || callbackSessionId || null,
+        leadId: requestRecord.leadId,
+        telefone: callbackPhoneDigits || requestRecord.phoneDigits || "",
+        analysisStatus: "done",
+        processingStatus: "done",
+        analysisRequestId: requestId,
+        analysisObservationId: observationId,
+        analysisLeadId: requestRecord.leadId,
+        analysisUpdatedAt: new Date().toISOString(),
+        analysisPreview: analysisTextFromStore ? analysisTextFromStore.slice(0, 280) : null,
+        aiAnalysis: analysisTextFromStore,
+        analysisError: null,
+      });
       return NextResponse.json({
         success: true,
         message: "Retorno de analise ja processado anteriormente.",
         requestId,
         leadId: requestRecord.leadId,
         callId: requestRecord.callId,
-        observationId: existingObservation?.id || requestRecord.observationId || null,
+        observationId,
         alreadyProcessed: true,
       });
     }
@@ -543,8 +561,11 @@ export async function POST(request: Request) {
         sessionId: requestRecord.sessionId || callbackSessionId || null,
         leadId: requestRecord.leadId,
         telefone: callbackPhoneDigits,
+        analysisStatus: "processing",
         processingStatus: "processing",
         analysisRequestId: requestId,
+        analysisLeadId: requestRecord.leadId,
+        analysisUpdatedAt: new Date().toISOString(),
         analysisError: null,
       });
       callLog = repaired.record;
@@ -588,8 +609,11 @@ export async function POST(request: Request) {
         leadId: requestRecord.leadId,
         telefone:
           String(callLog?.telefone || "").trim() || callbackPhoneDigits || requestRecord.phoneDigits || "",
+        analysisStatus: "error",
         processingStatus: "error",
         analysisRequestId: requestId,
+        analysisLeadId: requestRecord.leadId,
+        analysisUpdatedAt: new Date().toISOString(),
         analysisError: `Falha de correlacao: ${mismatches.join(", ")}`,
       });
       console.error("[ANALISE_IA] CALLBACK_CORRELATION_MISMATCH", {
@@ -619,8 +643,11 @@ export async function POST(request: Request) {
       });
       await upsertCallLog({
         id: requestRecord.callId,
+        analysisStatus: "error",
         processingStatus: "error",
         analysisRequestId: requestId,
+        analysisLeadId: requestRecord.leadId,
+        analysisUpdatedAt: new Date().toISOString(),
         analysisError: errorMessage,
       });
       return NextResponse.json({
@@ -678,10 +705,14 @@ export async function POST(request: Request) {
       sessionId: canonicalSessionId,
       leadId: requestRecord.leadId,
       telefone: canonicalPhone,
+      analysisStatus: "done",
       processingStatus: "done",
       aiAnalysis: analysisText,
       analysisRequestId: requestId,
       analysisObservationId: observation.id,
+      analysisLeadId: requestRecord.leadId,
+      analysisUpdatedAt: stamp.iso,
+      analysisPreview: analysisText.slice(0, 280),
       analysisError: null,
     });
     console.log("[ANALISE_IA] CALLBACK_SAVED", {

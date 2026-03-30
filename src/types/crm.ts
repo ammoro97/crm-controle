@@ -142,6 +142,7 @@ export type Meeting = {
 };
 
 export type CallStatus = "Atendida" | "Nao atendida" | "Ocupado" | "Cancelada";
+export type CallAnalysisStatus = "idle" | "processing" | "done" | "error";
 
 export type CallRecord = {
   id: string;
@@ -190,8 +191,12 @@ export type CallLog = {
   updatedAt: string;
   transcript?: string | null;
   aiAnalysis?: string | null;
+  analysisStatus?: CallAnalysisStatus;
   processingStatus?: "pending" | "processing" | "done" | "error";
   analysisRequestId?: string | null;
   analysisObservationId?: string | null;
+  analysisLeadId?: string | null;
+  analysisUpdatedAt?: string | null;
+  analysisPreview?: string | null;
   analysisError?: string | null;
 };

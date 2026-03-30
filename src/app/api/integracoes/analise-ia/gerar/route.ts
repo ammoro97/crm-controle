@@ -217,9 +217,14 @@ export async function POST(request: Request) {
       status: normalizedCall.status || matchedCallLog?.status || "Nao atendida",
       gateway: normalizedCall.ramal || matchedCallLog?.gateway || null,
       recordUrl: recordingUrl,
+      analysisStatus: "processing",
       processingStatus: "processing",
       analysisRequestId: requestId,
+      analysisLeadId: leadId,
+      analysisUpdatedAt: triggeredAt,
       analysisObservationId: null,
+      analysisPreview: null,
+      aiAnalysis: null,
       analysisError: null,
     });
     console.log("[ANALISE_IA] REQUEST_CALLLOG_UPSERTED_BEFORE_DISPATCH", {
@@ -269,8 +274,11 @@ export async function POST(request: Request) {
       });
       await upsertCallLog({
         id: canonicalCallId,
+        analysisStatus: "error",
         processingStatus: "error",
         analysisRequestId: requestId,
+        analysisLeadId: leadId,
+        analysisUpdatedAt: new Date().toISOString(),
         analysisError: "Falha no envio ao processamento externo",
       });
       return NextResponse.json(
@@ -303,9 +311,14 @@ export async function POST(request: Request) {
       status: normalizedCall.status || matchedCallLog?.status || "Nao atendida",
       gateway: normalizedCall.ramal || matchedCallLog?.gateway || null,
       recordUrl: recordingUrl,
+      analysisStatus: "processing",
       processingStatus: "processing",
       analysisRequestId: requestId,
+      analysisLeadId: leadId,
+      analysisUpdatedAt: new Date().toISOString(),
       analysisObservationId: null,
+      analysisPreview: null,
+      aiAnalysis: null,
       analysisError: null,
     });
 
@@ -327,8 +340,10 @@ export async function POST(request: Request) {
       });
       await upsertCallLog({
         id: createdCallId,
+        analysisStatus: "error",
         processingStatus: "error",
         analysisRequestId: createdRequestId,
+        analysisUpdatedAt: new Date().toISOString(),
         analysisError: "Erro interno ao iniciar analise",
       });
     }

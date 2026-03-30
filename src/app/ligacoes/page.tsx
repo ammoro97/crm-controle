@@ -32,7 +32,7 @@ import {
   setWrapupSessionState,
   subscribePostCallFlow,
 } from "@/lib/post-call-flow";
-import { CallLog, Lead, LeadObservation, Meeting } from "@/types/crm";
+import { CallAnalysisStatus, CallLog, Lead, LeadObservation, Meeting } from "@/types/crm";
 
 type Api4ComCallItem = {
   id?: string | number;
@@ -74,9 +74,13 @@ type MappedCall = {
   origem: string;
   ramal?: string | null;
   aiAnalysis?: string | null;
+  analysisStatus?: CallAnalysisStatus;
   processingStatus?: "pending" | "processing" | "done" | "error";
   analysisRequestId?: string | null;
   analysisObservationId?: string | null;
+  analysisLeadId?: string | null;
+  analysisUpdatedAt?: string | null;
+  analysisPreview?: string | null;
   analysisError?: string | null;
   raw: Api4ComCallItem;
 };
@@ -685,37 +689,65 @@ function mapApiCallToRow(
     origem: "api4com",
     ramal: metadataGateway || internal?.gateway || null,
     aiAnalysis: internal?.aiAnalysis || null,
+    analysisStatus: internal?.analysisStatus || "idle",
     processingStatus: internal?.processingStatus || "pending",
     analysisRequestId: internal?.analysisRequestId || null,
     analysisObservationId: internal?.analysisObservationId || null,
+    analysisLeadId: internal?.analysisLeadId || internal?.leadId || linkedLead?.id || null,
+    analysisUpdatedAt: internal?.analysisUpdatedAt || internal?.updatedAt || internal?.createdAt || null,
+    analysisPreview: internal?.analysisPreview || null,
     analysisError: internal?.analysisError || null,
     raw: item,
   };
 }
 
-function getDerivedAnalysisObservationId(call: MappedCall): string {
-  const explicit = String(call.analysisObservationId || "").trim();
-  if (explicit) return explicit;
-  if (String(call.aiAnalysis || "").trim() && String(call.id || "").trim()) {
-    return `OBS-IA-CALL-${call.id}`;
-  }
-  return "";
+function resolveAnalysisStatus(call: {
+  analysisStatus?: string | null;
+  processingStatus?: string | null;
+  analysisObservationId?: string | null;
+}): CallAnalysisStatus {
+  const explicit = String(call.analysisStatus || "").trim().toLowerCase();
+  if (explicit === "processing") return "processing";
+  if (explicit === "done") return "done";
+  if (explicit === "error") return "error";
+  if (explicit === "idle") return "idle";
+
+  const legacy = String(call.processingStatus || "").trim().toLowerCase();
+  if (legacy === "processing") return "processing";
+  if (legacy === "done") return "done";
+  if (legacy === "error") return "error";
+
+  if (String(call.analysisObservationId || "").trim()) return "done";
+  return "idle";
+}
+
+function getPersistedAnalysisObservationId(call: MappedCall): string {
+  return String(call.analysisObservationId || "").trim();
 }
 
 function isAnalysisReady(call: MappedCall): boolean {
-  return Boolean(getDerivedAnalysisObservationId(call));
+  const status = resolveAnalysisStatus(call);
+  if (status !== "done") return false;
+  return Boolean(getPersistedAnalysisObservationId(call));
 }
 
 function getCallAnalysisPriority(input: {
+  analysisStatus?: string | null;
   analysisObservationId?: string | null;
   aiAnalysis?: string | null;
   processingStatus?: string | null;
 }) {
   let score = 0;
   if (String(input.analysisObservationId || "").trim()) score += 100;
+  const status = resolveAnalysisStatus({
+    analysisStatus: (input.analysisStatus as CallAnalysisStatus | undefined) || undefined,
+    processingStatus: input.processingStatus || undefined,
+    analysisObservationId: input.analysisObservationId || undefined,
+  });
+  if (status === "done") score += 90;
+  if (status === "processing") score += 30;
+  if (status === "error") score += 10;
   if (String(input.aiAnalysis || "").trim()) score += 80;
-  if (String(input.processingStatus || "").trim().toLowerCase() === "done") score += 60;
-  if (String(input.processingStatus || "").trim().toLowerCase() === "processing") score += 20;
   return score;
 }
 
@@ -789,9 +821,13 @@ function mapInternalCallToRow(
     origem: "interna",
     ramal: item.gateway || null,
     aiAnalysis: item.aiAnalysis || null,
+    analysisStatus: item.analysisStatus || "idle",
     processingStatus: item.processingStatus || "pending",
     analysisRequestId: item.analysisRequestId || null,
     analysisObservationId: item.analysisObservationId || null,
+    analysisLeadId: item.analysisLeadId || item.leadId || linkedLead?.id || null,
+    analysisUpdatedAt: item.analysisUpdatedAt || item.updatedAt || item.createdAt || null,
+    analysisPreview: item.analysisPreview || null,
     analysisError: item.analysisError || null,
     raw: {
       record_url: item.recordUrl || undefined,
@@ -1269,7 +1305,7 @@ export default function LigacoesPage() {
 
   useEffect(() => {
     const hasProcessingAnalysis = calls.some(
-      (call) => !isAnalysisReady(call) && (call.processingStatus === "processing" || Boolean(call.analysisRequestId)),
+      (call) => resolveAnalysisStatus(call) === "processing",
     );
     const shouldKeepPolling = Date.now() < analysisPollUntilMs;
     if (!hasProcessingAnalysis && !shouldKeepPolling) return;
@@ -1486,8 +1522,8 @@ export default function LigacoesPage() {
   };
 
   const handleViewAnaliseIa = async (call: MappedCall) => {
-    let leadId = String(call.leadId || "").trim();
-    let observationId = getDerivedAnalysisObservationId(call);
+    let leadId = String(call.analysisLeadId || call.leadId || "").trim();
+    let observationId = getPersistedAnalysisObservationId(call);
 
     if (!leadId || !observationId) {
       try {
@@ -1517,24 +1553,19 @@ export default function LigacoesPage() {
           });
           const matched = sortedCandidates[0];
           if (matched) {
-            leadId = leadId || String(matched.leadId || "").trim();
+            leadId = leadId || String(matched.analysisLeadId || matched.leadId || "").trim();
             const matchedObservationId = String(matched.analysisObservationId || "").trim();
-            const matchedHasAnalysis = String(matched.aiAnalysis || "").trim();
-            if (matchedObservationId) {
-              observationId = matchedObservationId;
-            } else if (!observationId && matchedHasAnalysis) {
-              observationId = `OBS-IA-CALL-${matched.id}`;
-            }
+            if (matchedObservationId) observationId = matchedObservationId;
             setCalls((prev) =>
               prev.map((item) =>
                 item.id === call.id
                   ? {
                       ...item,
                       leadId: leadId || item.leadId || null,
+                      analysisLeadId: leadId || item.analysisLeadId || item.leadId || null,
                       analysisObservationId: matchedObservationId || item.analysisObservationId || null,
-                      aiAnalysis: matchedHasAnalysis || item.aiAnalysis || null,
-                      processingStatus:
-                        matchedObservationId || matchedHasAnalysis ? "done" : item.processingStatus,
+                      analysisStatus: matchedObservationId ? "done" : item.analysisStatus,
+                      processingStatus: matchedObservationId ? "done" : item.processingStatus,
                     }
                   : item,
               ),
@@ -1597,7 +1628,10 @@ export default function LigacoesPage() {
         item.id === call.id
           ? {
               ...item,
+              analysisStatus: "processing",
               processingStatus: "processing",
+              analysisLeadId: item.analysisLeadId || item.leadId || call.leadId || null,
+              analysisUpdatedAt: new Date().toISOString(),
               analysisError: null,
             }
           : item,
@@ -1680,7 +1714,9 @@ export default function LigacoesPage() {
             item.id === call.id
               ? {
                   ...item,
+                  analysisStatus: "error",
                   processingStatus: "error",
+                  analysisUpdatedAt: new Date().toISOString(),
                   analysisError: detailedMessage,
                 }
               : item,
@@ -1717,8 +1753,11 @@ export default function LigacoesPage() {
           item.id === call.id
             ? {
                 ...item,
+                analysisStatus: "processing",
                 processingStatus: "processing",
                 analysisRequestId: data.requestId || item.analysisRequestId || null,
+                analysisLeadId: item.analysisLeadId || item.leadId || call.leadId || null,
+                analysisUpdatedAt: new Date().toISOString(),
                 analysisError: null,
               }
             : item,
@@ -1735,7 +1774,9 @@ export default function LigacoesPage() {
           item.id === call.id
             ? {
                 ...item,
+                analysisStatus: "error",
                 processingStatus: "error",
+                analysisUpdatedAt: new Date().toISOString(),
                 analysisError: `Nao foi possivel enviar analise. ${errorMessage}`,
               }
             : item,
@@ -2689,16 +2730,16 @@ export default function LigacoesPage() {
                     const analysisFeedback = analysisFeedbackByCallId[call.id];
                     const analysisBusy = analysisLoadingCallId === call.id;
                     const analysisDone = isAnalysisReady(call);
-                    const analysisProcessing =
-                      !analysisDone &&
-                      (analysisBusy ||
-                        call.processingStatus === "processing" ||
-                        (Boolean(call.analysisRequestId) && call.processingStatus !== "error"));
+                    const analysisStatus = resolveAnalysisStatus(call);
+                    const analysisProcessing = analysisStatus === "processing" || analysisBusy;
+                    const analysisErrored = analysisStatus === "error";
                     const analysisButtonLabel = analysisDone
                       ? "Ver análise"
                       : analysisProcessing
                         ? "Gerando análise..."
-                        : "Gerar análise";
+                        : analysisErrored
+                          ? "Tentar novamente"
+                          : "Gerar análise";
                     return (
                       <Fragment key={call.id}>
                         <tr className="border-b border-border/70 text-sm text-slate-200 transition hover:bg-slate-900/40">
