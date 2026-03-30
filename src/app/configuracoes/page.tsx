@@ -38,6 +38,23 @@ type Api4ComConfigResponse = {
   config?: Api4ComConfigView;
 };
 
+type WebhookOutConfigView = {
+  url: string;
+  hasSecret: boolean;
+  secretMasked: string;
+  method: "POST";
+  enabled: boolean;
+  updatedAt: string | null;
+};
+
+type WebhookOutConfigResponse = {
+  success: boolean;
+  message?: string;
+  error?: string;
+  configured?: boolean;
+  config?: WebhookOutConfigView;
+};
+
 function formatDateTime(value: string) {
   const date = new Date(value);
   return date.toLocaleString("pt-BR", {
@@ -161,6 +178,11 @@ export default function ConfiguracoesPage() {
   const [webhookOutUrl, setWebhookOutUrl] = useState("");
   const [webhookOutSecret, setWebhookOutSecret] = useState("");
   const [webhookOutConfigured, setWebhookOutConfigured] = useState(false);
+  const [webhookOutLoading, setWebhookOutLoading] = useState(false);
+  const [webhookOutSaving, setWebhookOutSaving] = useState(false);
+  const [webhookOutTesting, setWebhookOutTesting] = useState(false);
+  const [webhookOutMessage, setWebhookOutMessage] = useState<string | null>(null);
+  const [webhookOutError, setWebhookOutError] = useState<string | null>(null);
 
   const [logs, setLogs] = useState<IntegrationLog[]>(() => buildInitialLogs());
 
@@ -225,9 +247,35 @@ export default function ConfiguracoesPage() {
     }
   };
 
+  const loadWebhookOutConfig = async () => {
+    setWebhookOutLoading(true);
+    setWebhookOutError(null);
+    setWebhookOutMessage(null);
+    try {
+      const response = await fetch("/api/integrations/webhook-out", {
+        method: "GET",
+        cache: "no-store",
+      });
+      const data = (await response.json()) as WebhookOutConfigResponse;
+
+      if (!response.ok || !data.success || !data.config) {
+        setWebhookOutError(data.error || "Nao foi possivel carregar webhook de saida.");
+        return;
+      }
+
+      setWebhookOutUrl(data.config.url || "");
+      setWebhookOutConfigured(Boolean(data.config.enabled && data.config.url));
+    } catch {
+      setWebhookOutError("Nao foi possivel carregar webhook de saida.");
+    } finally {
+      setWebhookOutLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!integracoesOpen) return;
     void loadApi4ComConfig();
+    void loadWebhookOutConfig();
   }, [integracoesOpen]);
 
   useEffect(() => {
@@ -468,18 +516,71 @@ export default function ConfiguracoesPage() {
     }
   };
 
-  const handleSaveWebhookOut = () => {
-    const configured = webhookOutUrl.trim().length > 0;
-    setWebhookOutConfigured(configured);
-    pushLog("Configuracao salva", "Webhook de saida", configured ? "Sucesso" : "Falha");
+  const handleSaveWebhookOut = async () => {
+    setWebhookOutSaving(true);
+    setWebhookOutError(null);
+    setWebhookOutMessage(null);
+    try {
+      const response = await fetch("/api/integrations/webhook-out", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: webhookOutUrl.trim(),
+          secret: webhookOutSecret.trim() ? webhookOutSecret : undefined,
+          method: "POST",
+          enabled: Boolean(webhookOutUrl.trim()),
+        }),
+      });
+
+      const data = (await response.json()) as WebhookOutConfigResponse;
+      if (!response.ok || !data.success || !data.config) {
+        const message = data.error || "Nao foi possivel salvar webhook de saida.";
+        setWebhookOutError(message);
+        pushLog("Configuracao salva", "Webhook de saida", "Falha");
+        return;
+      }
+
+      setWebhookOutConfigured(Boolean(data.config.enabled && data.config.url));
+      setWebhookOutUrl(data.config.url || "");
+      setWebhookOutMessage(data.message || "Webhook de saida salvo com sucesso.");
+      pushLog("Configuracao salva", "Webhook de saida", "Sucesso");
+    } catch {
+      setWebhookOutError("Nao foi possivel salvar webhook de saida.");
+      pushLog("Configuracao salva", "Webhook de saida", "Falha");
+    } finally {
+      setWebhookOutSaving(false);
+    }
   };
 
-  const handleSendWebhookOutTest = () => {
+  const handleSendWebhookOutTest = async () => {
     if (!webhookOutUrl.trim()) {
+      setWebhookOutError("Informe a URL do webhook de saida antes de testar.");
       pushLog("Teste sem URL configurada", "Webhook de saida", "Falha");
       return;
     }
-    pushLog("Envio de teste", "Webhook de saida", "Sucesso");
+    setWebhookOutTesting(true);
+    setWebhookOutError(null);
+    setWebhookOutMessage(null);
+    try {
+      const response = await fetch("/api/integrations/webhook-out/test", {
+        method: "POST",
+      });
+      const data = (await response.json()) as WebhookOutConfigResponse;
+      if (!response.ok || !data.success) {
+        setWebhookOutError(data.message || data.error || "Falha no envio de teste.");
+        pushLog("Envio de teste", "Webhook de saida", "Falha");
+        return;
+      }
+      setWebhookOutMessage(data.message || "Teste enviado com sucesso.");
+      pushLog("Envio de teste", "Webhook de saida", "Sucesso");
+    } catch {
+      setWebhookOutError("Nao foi possivel enviar teste para webhook de saida.");
+      pushLog("Envio de teste", "Webhook de saida", "Falha");
+    } finally {
+      setWebhookOutTesting(false);
+    }
   };
 
   return (
@@ -722,6 +823,7 @@ export default function ConfiguracoesPage() {
                     placeholder="https://seu-sistema.com/webhook"
                     value={webhookOutUrl}
                     onChange={(event) => setWebhookOutUrl(event.target.value)}
+                    disabled={webhookOutLoading || webhookOutSaving}
                   />
                 </label>
 
@@ -739,18 +841,33 @@ export default function ConfiguracoesPage() {
                     placeholder="token-opcional"
                     value={webhookOutSecret}
                     onChange={(event) => setWebhookOutSecret(event.target.value)}
+                    disabled={webhookOutLoading || webhookOutSaving}
                   />
                 </label>
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button type="button" className="btn-primary" onClick={handleSaveWebhookOut}>
-                  Salvar
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => void handleSaveWebhookOut()}
+                  disabled={webhookOutLoading || webhookOutSaving}
+                >
+                  {webhookOutSaving ? "Salvando..." : "Salvar"}
                 </button>
-                <button type="button" className="btn-ghost" onClick={handleSendWebhookOutTest}>
-                  Enviar teste
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => void handleSendWebhookOutTest()}
+                  disabled={webhookOutLoading || webhookOutTesting || webhookOutSaving}
+                >
+                  {webhookOutTesting ? "Enviando..." : "Enviar teste"}
                 </button>
               </div>
+
+              {webhookOutLoading ? <p className="mt-3 text-xs text-slate-400">Carregando configuracao...</p> : null}
+              {webhookOutMessage ? <p className="mt-3 text-xs text-emerald-300">{webhookOutMessage}</p> : null}
+              {webhookOutError ? <p className="mt-3 text-xs text-rose-300">{webhookOutError}</p> : null}
             </article>
           </div>
 

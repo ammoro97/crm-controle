@@ -59,6 +59,8 @@ type Api4ComCallItem = {
 type MappedCall = {
   id: string;
   leadId?: string | null;
+  externalCallId?: string | null;
+  sessionId?: string | null;
   nome: string;
   empresa: string;
   telefone: string;
@@ -70,6 +72,7 @@ type MappedCall = {
   subfinalizacao: string;
   atendente: string;
   origem: string;
+  ramal?: string | null;
   raw: Api4ComCallItem;
 };
 
@@ -83,6 +86,25 @@ type CallsApiResponse = {
 type InternalCallsApiResponse = {
   success?: boolean;
   calls?: CallLog[];
+};
+
+type WebhookOutConfigResponse = {
+  success: boolean;
+  configured?: boolean;
+  error?: string;
+  message?: string;
+};
+
+type GenerateAnaliseIaResponse = {
+  success: boolean;
+  message?: string;
+  error?: string;
+  detail?: string | null;
+};
+
+type AnalysisFeedbackEntry = {
+  type: "success" | "error" | "info";
+  message: string;
 };
 
 type LeadsIndexes = {
@@ -365,6 +387,16 @@ function formatDuration(seconds?: number) {
   return `${minutes.toString().padStart(2, "0")}:${restSeconds.toString().padStart(2, "0")}`;
 }
 
+function getCallRecordingUrl(call: MappedCall): string | null {
+  if (typeof call.raw.recording_url === "string" && call.raw.recording_url.trim()) {
+    return call.raw.recording_url.trim();
+  }
+  if (typeof call.raw.record_url === "string" && call.raw.record_url.trim()) {
+    return call.raw.record_url.trim();
+  }
+  return null;
+}
+
 function parseDuration(value: unknown): number {
   const asNumber = Number(value);
   if (Number.isFinite(asNumber) && asNumber >= 0) return asNumber;
@@ -480,6 +512,7 @@ function mapApiCallToRow(
   const metadataResponsavelId = String(metadata?.responsavelId ?? "").trim();
   const metadataSessionId = String(metadata?.sessionId ?? "").trim();
   const metadataExternalCallId = String(metadata?.externalCallId ?? "").trim();
+  const metadataGateway = String(metadata?.gateway ?? "").trim();
 
   const internal = rawId ? context.internalById.get(rawId) : undefined;
   const leadFromId =
@@ -567,6 +600,8 @@ function mapApiCallToRow(
       rawId ||
       `api4com-${normalizeDigits(resolvedTelefone || metadataTelefone || item.telefone || item.to || "semfone")}-${(resolvedStartedAt || startedAt || String(index)).replace(/[^0-9A-Za-z_-]/g, "")}`,
     leadId: linkedLead?.id || internal?.leadId || metadataLeadId || null,
+    externalCallId: rawId || metadataExternalCallId || internal?.externalCallId || null,
+    sessionId: sessionIdCandidate || internal?.sessionId || null,
     nome: resolvedNome,
     empresa: resolvedEmpresa,
     telefone: resolvedTelefone,
@@ -578,6 +613,7 @@ function mapApiCallToRow(
     subfinalizacao,
     atendente,
     origem: "api4com",
+    ramal: metadataGateway || internal?.gateway || null,
     raw: item,
   };
 }
@@ -616,6 +652,8 @@ function mapInternalCallToRow(
   return {
     id: item.id,
     leadId: linkedLead?.id || item.leadId || null,
+    externalCallId: item.externalCallId || null,
+    sessionId: item.sessionId || null,
     nome: linkedLead?.name || item.nome || "-",
     empresa: linkedLead?.company || item.empresa || "-",
     telefone: linkedLead?.phone || item.telefone || item.called || item.caller || "-",
@@ -627,7 +665,12 @@ function mapInternalCallToRow(
     subfinalizacao,
     atendente: atendenteFromWrapupResponsavelId || "Responsável não vinculado",
     origem: "interna",
-    raw: {},
+    ramal: item.gateway || null,
+    raw: {
+      record_url: item.recordUrl || undefined,
+      hangup_cause: item.hangupCause || undefined,
+      metadata: item.gateway ? { gateway: item.gateway } : undefined,
+    },
   };
 }
 
@@ -813,6 +856,11 @@ export default function LigacoesPage() {
   const [atendenteFilter, setAtendenteFilter] = useState("Todos");
   const [hoveredFinalizacaoLabel, setHoveredFinalizacaoLabel] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [webhookOutConfigured, setWebhookOutConfigured] = useState(false);
+  const [webhookOutLoading, setWebhookOutLoading] = useState(true);
+  const [webhookOutError, setWebhookOutError] = useState<string | null>(null);
+  const [analysisLoadingCallId, setAnalysisLoadingCallId] = useState<string | null>(null);
+  const [analysisFeedbackByCallId, setAnalysisFeedbackByCallId] = useState<Record<string, AnalysisFeedbackEntry>>({});
   const hiddenCallIdsRef = useRef<Set<string>>(new Set());
 
   const [activeSession, setActiveSession] = useState<ActiveCallSession | null>(null);
@@ -945,6 +993,29 @@ export default function LigacoesPage() {
     }
   };
 
+  const loadWebhookOutStatus = async () => {
+    setWebhookOutLoading(true);
+    setWebhookOutError(null);
+    try {
+      const response = await fetch("/api/integrations/webhook-out", {
+        method: "GET",
+        cache: "no-store",
+      });
+      const data = (await response.json()) as WebhookOutConfigResponse;
+      if (!response.ok || !data.success) {
+        setWebhookOutConfigured(false);
+        setWebhookOutError(data.error || "Nao foi possivel carregar configuracao de webhook de saida.");
+        return;
+      }
+      setWebhookOutConfigured(Boolean(data.configured));
+    } catch {
+      setWebhookOutConfigured(false);
+      setWebhookOutError("Nao foi possivel carregar configuracao de webhook de saida.");
+    } finally {
+      setWebhookOutLoading(false);
+    }
+  };
+
   const runWrapupReconciliation = async () => {
     if (getPendingPostCallWrapupsCount() === 0) return;
 
@@ -1010,6 +1081,10 @@ export default function LigacoesPage() {
   }, []);
 
   useEffect(() => {
+    void loadWebhookOutStatus();
+  }, []);
+
+  useEffect(() => {
     if (responsavelById.size === 0) return;
     if (!initialLoadDoneRef.current && isInitialLoadRunningRef.current) return;
     void loadCallsWithRetry("responsaveis-ready", 2);
@@ -1018,10 +1093,12 @@ export default function LigacoesPage() {
   useEffect(() => {
     const onFocus = () => {
       void loadCallsWithRetry("window-focus", 2);
+      void loadWebhookOutStatus();
     };
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         void loadCallsWithRetry("visibility-visible", 2);
+        void loadWebhookOutStatus();
       }
     };
     window.addEventListener("focus", onFocus);
@@ -1243,6 +1320,104 @@ export default function LigacoesPage() {
       setSelectedCallId(null);
     }
     setSelectedIds([]);
+  };
+
+  const handleGenerateAnaliseIa = async (call: MappedCall) => {
+    if (analysisLoadingCallId) return;
+
+    if (!webhookOutConfigured) {
+      setAnalysisFeedbackByCallId((prev) => ({
+        ...prev,
+        [call.id]: {
+          type: "error",
+          message: "Webhook de saida nao configurado. Configure em Configuracoes > Integracoes.",
+        },
+      }));
+      return;
+    }
+
+    setAnalysisLoadingCallId(call.id);
+    setAnalysisFeedbackByCallId((prev) => ({
+      ...prev,
+      [call.id]: {
+        type: "info",
+        message: "Gerando e enviando solicitacao para processamento externo...",
+      },
+    }));
+
+    const recordingUrl = getCallRecordingUrl(call);
+    const metadata =
+      call.raw.metadata && typeof call.raw.metadata === "object"
+        ? (call.raw.metadata as Record<string, unknown>)
+        : null;
+    const ramalFromMetadata = String(metadata?.gateway ?? metadata?.ramal ?? "").trim();
+    const externalCallIdFromRaw = String(call.raw.call_id ?? call.raw.uniqueid ?? "").trim();
+
+    try {
+      const response = await fetch("/api/integracoes/analise-ia/gerar", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          triggeredByUserId: currentUser?.id || undefined,
+          triggeredByName: currentUser?.nome || undefined,
+          triggeredByEmail: currentUser?.email || undefined,
+          call: {
+            id: call.id,
+            callId: call.id,
+            leadId: call.leadId || null,
+            externalCallId: call.externalCallId || externalCallIdFromRaw || null,
+            sessionId: call.sessionId || null,
+            contactName: call.nome,
+            companyName: call.empresa,
+            phone: call.telefone,
+            attendantName: call.atendente,
+            date: formatDate(call.startedAt),
+            startedAt: call.startedAt,
+            endedAt: call.endedAt,
+            durationSeconds: Number(call.durationSeconds || 0),
+            durationLabel: formatDuration(call.durationSeconds),
+            status: call.status,
+            finalizacao: call.finalizacao,
+            subfinalizacao: call.subfinalizacao,
+            origem: call.origem,
+            ramal: call.ramal || ramalFromMetadata || null,
+            recordingUrl,
+          },
+        }),
+      });
+
+      const data = (await response.json()) as GenerateAnaliseIaResponse;
+      if (!response.ok || !data.success) {
+        setAnalysisFeedbackByCallId((prev) => ({
+          ...prev,
+          [call.id]: {
+            type: "error",
+            message: data.message || data.error || "Falha ao enviar analise para processamento externo.",
+          },
+        }));
+        return;
+      }
+
+      setAnalysisFeedbackByCallId((prev) => ({
+        ...prev,
+        [call.id]: {
+          type: "success",
+          message: data.message || "Solicitacao de analise enviada com sucesso.",
+        },
+      }));
+    } catch {
+      setAnalysisFeedbackByCallId((prev) => ({
+        ...prev,
+        [call.id]: {
+          type: "error",
+          message: "Nao foi possivel enviar analise. Verifique a configuracao do webhook.",
+        },
+      }));
+    } finally {
+      setAnalysisLoadingCallId(null);
+    }
   };
 
   const handleMinimizeWrapup = () => {
@@ -2172,6 +2347,9 @@ export default function LigacoesPage() {
                   filteredCalls.map((call) => {
                     const isOpen = selectedCallId === call.id;
                     const isSelected = selectedIds.includes(call.id);
+                    const recordingUrl = getCallRecordingUrl(call);
+                    const analysisFeedback = analysisFeedbackByCallId[call.id];
+                    const analysisBusy = analysisLoadingCallId === call.id;
                     return (
                       <Fragment key={call.id}>
                         <tr className="border-b border-border/70 text-sm text-slate-200 transition hover:bg-slate-900/40">
@@ -2282,18 +2460,9 @@ export default function LigacoesPage() {
                                 </div>
                                 <div className="md:col-span-2 xl:col-span-4">
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Audio</p>
-                                  {typeof call.raw.recording_url === "string" && call.raw.recording_url ? (
+                                  {recordingUrl ? (
                                     <a
-                                      href={call.raw.recording_url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="mt-1 inline-flex text-sm text-emerald-300 underline underline-offset-2"
-                                    >
-                                      Abrir gravação
-                                    </a>
-                                  ) : typeof call.raw.record_url === "string" && call.raw.record_url ? (
-                                    <a
-                                      href={call.raw.record_url}
+                                      href={recordingUrl}
                                       target="_blank"
                                       rel="noreferrer"
                                       className="mt-1 inline-flex text-sm text-emerald-300 underline underline-offset-2"
@@ -2301,7 +2470,7 @@ export default function LigacoesPage() {
                                       Abrir gravação
                                     </a>
                                   ) : (
-                                    <p className="mt-1 text-sm text-slate-500">Em breve</p>
+                                    <p className="mt-1 text-sm text-slate-500">Sem gravação disponível</p>
                                   )}
                                 </div>
                                 <div>
@@ -2310,7 +2479,40 @@ export default function LigacoesPage() {
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Análise IA</p>
-                                  <p className="mt-1 text-sm text-slate-500">Em breve</p>
+                                  {webhookOutLoading ? (
+                                    <p className="mt-1 text-sm text-slate-500">Carregando integração...</p>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="btn-primary mt-1 h-8 px-2.5 py-1 text-xs"
+                                      onClick={() => void handleGenerateAnaliseIa(call)}
+                                      disabled={analysisBusy || !webhookOutConfigured}
+                                    >
+                                      {analysisBusy ? "Gerando..." : "Gerar análise"}
+                                    </button>
+                                  )}
+                                  {!webhookOutLoading && !webhookOutConfigured ? (
+                                    <p className="mt-1 text-xs text-amber-300">
+                                      Configure o webhook de saída em Configurações &gt; Integrações.
+                                    </p>
+                                  ) : null}
+                                  {webhookOutError ? <p className="mt-1 text-xs text-rose-300">{webhookOutError}</p> : null}
+                                  {analysisFeedback ? (
+                                    <p
+                                      className={`mt-1 text-xs ${
+                                        analysisFeedback.type === "success"
+                                          ? "text-emerald-300"
+                                          : analysisFeedback.type === "error"
+                                            ? "text-rose-300"
+                                            : "text-slate-400"
+                                      }`}
+                                    >
+                                      {analysisFeedback.message}
+                                    </p>
+                                  ) : null}
+                                  <p className="mt-1 text-[11px] text-slate-500">
+                                    Envia os dados da ligação para processamento externo via n8n.
+                                  </p>
                                 </div>
                               </div>
                             </td>
