@@ -693,6 +693,19 @@ function mapApiCallToRow(
   };
 }
 
+function getDerivedAnalysisObservationId(call: MappedCall): string {
+  const explicit = String(call.analysisObservationId || "").trim();
+  if (explicit) return explicit;
+  if (String(call.aiAnalysis || "").trim() && String(call.id || "").trim()) {
+    return `OBS-IA-CALL-${call.id}`;
+  }
+  return "";
+}
+
+function isAnalysisReady(call: MappedCall): boolean {
+  return Boolean(getDerivedAnalysisObservationId(call));
+}
+
 function mapInternalCallToRow(
   item: CallLog,
   context: {
@@ -1213,7 +1226,9 @@ export default function LigacoesPage() {
   }, []);
 
   useEffect(() => {
-    const hasProcessingAnalysis = calls.some((call) => call.processingStatus === "processing");
+    const hasProcessingAnalysis = calls.some(
+      (call) => !isAnalysisReady(call) && (call.processingStatus === "processing" || Boolean(call.analysisRequestId)),
+    );
     const shouldKeepPolling = Date.now() < analysisPollUntilMs;
     if (!hasProcessingAnalysis && !shouldKeepPolling) return;
     const intervalId = window.setInterval(() => {
@@ -1428,9 +1443,65 @@ export default function LigacoesPage() {
     setSelectedIds([]);
   };
 
-  const handleViewAnaliseIa = (call: MappedCall) => {
-    const leadId = String(call.leadId || "").trim();
-    const observationId = String(call.analysisObservationId || "").trim();
+  const handleViewAnaliseIa = async (call: MappedCall) => {
+    let leadId = String(call.leadId || "").trim();
+    let observationId = getDerivedAnalysisObservationId(call);
+
+    if (!leadId || !observationId) {
+      try {
+        const response = await fetch("/api/ligacoes", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = (await response.json()) as InternalCallsApiResponse;
+        if (response.ok && data.success && Array.isArray(data.calls)) {
+          const candidates = data.calls.filter((item) => {
+            const itemId = String(item.id || "").trim();
+            const itemExternal = String(item.externalCallId || "").trim();
+            const itemSession = String(item.sessionId || "").trim();
+            return (
+              itemId === call.id ||
+              itemExternal === call.id ||
+              (call.externalCallId && (itemId === call.externalCallId || itemExternal === call.externalCallId)) ||
+              (call.sessionId && itemSession === call.sessionId)
+            );
+          });
+          const sortedCandidates = [...candidates].sort((a, b) => {
+            const first = String(a.startedAt || a.createdAt || "");
+            const second = String(b.startedAt || b.createdAt || "");
+            return second.localeCompare(first);
+          });
+          const matched = sortedCandidates[0];
+          if (matched) {
+            leadId = leadId || String(matched.leadId || "").trim();
+            const matchedObservationId = String(matched.analysisObservationId || "").trim();
+            const matchedHasAnalysis = String(matched.aiAnalysis || "").trim();
+            if (matchedObservationId) {
+              observationId = matchedObservationId;
+            } else if (!observationId && matchedHasAnalysis) {
+              observationId = `OBS-IA-CALL-${matched.id}`;
+            }
+            setCalls((prev) =>
+              prev.map((item) =>
+                item.id === call.id
+                  ? {
+                      ...item,
+                      leadId: leadId || item.leadId || null,
+                      analysisObservationId: matchedObservationId || item.analysisObservationId || null,
+                      aiAnalysis: matchedHasAnalysis || item.aiAnalysis || null,
+                      processingStatus:
+                        matchedObservationId || matchedHasAnalysis ? "done" : item.processingStatus,
+                    }
+                  : item,
+              ),
+            );
+          }
+        }
+      } catch {
+        // noop
+      }
+    }
+
     if (!leadId || !observationId) {
       setAnalysisFeedbackByCallId((prev) => ({
         ...prev,
@@ -1452,8 +1523,8 @@ export default function LigacoesPage() {
 
   const handleGenerateAnaliseIa = async (call: MappedCall) => {
     if (analysisLoadingCallId) return;
-    if (call.processingStatus === "done" && call.analysisObservationId) {
-      handleViewAnaliseIa(call);
+    if (isAnalysisReady(call)) {
+      await handleViewAnaliseIa(call);
       return;
     }
     const localWebhook = readWebhookOutClientConfig();
@@ -2573,8 +2644,12 @@ export default function LigacoesPage() {
                     const recordingUrl = getCallRecordingUrl(call);
                     const analysisFeedback = analysisFeedbackByCallId[call.id];
                     const analysisBusy = analysisLoadingCallId === call.id;
-                    const analysisDone = call.processingStatus === "done" && Boolean(call.analysisObservationId);
-                    const analysisProcessing = analysisBusy || call.processingStatus === "processing";
+                    const analysisDone = isAnalysisReady(call);
+                    const analysisProcessing =
+                      !analysisDone &&
+                      (analysisBusy ||
+                        call.processingStatus === "processing" ||
+                        (Boolean(call.analysisRequestId) && call.processingStatus !== "error"));
                     const analysisButtonLabel = analysisDone
                       ? "Ver análise"
                       : analysisProcessing
@@ -2731,7 +2806,7 @@ export default function LigacoesPage() {
                                   (!analysisFeedback || analysisFeedback.message !== call.analysisError) ? (
                                     <p className="mt-1 text-xs text-rose-300">{call.analysisError}</p>
                                   ) : null}
-                                  {analysisFeedback ? (
+                                  {analysisFeedback && !analysisDone ? (
                                     <p
                                       className={`mt-1 text-xs ${
                                         analysisFeedback.type === "success"
