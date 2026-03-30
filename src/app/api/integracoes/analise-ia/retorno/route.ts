@@ -580,7 +580,14 @@ export async function POST(request: Request) {
         completedAt: new Date().toISOString(),
       });
       await upsertCallLog({
-        id: requestRecord.callId,
+        id: callLog?.id || requestRecord.callId,
+        externalCallId:
+          String(callLog?.externalCallId || "").trim() || requestRecord.externalCallId || callbackExternalCallId || null,
+        sessionId:
+          String(callLog?.sessionId || "").trim() || requestRecord.sessionId || callbackSessionId || null,
+        leadId: requestRecord.leadId,
+        telefone:
+          String(callLog?.telefone || "").trim() || callbackPhoneDigits || requestRecord.phoneDigits || "",
         processingStatus: "error",
         analysisRequestId: requestId,
         analysisError: `Falha de correlacao: ${mismatches.join(", ")}`,
@@ -657,8 +664,20 @@ export async function POST(request: Request) {
       completedAt: stamp.iso,
     });
 
+    const canonicalCallLogId = String(callLog?.id || requestRecord.callId || "").trim();
+    const canonicalExternalCallId =
+      String(callLog?.externalCallId || "").trim() || requestRecord.externalCallId || callbackExternalCallId || null;
+    const canonicalSessionId =
+      String(callLog?.sessionId || "").trim() || requestRecord.sessionId || callbackSessionId || null;
+    const canonicalPhone =
+      String(callLog?.telefone || "").trim() || callbackPhoneDigits || requestRecord.phoneDigits || "";
+
     await upsertCallLog({
-      id: requestRecord.callId,
+      id: canonicalCallLogId,
+      externalCallId: canonicalExternalCallId,
+      sessionId: canonicalSessionId,
+      leadId: requestRecord.leadId,
+      telefone: canonicalPhone,
       processingStatus: "done",
       aiAnalysis: analysisText,
       analysisRequestId: requestId,
@@ -667,9 +686,11 @@ export async function POST(request: Request) {
     });
     console.log("[ANALISE_IA] CALLBACK_SAVED", {
       requestId,
-      callId: requestRecord.callId,
+      callId: canonicalCallLogId,
       leadId: requestRecord.leadId,
       observationId: observation.id,
+      externalCallId: canonicalExternalCallId,
+      sessionId: canonicalSessionId,
     });
 
     return NextResponse.json({
