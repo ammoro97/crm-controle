@@ -222,12 +222,12 @@ function normalizeFinalizacaoLabel(value: string) {
     "era a pessoa errada": "Pessoa nao conhece",
     "pessoa errada": "Pessoa nao conhece",
     "nao atendeu": "Caixa postal",
-    "nÃ£o atendeu": "Caixa postal",
+    "não atendeu": "Caixa postal",
     "caixa postal": "Caixa postal",
     "numero invalido": "Numero invalido",
-    "nÃºmero invÃ¡lido": "Numero invalido",
+    "número inválido": "Numero invalido",
     "ligacao caiu": "Ligacao caiu",
-    "ligaÃ§Ã£o caiu": "Ligacao caiu",
+    "ligação caiu": "Ligacao caiu",
     "pediu retorno": "Falou com cliente",
     "deixou recado": "Falou com secretaria",
     outro: "Falou com cliente",
@@ -660,6 +660,10 @@ const IMPRODUTIVE_FINALIZACOES = new Set([
   "ligacao muda",
   "numero invalido",
   "pessoa nao conhece",
+]);
+const FOLLOWUP_VALID_SUBFINALIZACOES = new Set([
+  "retorno de ligacao",
+  "retorno de whatsapp",
 ]);
 
 type FinalizacaoTipo =
@@ -1306,10 +1310,29 @@ export default function LigacoesPage() {
     return Math.round((summary.answered / total) * 100);
   }, [filteredCalls.length, summary.answered]);
 
-  const tmaValue = useMemo(
-    () => formatAverageTime(summary.totalAnsweredSeconds, summary.answered),
-    [summary.answered, summary.totalAnsweredSeconds],
-  );
+  const tmaSegmentado = useMemo(() => {
+    const build = (finalizacaoKey: string) => {
+      let totalSeconds = 0;
+      let count = 0;
+
+      for (const call of filteredCalls) {
+        if (normalizeFinalizacaoKey(call.finalizacao) !== finalizacaoKey) continue;
+        totalSeconds += Math.max(0, Number(call.durationSeconds || 0));
+        count += 1;
+      }
+
+      return {
+        totalSeconds,
+        count,
+        tma: formatAverageTime(totalSeconds, count),
+      };
+    };
+
+    return {
+      cliente: build("falou com cliente"),
+      secretaria: build("falou com secretaria"),
+    };
+  }, [filteredCalls]);
 
   const contactQuality = useMemo(() => {
     const isAnsweredCall = (call: MappedCall) => isTechnicalAnswered(call.status, Number(call.durationSeconds || 0));
@@ -1355,24 +1378,9 @@ export default function LigacoesPage() {
       return CPC_POSITIVE_FINALIZACOES.has(normalized);
     }).length;
 
-    const agendamentos = filteredCalls.filter((call) => {
-      const finalizacao = normalizeFinalizacaoKey(call.finalizacao);
-      const subfinalizacao = normalizeFinalizacaoKey(call.subfinalizacao);
-
-      if (finalizacao === "falou com cliente") {
-        return (
-          subfinalizacao === "agendar video chamada" ||
-          subfinalizacao === "agendar ligacao" ||
-          subfinalizacao === "agendar whatsapp"
-        );
-      }
-
-      if (finalizacao === "falou com secretaria") {
-        return subfinalizacao === "confirmou possibilidade de contato";
-      }
-
-      return false;
-    }).length;
+    const agendamentos = filteredCalls.filter((call) =>
+      FOLLOWUP_VALID_SUBFINALIZACOES.has(normalizeFinalizacaoKey(call.subfinalizacao)),
+    ).length;
 
     const videoCalls = filteredCalls.filter((call) => {
       if (!isAnsweredCall(call)) return false;
@@ -1396,6 +1404,13 @@ export default function LigacoesPage() {
     return { vsContatosPositivos, vsLigacoesGerais };
   }, [contactQuality.cpcPositive, conversion.agendamentos, filteredCalls.length]);
 
+  const clienteSemInteresseNoCpc = useMemo(() => {
+    const quantidade = contactQuality.cpcNegative;
+    const base = contactQuality.cpc;
+    const percentual = base > 0 ? Math.round((quantidade / base) * 100) : 0;
+    return { quantidade, base, percentual };
+  }, [contactQuality.cpc, contactQuality.cpcNegative]);
+
   const improdutivasRate = useMemo(
     () => (filteredCalls.length > 0 ? Math.round((contactQuality.improdutivas / filteredCalls.length) * 100) : 0),
     [contactQuality.improdutivas, filteredCalls.length],
@@ -1415,17 +1430,7 @@ export default function LigacoesPage() {
         percent: total > 0 ? Math.round((count / total) * 100) : 0,
       }))
       .sort((a, b) => b.count - a.count);
-    if (sorted.length <= 5) return sorted;
-    const top = sorted.slice(0, 4);
-    const othersCount = sorted.slice(4).reduce((acc, item) => acc + item.count, 0);
-    if (othersCount > 0) {
-      top.push({
-        label: "Outros",
-        count: othersCount,
-        percent: total > 0 ? Math.round((othersCount / total) * 100) : 0,
-      });
-    }
-    return top;
+    return sorted;
   }, [filteredCalls]);
 
   const finalizacaoChartWithUi = useMemo(
@@ -1779,9 +1784,9 @@ export default function LigacoesPage() {
       <div className="panel border-slate-800/90 bg-slate-950/80 p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Painel de Ligacoes</p>
-            <h1 className="mt-1 text-xl font-semibold text-slate-100">Ligacoes</h1>
-            <p className="mt-1 text-sm text-slate-400">Acompanhe o historico de chamadas realizadas no CRM.</p>
+            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Painel de Ligações</p>
+            <h1 className="mt-1 text-xl font-semibold text-slate-100">Ligações</h1>
+            <p className="mt-1 text-sm text-slate-400">Acompanhe o histórico de chamadas realizadas no CRM.</p>
           </div>
           <div className="flex w-full flex-wrap items-end justify-start gap-2 rounded-xl border border-slate-800/90 bg-slate-950/70 p-2 lg:w-auto lg:justify-end">
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
@@ -1838,7 +1843,7 @@ export default function LigacoesPage() {
               </p>
             </div>
             <button type="button" className="btn-primary h-9 px-3 py-1.5 text-xs" onClick={handleRestoreWrapup}>
-              Restaurar finalizacao
+              Restaurar finalização
             </button>
           </div>
         </div>
@@ -1848,8 +1853,8 @@ export default function LigacoesPage() {
         <div className="panel border-slate-800/90 bg-slate-950/70 p-3">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold text-slate-200">Volume e Eficiencia</p>
-              <p className="text-[11px] text-slate-400">Panorama principal da operacao de ligacoes</p>
+              <p className="text-xs font-semibold text-slate-200">Volume e Eficiência</p>
+              <p className="text-[11px] text-slate-400">Panorama principal da operação de ligações</p>
             </div>
           </div>
           <div className="grid gap-2 lg:grid-cols-12">
@@ -1860,21 +1865,26 @@ export default function LigacoesPage() {
                 <span className="font-semibold text-emerald-100">{summary.answered}</span> de {filteredCalls.length} atendidas
               </p>
             </article>
-            <div className="grid gap-2 sm:grid-cols-3 lg:col-span-7">
+            <div className="grid gap-2 sm:grid-cols-2 lg:col-span-7">
               <article className="rounded-lg border border-slate-800/80 bg-slate-950/85 p-3">
-                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Ligacoes Gerais</p>
+                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Ligações Gerais</p>
                 <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{filteredCalls.length}</p>
                 <p className="mt-1.5 text-[12px] text-slate-400">Volume total</p>
               </article>
               <article className="rounded-lg border border-slate-800/80 bg-slate-950/85 p-3">
                 <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Tempo Total</p>
                 <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{summary.totalCallTime}</p>
-                <p className="mt-1.5 text-[12px] text-slate-400">Duracao acumulada</p>
+                <p className="mt-1.5 text-[12px] text-slate-400">Duração acumulada</p>
               </article>
               <article className="rounded-lg border border-slate-800/80 bg-slate-950/85 p-3">
-                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA</p>
-                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaValue}</p>
-                <p className="mt-1.5 text-[12px] text-slate-400">Tempo medio de atendimento</p>
+                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Cliente</p>
+                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.cliente.tma}</p>
+                <p className="mt-1.5 text-[12px] text-slate-400">Somente &quot;Falou com cliente&quot;</p>
+              </article>
+              <article className="rounded-lg border border-slate-800/80 bg-slate-950/85 p-3">
+                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Secretaria</p>
+                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.secretaria.tma}</p>
+                <p className="mt-1.5 text-[12px] text-slate-400">Somente &quot;Falou com secretaria&quot;</p>
               </article>
             </div>
           </div>
@@ -1897,7 +1907,7 @@ export default function LigacoesPage() {
                 <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
                   <div className="h-full bg-emerald-500" style={{ width: `${contactQuality.cpcPositiveRate}%` }} />
                 </div>
-                <p className="text-[12px] text-slate-300">{contactQuality.cpcPositiveRate}% - {contactQuality.cpcPositive}</p>
+                <p className="text-[12px] text-slate-300">{contactQuality.cpcPositiveRate}% · {contactQuality.cpcPositive}</p>
               </div>
 
               <div className="grid grid-cols-[minmax(0,170px)_1fr_auto] items-center gap-2">
@@ -1908,7 +1918,7 @@ export default function LigacoesPage() {
                 <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
                   <div className="h-full bg-rose-500" style={{ width: `${contactQuality.cpcNegativeRate}%` }} />
                 </div>
-                <p className="text-[12px] text-slate-300">{contactQuality.cpcNegativeRate}% - {contactQuality.cpcNegative}</p>
+                <p className="text-[12px] text-slate-300">{contactQuality.cpcNegativeRate}% · {contactQuality.cpcNegative}</p>
               </div>
 
               <div className="grid grid-cols-[minmax(0,170px)_1fr_auto] items-center gap-2">
@@ -1919,7 +1929,7 @@ export default function LigacoesPage() {
                 <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
                   <div className="h-full bg-amber-500" style={{ width: `${improdutivasRate}%` }} />
                 </div>
-                <p className="text-[12px] text-slate-300">{improdutivasRate}% - {contactQuality.improdutivas}</p>
+                <p className="text-[12px] text-slate-300">{improdutivasRate}% · {contactQuality.improdutivas}</p>
               </div>
 
               <div className="grid grid-cols-[minmax(0,170px)_1fr_auto] items-center gap-2">
@@ -1930,7 +1940,7 @@ export default function LigacoesPage() {
                 <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
                   <div className="h-full bg-slate-400" style={{ width: `${contactQuality.cpcRate}%` }} />
                 </div>
-                <p className="text-[12px] text-slate-300">{contactQuality.cpcRate}% - {contactQuality.cpc}</p>
+                <p className="text-[12px] text-slate-300">{contactQuality.cpcRate}% · {contactQuality.cpc}</p>
               </div>
             </div>
           </div>
@@ -1940,25 +1950,33 @@ export default function LigacoesPage() {
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold text-slate-200">Resultado</p>
-              <p className="text-[11px] text-slate-400">Impacto comercial das ligacoes</p>
+              <p className="text-[11px] text-slate-400">Impacto comercial das ligações</p>
             </div>
           </div>
-          <div className="grid gap-2 md:grid-cols-2">
+          <div className="grid gap-2 md:grid-cols-3">
             <article className="rounded-lg border border-slate-800/85 bg-slate-950/85 p-3.5">
               <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Agendamentos de Follow-up</p>
               <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{conversion.agendamentos}</p>
-              <p className="mt-1.5 text-[12px] text-slate-400">Baseado em finalizacoes/subfinalizacoes</p>
+              <p className="mt-1.5 text-[12px] text-slate-400">Somente retorno de ligação e WhatsApp</p>
               <p className="mt-1 text-[12px] text-slate-400">{followUpRates.vsContatosPositivos}% dos contatos positivos</p>
-              <p className="mt-1 text-[12px] text-slate-400">{followUpRates.vsLigacoesGerais}% das ligacoes gerais</p>
+              <p className="mt-1 text-[12px] text-slate-400">{followUpRates.vsLigacoesGerais}% das ligações gerais</p>
             </article>
-            <article className="rounded-lg border border-fuchsia-500/25 bg-fuchsia-500/8 p-3.5">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-fuchsia-200">Conversao</p>
+            <article className="rounded-lg border border-rose-500/25 bg-rose-500/8 p-3.5">
+              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-rose-200">Cliente sem interesse / CPC</p>
+              <p className="mt-1.5 text-3xl font-semibold leading-none text-rose-100">{clienteSemInteresseNoCpc.percentual}%</p>
+              <p className="mt-1.5 text-[12px] text-slate-300">
+                {clienteSemInteresseNoCpc.quantidade} de {clienteSemInteresseNoCpc.base}
+              </p>
+              <p className="mt-1 text-[12px] text-slate-400">Finalização &quot;Cliente sem interesse&quot; dentro da base CPC</p>
+            </article>
+            <article className="rounded-lg border border-fuchsia-500/35 bg-fuchsia-500/8 p-3.5">
+              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-fuchsia-200">Conversão</p>
               <p className="mt-1.5 text-3xl font-semibold leading-none text-fuchsia-100">{conversion.conversionRate}%</p>
               <p className="mt-1.5 text-[12px] text-slate-300">{conversion.videoCalls} de {conversion.cpcPositiveBase}</p>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800/90">
                 <div className="h-full bg-fuchsia-500" style={{ width: `${conversion.conversionRate}%` }} />
               </div>
-              <p className="mt-1 text-[12px] text-slate-400">Chamadas de video / CPC positivo</p>
+              <p className="mt-1 text-[12px] text-slate-400">Chamadas de vídeo / CPC positivo</p>
             </article>
           </div>
         </div>
@@ -1966,15 +1984,12 @@ export default function LigacoesPage() {
         <article className="panel border-slate-800/90 bg-slate-950/70 p-3">
           <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold text-slate-200">DistribuiÃ§Ã£o de FinalizaÃ§Ãµes</p>
-              <p className="text-[11px] text-slate-400">ParticipaÃ§Ã£o percentual e comparaÃ§Ã£o entre resultados</p>
+              <p className="text-xs font-semibold text-slate-200">Distribuição de Finalizações</p>
+              <p className="text-[11px] text-slate-400">Participação percentual e comparação entre resultados</p>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-300">
-                {filteredCalls.length} ligaÃ§Ãµes
-              </span>
-              <span className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-300">
-                Top {Math.min(4, finalizacaoChart.length)} + Outros
+                {filteredCalls.length} ligações
               </span>
             </div>
           </div>
