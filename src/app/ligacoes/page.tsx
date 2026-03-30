@@ -662,26 +662,115 @@ const IMPRODUTIVE_FINALIZACOES = new Set([
   "pessoa nao conhece",
 ]);
 
-function finalizacaoBarColor(label: string) {
+type FinalizacaoTipo =
+  | "falou_com_cliente"
+  | "pessoa_nao_conhece"
+  | "falou_com_secretaria"
+  | "numero_invalido"
+  | "caixa_postal"
+  | "ligacao_caiu"
+  | "ligacao_muda"
+  | "cliente_sem_interesse"
+  | "outros";
+
+type FinalizacaoUiConfig = {
+  label: string;
+  hex: string;
+  barClass: string;
+  ringClass: string;
+  badgeClass: string;
+};
+
+const FINALIZACAO_UI: Record<FinalizacaoTipo, FinalizacaoUiConfig> = {
+  falou_com_cliente: {
+    label: "Falou com cliente",
+    hex: "#10b981",
+    barClass: "bg-emerald-500",
+    ringClass: "stroke-emerald-500",
+    badgeClass: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/35",
+  },
+  pessoa_nao_conhece: {
+    label: "Pessoa nao conhece",
+    hex: "#3b82f6",
+    barClass: "bg-blue-500",
+    ringClass: "stroke-blue-500",
+    badgeClass: "bg-blue-500/15 text-blue-300 border border-blue-500/35",
+  },
+  falou_com_secretaria: {
+    label: "Falou com secretaria",
+    hex: "#f59e0b",
+    barClass: "bg-amber-500",
+    ringClass: "stroke-amber-500",
+    badgeClass: "bg-amber-500/15 text-amber-300 border border-amber-500/35",
+  },
+  numero_invalido: {
+    label: "Numero invalido",
+    hex: "#f43f5e",
+    barClass: "bg-rose-500",
+    ringClass: "stroke-rose-500",
+    badgeClass: "bg-rose-500/15 text-rose-300 border border-rose-500/35",
+  },
+  caixa_postal: {
+    label: "Caixa postal",
+    hex: "#eab308",
+    barClass: "bg-yellow-500",
+    ringClass: "stroke-yellow-500",
+    badgeClass: "bg-yellow-500/15 text-yellow-300 border border-yellow-500/35",
+  },
+  ligacao_caiu: {
+    label: "Ligacao caiu",
+    hex: "#8b5cf6",
+    barClass: "bg-violet-500",
+    ringClass: "stroke-violet-500",
+    badgeClass: "bg-violet-500/15 text-violet-300 border border-violet-500/35",
+  },
+  ligacao_muda: {
+    label: "Ligacao muda",
+    hex: "#06b6d4",
+    barClass: "bg-cyan-500",
+    ringClass: "stroke-cyan-500",
+    badgeClass: "bg-cyan-500/15 text-cyan-300 border border-cyan-500/35",
+  },
+  cliente_sem_interesse: {
+    label: "Cliente sem interesse",
+    hex: "#ef4444",
+    barClass: "bg-red-500",
+    ringClass: "stroke-red-500",
+    badgeClass: "bg-red-500/15 text-red-300 border border-red-500/35",
+  },
+  outros: {
+    label: "Outros",
+    hex: "#64748b",
+    barClass: "bg-slate-500",
+    ringClass: "stroke-slate-500",
+    badgeClass: "bg-slate-700/30 text-slate-300 border border-slate-600/60",
+  },
+};
+
+function getFinalizacaoTipo(label: string): FinalizacaoTipo {
   const normalized = normalizeFinalizacaoKey(label);
-  if (normalized === "outros") return "bg-slate-500";
-  if (normalized.includes("falou com cliente")) return "bg-emerald-500";
-  if (normalized.includes("caixa postal")) return "bg-amber-500";
-  if (normalized.includes("ligacao caiu")) return "bg-violet-500";
-  if (normalized.includes("numero invalido")) return "bg-rose-500";
-  if (normalized.includes("cliente sem interesse")) return "bg-red-500";
-  return "bg-slate-400";
+  if (normalized === "outros" || normalized === "sem finalizacao") return "outros";
+  if (normalized.includes("falou com cliente")) return "falou_com_cliente";
+  if (normalized.includes("pessoa nao conhece")) return "pessoa_nao_conhece";
+  if (normalized.includes("falou com secretaria")) return "falou_com_secretaria";
+  if (normalized.includes("numero invalido")) return "numero_invalido";
+  if (normalized.includes("caixa postal")) return "caixa_postal";
+  if (normalized.includes("ligacao caiu")) return "ligacao_caiu";
+  if (normalized.includes("ligacao muda")) return "ligacao_muda";
+  if (normalized.includes("cliente sem interesse")) return "cliente_sem_interesse";
+  return "outros";
+}
+
+function getFinalizacaoUi(label: string) {
+  return FINALIZACAO_UI[getFinalizacaoTipo(label)];
+}
+
+function finalizacaoBarColor(label: string) {
+  return getFinalizacaoUi(label).barClass;
 }
 
 function finalizacaoColorHex(label: string) {
-  const normalized = normalizeFinalizacaoKey(label);
-  if (normalized === "outros") return "#64748b";
-  if (normalized.includes("falou com cliente")) return "#10b981";
-  if (normalized.includes("caixa postal")) return "#f59e0b";
-  if (normalized.includes("ligacao caiu")) return "#8b5cf6";
-  if (normalized.includes("numero invalido")) return "#f43f5e";
-  if (normalized.includes("cliente sem interesse")) return "#ef4444";
-  return "#94a3b8";
+  return getFinalizacaoUi(label).hex;
 }
 
 function normalizeMeetingPersonName(value?: string) {
@@ -710,6 +799,7 @@ export default function LigacoesPage() {
   const [wrapups, setWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
   const [finalizacaoFilter, setFinalizacaoFilter] = useState("Todas");
   const [atendenteFilter, setAtendenteFilter] = useState("Todos");
+  const [hoveredFinalizacaoLabel, setHoveredFinalizacaoLabel] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const hiddenCallIdsRef = useRef<Set<string>>(new Set());
 
@@ -1333,29 +1423,33 @@ export default function LigacoesPage() {
     return top;
   }, [filteredCalls]);
 
-  const finalizacaoDonutGradient = useMemo(() => {
-    if (finalizacaoChart.length === 0) return "conic-gradient(#1e293b 0% 100%)";
+  const finalizacaoChartWithUi = useMemo(
+    () =>
+      finalizacaoChart.map((item) => ({
+        ...item,
+        ui: getFinalizacaoUi(item.label),
+      })),
+    [finalizacaoChart],
+  );
 
-    const total = finalizacaoChart.reduce((acc, item) => acc + item.count, 0);
-    if (total <= 0) return "conic-gradient(#1e293b 0% 100%)";
+  const finalizacaoDonutSlices = useMemo(() => {
+    const total = finalizacaoChartWithUi.reduce((acc, item) => acc + item.count, 0);
+    const circumference = 2 * Math.PI * 52;
+    let offset = 0;
 
-    let cursor = 0;
-    const slices: string[] = [];
-
-    for (const item of finalizacaoChart) {
-      const slice = (item.count / total) * 100;
-      const start = cursor;
-      const end = Math.min(100, start + slice);
-      slices.push(`${finalizacaoColorHex(item.label)} ${start}% ${end}%`);
-      cursor = end;
-    }
-
-    if (cursor < 100) {
-      slices.push(`#1e293b ${cursor}% 100%`);
-    }
-
-    return `conic-gradient(${slices.join(", ")})`;
-  }, [finalizacaoChart]);
+    return finalizacaoChartWithUi.map((item) => {
+      const fraction = total > 0 ? item.count / total : 0;
+      const length = circumference * fraction;
+      const segment = {
+        ...item,
+        circumference,
+        dasharray: `${length} ${Math.max(circumference - length, 0)}`,
+        dashoffset: -offset,
+      };
+      offset += length;
+      return segment;
+    });
+  }, [finalizacaoChartWithUi]);
 
   const applyWrapupToLead = (
     session: ActiveCallSession,
@@ -1873,12 +1967,30 @@ export default function LigacoesPage() {
               <div className="rounded-lg border border-slate-800/90 bg-slate-950/85 p-3">
                 <div className="flex items-center justify-center">
                   <div className="relative h-40 w-40 rounded-full border border-slate-800/90 p-3">
-                    <div
-                      className="h-full w-full rounded-full"
-                      style={{
-                        backgroundImage: finalizacaoDonutGradient,
-                      }}
-                    />
+                    <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
+                      <circle cx="60" cy="60" r="52" fill="none" stroke="#1e293b" strokeWidth="14" />
+                      {finalizacaoDonutSlices.map((item) => {
+                        const isHighlighted = hoveredFinalizacaoLabel === item.label;
+                        const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
+                        return (
+                          <circle
+                            key={`donut-${item.label}`}
+                            cx="60"
+                            cy="60"
+                            r="52"
+                            fill="none"
+                            stroke={finalizacaoColorHex(item.label)}
+                            strokeWidth={isHighlighted ? 18 : 14}
+                            strokeDasharray={item.dasharray}
+                            strokeDashoffset={item.dashoffset}
+                            strokeLinecap="butt"
+                            className={`cursor-pointer transition-all duration-150 ${isDimmed ? "opacity-35" : "opacity-100"}`}
+                            onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
+                            onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
+                          />
+                        );
+                      })}
+                    </svg>
                     <div className="absolute inset-6 flex flex-col items-center justify-center rounded-full border border-slate-800 bg-slate-950/95 text-center">
                       <p className="text-[10px] uppercase tracking-[0.1em] text-slate-500">Total</p>
                       <p className="mt-1 text-2xl font-semibold leading-none text-slate-100">{filteredCalls.length}</p>
@@ -1886,33 +1998,58 @@ export default function LigacoesPage() {
                   </div>
                 </div>
                 <div className="mt-3 space-y-1.5">
-                  {finalizacaoChart.slice(0, 3).map((item) => (
-                    <div key={`top-${item.label}`} className="flex items-center justify-between gap-2 rounded-md bg-slate-900/70 px-2 py-1.5">
-                      <span className="truncate text-[11px] text-slate-300">{item.label}</span>
-                      <span className="text-[11px] font-medium text-slate-200">{item.percent}%</span>
-                    </div>
-                  ))}
+                  {finalizacaoChartWithUi.slice(0, 3).map((item) => {
+                    const isHighlighted = hoveredFinalizacaoLabel === item.label;
+                    const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
+                    return (
+                      <div
+                        key={`top-${item.label}`}
+                        className={`flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 transition ${
+                          isHighlighted
+                            ? "border-slate-500 bg-slate-800/90"
+                            : "border-slate-800/90 bg-slate-900/70"
+                        } ${isDimmed ? "opacity-45" : "opacity-100"}`}
+                        onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
+                        onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className={`h-2 w-2 shrink-0 rounded-full ${item.ui.barClass}`} />
+                          <span className="truncate text-[11px] text-slate-300">{item.label}</span>
+                        </div>
+                        <span className="text-[11px] font-medium text-slate-200">{item.percent}%</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
               <div className="rounded-lg border border-slate-800/90 bg-slate-950/85 p-2">
                 <div className="space-y-1.5">
-                  {finalizacaoChart.map((item) => {
+                  {finalizacaoChartWithUi.map((item) => {
                     const isOthers = normalizeFinalizacaoKey(item.label) === "outros";
+                    const isHighlighted = hoveredFinalizacaoLabel === item.label;
+                    const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
                     return (
                       <div
                         key={item.label}
-                        className={`rounded-md border px-2.5 py-2 ${
-                          isOthers ? "border-slate-700/80 bg-slate-900/55" : "border-slate-800/90 bg-slate-900/75"
-                        }`}
+                        className={`cursor-pointer rounded-md border px-2.5 py-2 transition ${
+                          isHighlighted
+                            ? "border-slate-500 bg-slate-800/90"
+                            : isOthers
+                              ? "border-slate-700/80 bg-slate-900/55"
+                              : "border-slate-800/90 bg-slate-900/75"
+                        } ${isDimmed ? "opacity-45" : "opacity-100"}`}
+                        onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
+                        onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
                       >
                         <div className="mb-1.5 flex items-center justify-between gap-2">
-                          <span className="truncate text-[12px] font-medium text-slate-200">{item.label}</span>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${item.ui.barClass}`} />
+                            <span className="truncate text-[12px] font-medium text-slate-200">{item.label}</span>
+                          </div>
                           <div className="flex items-center gap-2 text-[11px]">
                             <span className="text-slate-400">{item.count}</span>
-                            <span
-                              className={`rounded px-1.5 py-0.5 font-medium ${isOthers ? "bg-slate-800 text-slate-300" : "bg-slate-800/80 text-slate-200"}`}
-                            >
+                            <span className={`rounded px-1.5 py-0.5 font-medium ${item.ui.badgeClass}`}>
                               {item.percent}%
                             </span>
                           </div>
