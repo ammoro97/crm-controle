@@ -669,9 +669,10 @@ const IMPRODUTIVE_FINALIZACOES = new Set([
   "pessoa nao conhece",
 ]);
 const FOLLOWUP_VALID_SUBFINALIZACOES = new Set([
-  "retorno de ligacao",
-  "retorno de whatsapp",
+  "agendar ligacao",
+  "agendar whatsapp",
 ]);
+const FOLLOWUP_VALID_FINALIZACOES = new Set(["falou com cliente", "falou com secretaria"]);
 
 type FinalizacaoTipo =
   | "falou_com_cliente"
@@ -1385,9 +1386,18 @@ export default function LigacoesPage() {
       return CPC_POSITIVE_FINALIZACOES.has(normalized);
     }).length;
 
-    const agendamentos = filteredCalls.filter((call) =>
-      FOLLOWUP_VALID_SUBFINALIZACOES.has(normalizeFinalizacaoKey(call.subfinalizacao)),
+    const followUpBase = filteredCalls.filter((call) =>
+      FOLLOWUP_VALID_FINALIZACOES.has(normalizeFinalizacaoKey(call.finalizacao)),
     ).length;
+
+    const agendamentos = filteredCalls.filter((call) => {
+      const finalizacao = normalizeFinalizacaoKey(call.finalizacao);
+      const subfinalizacao = normalizeFinalizacaoKey(call.subfinalizacao);
+      return (
+        FOLLOWUP_VALID_FINALIZACOES.has(finalizacao) &&
+        FOLLOWUP_VALID_SUBFINALIZACOES.has(subfinalizacao)
+      );
+    }).length;
 
     const videoCalls = filteredCalls.filter((call) => {
       if (!isAnsweredCall(call)) return false;
@@ -1399,17 +1409,17 @@ export default function LigacoesPage() {
     return {
       conversionRate,
       agendamentos,
+      followUpBase,
       videoCalls,
       cpcPositiveBase,
     };
   }, [filteredCalls]);
 
   const followUpRates = useMemo(() => {
-    const vsContatosPositivos =
-      contactQuality.cpcPositive > 0 ? Math.round((conversion.agendamentos / contactQuality.cpcPositive) * 100) : 0;
-    const vsLigacoesGerais = filteredCalls.length > 0 ? Math.round((conversion.agendamentos / filteredCalls.length) * 100) : 0;
-    return { vsContatosPositivos, vsLigacoesGerais };
-  }, [contactQuality.cpcPositive, conversion.agendamentos, filteredCalls.length]);
+    const vsBaseFollowUp =
+      conversion.followUpBase > 0 ? Math.round((conversion.agendamentos / conversion.followUpBase) * 100) : 0;
+    return { vsBaseFollowUp };
+  }, [conversion.agendamentos, conversion.followUpBase]);
 
   const clienteSemInteresseNoCpc = useMemo(() => {
     const quantidade = contactQuality.cpcNegative;
@@ -1962,9 +1972,11 @@ export default function LigacoesPage() {
             <article className="rounded-lg border border-slate-800/85 bg-slate-950/85 p-3.5">
               <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Agendamentos de Follow-up</p>
               <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{conversion.agendamentos}</p>
-              <p className="mt-1.5 text-[12px] text-slate-400">Somente retorno de ligação e WhatsApp</p>
-              <p className="mt-1 text-[12px] text-slate-400">{followUpRates.vsContatosPositivos}% dos contatos positivos</p>
-              <p className="mt-1 text-[12px] text-slate-400">{followUpRates.vsLigacoesGerais}% das ligações gerais</p>
+              <p className="mt-1.5 text-[12px] text-slate-400">Somente Agendar Ligação e Agendar WhatsApp</p>
+              <p className="mt-1 text-[12px] text-slate-400">{followUpRates.vsBaseFollowUp}% da base elegível de finalizações</p>
+              <p className="mt-1 text-[12px] text-slate-400">
+                {conversion.agendamentos} de {conversion.followUpBase} (Falou com cliente + Falou com secretária)
+              </p>
             </article>
             <article className="rounded-lg border border-orange-500/25 bg-orange-500/8 p-3.5">
               <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-orange-200">Cliente sem interesse / CPC</p>
