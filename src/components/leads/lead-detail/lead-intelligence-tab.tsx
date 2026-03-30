@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Lead } from "@/types/crm";
 import {
   businessTypeOptions,
@@ -12,18 +13,47 @@ type LeadIntelligenceTabProps = {
   draftLead: Lead;
   isEditing: boolean;
   onActivateEdit: () => void;
+  onEditingStateChange?: (editing: boolean) => void;
   onDraftChange: (next: Lead) => void;
   onPersist: (next: Lead) => void;
 };
+
+type IntelligenceEditableKey =
+  | "businessType"
+  | "specialty"
+  | "monthlyRevenueRange"
+  | "averageLeadsPerMonth"
+  | "mainProblem"
+  | "painPoints";
 
 export function LeadIntelligenceTab({
   draftLead,
   isEditing,
   onActivateEdit,
+  onEditingStateChange,
   onDraftChange,
   onPersist,
 }: LeadIntelligenceTabProps) {
   const commercial = getLeadCommercialData(draftLead);
+  const [activeField, setActiveField] = useState<IntelligenceEditableKey | null>(null);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setActiveField(null);
+    }
+  }, [isEditing]);
+
+  const openField = (field: IntelligenceEditableKey) => {
+    const next = activeField === field ? null : field;
+    setActiveField(next);
+    onEditingStateChange?.(next !== null);
+    if (next) onActivateEdit();
+  };
+
+  const closeField = () => {
+    setActiveField(null);
+    onEditingStateChange?.(false);
+  };
 
   const applyUpdate = (field: string, value: string) => {
     const nextLead = updateCommercialField(draftLead, field, value);
@@ -39,37 +69,49 @@ export function LeadIntelligenceTab({
             label="Tipo"
             value={commercial.businessType}
             editable
-            isEditing={isEditing}
+            isEditing={activeField === "businessType"}
             type="select"
             selectOptions={businessTypeOptions}
-            onActivateEdit={onActivateEdit}
+            deferCommit
+            onActivateEdit={() => openField("businessType")}
             onChange={(value) => applyUpdate("businessType", value)}
+            onFinishEdit={closeField}
+            onCancelEdit={closeField}
           />
           <LeadInlineField
             label="Especialidade"
             value={commercial.specialty}
             editable
-            isEditing={isEditing}
-            onActivateEdit={onActivateEdit}
+            isEditing={activeField === "specialty"}
+            deferCommit
+            onActivateEdit={() => openField("specialty")}
             onChange={(value) => applyUpdate("specialty", value)}
+            onFinishEdit={closeField}
+            onCancelEdit={closeField}
           />
           <LeadInlineField
             label="Faturamento mensal"
             value={commercial.monthlyRevenueRange}
             editable
-            isEditing={isEditing}
+            isEditing={activeField === "monthlyRevenueRange"}
             type="select"
             selectOptions={revenueOptions}
-            onActivateEdit={onActivateEdit}
+            deferCommit
+            onActivateEdit={() => openField("monthlyRevenueRange")}
             onChange={(value) => applyUpdate("monthlyRevenueRange", value)}
+            onFinishEdit={closeField}
+            onCancelEdit={closeField}
           />
           <LeadInlineField
             label="Volume de leads"
             value={commercial.averageLeadsPerMonth}
             editable
-            isEditing={isEditing}
-            onActivateEdit={onActivateEdit}
+            isEditing={activeField === "averageLeadsPerMonth"}
+            deferCommit
+            onActivateEdit={() => openField("averageLeadsPerMonth")}
             onChange={(value) => applyUpdate("averageLeadsPerMonth", value)}
+            onFinishEdit={closeField}
+            onCancelEdit={closeField}
           />
         </div>
       </LeadSectionCard>
@@ -80,18 +122,24 @@ export function LeadIntelligenceTab({
             label="Problema principal"
             value={commercial.mainProblem}
             editable
-            isEditing={isEditing}
+            isEditing={activeField === "mainProblem"}
             type="textarea"
-            onActivateEdit={onActivateEdit}
+            deferCommit
+            onActivateEdit={() => openField("mainProblem")}
             onChange={(value) => applyUpdate("mainProblem", value)}
+            onFinishEdit={closeField}
+            onCancelEdit={closeField}
           />
           <LeadInlineField
             label="Dores"
             value={commercial.painPoints}
             editable
-            isEditing={isEditing}
-            onActivateEdit={onActivateEdit}
+            isEditing={activeField === "painPoints"}
+            deferCommit
+            onActivateEdit={() => openField("painPoints")}
             onChange={(value) => applyUpdate("painPoints", value)}
+            onFinishEdit={closeField}
+            onCancelEdit={closeField}
           />
         </div>
       </LeadSectionCard>
