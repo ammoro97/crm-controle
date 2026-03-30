@@ -1854,43 +1854,76 @@ export default function LigacoesPage() {
           <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-xs font-semibold text-slate-200">Distribuição de Finalizações</p>
-              <p className="text-[11px] text-slate-400">Participação percentual e ranking dos resultados</p>
+              <p className="text-[11px] text-slate-400">Participação percentual e comparação entre resultados</p>
             </div>
-            <span className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-300">
-              Top {Math.min(4, finalizacaoChart.length)} + Outros
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-300">
+                {filteredCalls.length} ligações
+              </span>
+              <span className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-300">
+                Top {Math.min(4, finalizacaoChart.length)} + Outros
+              </span>
+            </div>
           </div>
 
           {finalizacaoChart.length === 0 ? (
             <p className="text-sm text-slate-500">Sem dados para exibir.</p>
           ) : (
-            <div className="grid gap-3 lg:grid-cols-[220px_1fr]">
-              <div className="flex items-center justify-center">
-                <div className="relative h-40 w-40 rounded-full border border-slate-800/90 p-3">
-                  <div
-                    className="h-full w-full rounded-full"
-                    style={{
-                      backgroundImage: finalizacaoDonutGradient,
-                    }}
-                  />
-                  <div className="absolute inset-6 flex flex-col items-center justify-center rounded-full border border-slate-800 bg-slate-950/95 text-center">
-                    <p className="text-[10px] uppercase tracking-[0.1em] text-slate-500">Ligacoes</p>
-                    <p className="mt-1 text-2xl font-semibold leading-none text-slate-100">{filteredCalls.length}</p>
+            <div className="grid gap-3 xl:grid-cols-[260px_1fr]">
+              <div className="rounded-lg border border-slate-800/90 bg-slate-950/85 p-3">
+                <div className="flex items-center justify-center">
+                  <div className="relative h-40 w-40 rounded-full border border-slate-800/90 p-3">
+                    <div
+                      className="h-full w-full rounded-full"
+                      style={{
+                        backgroundImage: finalizacaoDonutGradient,
+                      }}
+                    />
+                    <div className="absolute inset-6 flex flex-col items-center justify-center rounded-full border border-slate-800 bg-slate-950/95 text-center">
+                      <p className="text-[10px] uppercase tracking-[0.1em] text-slate-500">Total</p>
+                      <p className="mt-1 text-2xl font-semibold leading-none text-slate-100">{filteredCalls.length}</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="space-y-1.5">
-                {finalizacaoChart.map((item) => (
-                  <div key={item.label} className="grid grid-cols-[minmax(0,180px)_1fr_auto] items-center gap-2">
-                    <span className="truncate text-[12px] text-slate-300">{item.label}</span>
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
-                      <div className={`h-full ${finalizacaoBarColor(item.label)}`} style={{ width: `${item.percent}%` }} />
+                <div className="mt-3 space-y-1.5">
+                  {finalizacaoChart.slice(0, 3).map((item) => (
+                    <div key={`top-${item.label}`} className="flex items-center justify-between gap-2 rounded-md bg-slate-900/70 px-2 py-1.5">
+                      <span className="truncate text-[11px] text-slate-300">{item.label}</span>
+                      <span className="text-[11px] font-medium text-slate-200">{item.percent}%</span>
                     </div>
-                    <span className="text-[12px] text-slate-300">
-                      {item.count} ({item.percent}%)
-                    </span>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-800/90 bg-slate-950/85 p-2">
+                <div className="space-y-1.5">
+                  {finalizacaoChart.map((item) => {
+                    const isOthers = normalizeFinalizacaoKey(item.label) === "outros";
+                    return (
+                      <div
+                        key={item.label}
+                        className={`rounded-md border px-2.5 py-2 ${
+                          isOthers ? "border-slate-700/80 bg-slate-900/55" : "border-slate-800/90 bg-slate-900/75"
+                        }`}
+                      >
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <span className="truncate text-[12px] font-medium text-slate-200">{item.label}</span>
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <span className="text-slate-400">{item.count}</span>
+                            <span
+                              className={`rounded px-1.5 py-0.5 font-medium ${isOthers ? "bg-slate-800 text-slate-300" : "bg-slate-800/80 text-slate-200"}`}
+                            >
+                              {item.percent}%
+                            </span>
+                          </div>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
+                          <div className={`h-full ${finalizacaoBarColor(item.label)}`} style={{ width: `${item.percent}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
