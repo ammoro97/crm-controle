@@ -1,10 +1,168 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getCallLogs } from "@/lib/calls-store";
+import { getCallAnalysisObservations, getCallAnalysisRequests } from "@/lib/call-analysis-store";
+import { CallAnalysisObservationRecord, CallAnalysisRequestRecord } from "@/types/call-analysis";
+
+function buildRequestByIdMap(requests: CallAnalysisRequestRecord[]) {
+  const map = new Map<string, CallAnalysisRequestRecord>();
+  for (const request of requests) {
+    const requestId = String(request.requestId || "").trim();
+    if (!requestId) continue;
+    map.set(requestId, request);
+  }
+  return map;
+}
+
+function buildLatestObservationByRequestIdMap(observations: CallAnalysisObservationRecord[]) {
+  const map = new Map<string, CallAnalysisObservationRecord>();
+  const ordered = [...observations].sort((a, b) => {
+    const first = String(a.createdAt || "");
+    const second = String(b.createdAt || "");
+    return second.localeCompare(first);
+  });
+  for (const observation of ordered) {
+    const requestId = String(observation.requestId || "").trim();
+    if (!requestId || map.has(requestId)) continue;
+    map.set(requestId, observation);
+  }
+  return map;
+}
+
+function latestBy<T>(items: T[], selector: (item: T) => string) {
+  if (items.length === 0) return null;
+  const ordered = [...items].sort((a, b) => selector(b).localeCompare(selector(a)));
+  return ordered[0] || null;
+}
+
+function matchObservationForCall(
+  callId: string,
+  externalCallId: string,
+  sessionId: string,
+  observations: CallAnalysisObservationRecord[],
+  requestById: Map<string, CallAnalysisRequestRecord>,
+) {
+  const candidates = observations.filter((item) => {
+    const itemCallId = String(item.callId || "").trim();
+    const request = requestById.get(String(item.requestId || "").trim());
+    const requestCallId = String(request?.callId || "").trim();
+    const requestExternalCallId = String(request?.externalCallId || "").trim();
+    const requestSessionId = String(request?.sessionId || "").trim();
+
+    const callMatches =
+      (itemCallId && (itemCallId === callId || (externalCallId && itemCallId === externalCallId))) ||
+      (requestCallId && (requestCallId === callId || (externalCallId && requestCallId === externalCallId))) ||
+      (requestExternalCallId && (requestExternalCallId === callId || (externalCallId && requestExternalCallId === externalCallId))) ||
+      (sessionId && requestSessionId === sessionId);
+
+    return callMatches;
+  });
+  return latestBy(candidates, (item) => String(item.createdAt || ""));
+}
+
+function matchRequestForCall(
+  callId: string,
+  externalCallId: string,
+  sessionId: string,
+  requests: CallAnalysisRequestRecord[],
+) {
+  const candidates = requests.filter((item) => {
+    const requestCallId = String(item.callId || "").trim();
+    const requestExternalCallId = String(item.externalCallId || "").trim();
+    const requestSessionId = String(item.sessionId || "").trim();
+    if (!requestCallId && !requestExternalCallId && !requestSessionId) return false;
+    return (
+      requestCallId === callId ||
+      (externalCallId && requestCallId === externalCallId) ||
+      requestExternalCallId === callId ||
+      (externalCallId && requestExternalCallId === externalCallId) ||
+      (sessionId && requestSessionId === sessionId)
+    );
+  });
+  return latestBy(candidates, (item) => String(item.triggeredAt || ""));
+}
 
 export async function GET() {
   try {
-    const calls = await getCallLogs();
-    const ordered = [...calls].sort((a, b) => {
+    const [calls, analysisObservations, analysisRequests] = await Promise.all([
+      getCallLogs(),
+      getCallAnalysisObservations(),
+      getCallAnalysisRequests(),
+    ]);
+    const requestById = buildRequestByIdMap(analysisRequests);
+    const latestObservationByRequestId = buildLatestObservationByRequestIdMap(analysisObservations);
+
+    const enriched = calls.map((call) => {
+      const callId = String(call.id || "").trim();
+      const externalCallId = String(call.externalCallId || "").trim();
+      const sessionId = String(call.sessionId || "").trim();
+      const latestObservation = matchObservationForCall(
+        callId,
+        externalCallId,
+        sessionId,
+        analysisObservations,
+        requestById,
+      );
+      const latestRequest = matchRequestForCall(callId, externalCallId, sessionId, analysisRequests);
+      const requestLinkedToObservation = latestObservation
+        ? requestById.get(String(latestObservation.requestId || "").trim())
+        : null;
+
+      const merged = { ...call };
+
+      if (latestObservation) {
+        merged.leadId = merged.leadId || latestObservation.leadId;
+        merged.analysisObservationId = merged.analysisObservationId || latestObservation.id;
+        merged.aiAnalysis = merged.aiAnalysis || latestObservation.content;
+        merged.analysisRequestId = merged.analysisRequestId || latestObservation.requestId;
+        merged.externalCallId =
+          merged.externalCallId ||
+          String(requestLinkedToObservation?.externalCallId || "").trim() ||
+          merged.externalCallId;
+        merged.sessionId =
+          merged.sessionId ||
+          String(requestLinkedToObservation?.sessionId || "").trim() ||
+          merged.sessionId;
+        merged.processingStatus = "done";
+        merged.analysisError = null;
+        return merged;
+      }
+
+      if (latestRequest) {
+        merged.analysisRequestId = merged.analysisRequestId || latestRequest.requestId;
+        merged.externalCallId =
+          merged.externalCallId ||
+          String(latestRequest.externalCallId || "").trim() ||
+          merged.externalCallId;
+        merged.sessionId =
+          merged.sessionId ||
+          String(latestRequest.sessionId || "").trim() ||
+          merged.sessionId;
+        if (latestRequest.status === "processing") {
+          merged.processingStatus = "processing";
+        } else if (latestRequest.status === "error") {
+          merged.processingStatus = "error";
+          merged.analysisError = merged.analysisError || latestRequest.errorMessage || null;
+        } else if (latestRequest.status === "done") {
+          const observationForRequest = latestObservationByRequestId.get(latestRequest.requestId);
+          merged.processingStatus = "done";
+          merged.analysisObservationId =
+            merged.analysisObservationId ||
+            latestRequest.observationId ||
+            observationForRequest?.id ||
+            null;
+          merged.aiAnalysis =
+            merged.aiAnalysis ||
+            latestRequest.analysisText ||
+            observationForRequest?.content ||
+            null;
+          merged.analysisError = null;
+        }
+      }
+
+      return merged;
+    });
+
+    const ordered = [...enriched].sort((a, b) => {
       const first = a.startedAt || a.createdAt;
       const second = b.startedAt || b.createdAt;
       return second.localeCompare(first);
@@ -22,6 +180,9 @@ export async function GET() {
             endedAt: ordered[0].endedAt,
             durationSeconds: ordered[0].durationSeconds,
             telefone: ordered[0].telefone,
+            processingStatus: ordered[0].processingStatus || null,
+            analysisRequestId: ordered[0].analysisRequestId || null,
+            analysisObservationId: ordered[0].analysisObservationId || null,
           }
         : null,
     });

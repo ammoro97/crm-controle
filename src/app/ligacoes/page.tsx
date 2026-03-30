@@ -706,6 +706,40 @@ function isAnalysisReady(call: MappedCall): boolean {
   return Boolean(getDerivedAnalysisObservationId(call));
 }
 
+function getCallAnalysisPriority(input: {
+  analysisObservationId?: string | null;
+  aiAnalysis?: string | null;
+  processingStatus?: string | null;
+}) {
+  let score = 0;
+  if (String(input.analysisObservationId || "").trim()) score += 100;
+  if (String(input.aiAnalysis || "").trim()) score += 80;
+  if (String(input.processingStatus || "").trim().toLowerCase() === "done") score += 60;
+  if (String(input.processingStatus || "").trim().toLowerCase() === "processing") score += 20;
+  return score;
+}
+
+function getCallSortReference(input: {
+  updatedAt?: string | null;
+  endedAt?: string | null;
+  startedAt?: string | null;
+  createdAt?: string | null;
+}) {
+  return String(input.updatedAt || input.endedAt || input.startedAt || input.createdAt || "");
+}
+
+function shouldReplaceLookupRecord(current: CallLog, incoming: CallLog) {
+  const currentScore = getCallAnalysisPriority(current);
+  const incomingScore = getCallAnalysisPriority(incoming);
+  if (incomingScore !== currentScore) return incomingScore > currentScore;
+
+  const currentRef = getCallSortReference(current);
+  const incomingRef = getCallSortReference(incoming);
+  if (incomingRef !== currentRef) return incomingRef > currentRef;
+
+  return false;
+}
+
 function mapInternalCallToRow(
   item: CallLog,
   context: {
@@ -1016,15 +1050,23 @@ export default function LigacoesPage() {
 
       const internalMapById = new Map<string, CallLog>();
       const internalMapByLookup = new Map<string, CallLog>();
+      const registerLookup = (key: string, item: CallLog) => {
+        const normalized = String(key || "").trim();
+        if (!normalized) return;
+        const current = internalMapByLookup.get(normalized);
+        if (!current || shouldReplaceLookupRecord(current, item)) {
+          internalMapByLookup.set(normalized, item);
+        }
+      };
       if (internalResponse.ok && internalData.success && Array.isArray(internalData.calls)) {
         for (const item of internalData.calls) {
           internalMapById.set(item.id, item);
           const id = String(item.id || "").trim();
           const external = String(item.externalCallId || "").trim();
           const session = String(item.sessionId || "").trim();
-          if (id) internalMapByLookup.set(id, item);
-          if (external) internalMapByLookup.set(external, item);
-          if (session) internalMapByLookup.set(session, item);
+          registerLookup(id, item);
+          registerLookup(external, item);
+          registerLookup(session, item);
         }
       }
       setInternalById(internalMapById);
@@ -1467,6 +1509,8 @@ export default function LigacoesPage() {
             );
           });
           const sortedCandidates = [...candidates].sort((a, b) => {
+            const scoreDiff = getCallAnalysisPriority(b) - getCallAnalysisPriority(a);
+            if (scoreDiff !== 0) return scoreDiff;
             const first = String(a.startedAt || a.createdAt || "");
             const second = String(b.startedAt || b.createdAt || "");
             return second.localeCompare(first);
