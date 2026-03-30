@@ -116,25 +116,25 @@ type WrapupsIndexes = {
 type ResponsavelByIdIndex = Map<string, string>;
 
 const postCallResultOptions: Array<{ value: PostCallResultOption; label: string }> = [
-  { value: "Ligacao caiu", label: "Ligacao caiu" },
+  { value: "Ligacao caiu", label: "Ligação caiu" },
   { value: "Caixa postal", label: "Caixa postal" },
-  { value: "Ligacao muda", label: "Ligacao muda" },
-  { value: "Numero invalido", label: "Numero invalido" },
-  { value: "Pessoa nao conhece", label: "Pessoa nao conhece" },
+  { value: "Ligacao muda", label: "Ligação muda" },
+  { value: "Numero invalido", label: "Número inválido" },
+  { value: "Pessoa nao conhece", label: "Pessoa não conhece" },
   { value: "Falou com cliente", label: "Falou com cliente" },
-  { value: "Falou com secretaria", label: "Falou com secretaria" },
+  { value: "Falou com secretaria", label: "Falou com secretária" },
   { value: "Cliente sem interesse", label: "Cliente sem interesse" },
 ];
 
 const baseFinalizacaoOptions = [
   "Todas",
-  "Ligacao caiu",
+  "Ligação caiu",
   "Caixa postal",
-  "Ligacao muda",
-  "Numero invalido",
-  "Pessoa nao conhece",
+  "Ligação muda",
+  "Número inválido",
+  "Pessoa não conhece",
   "Falou com cliente",
-  "Falou com secretaria",
+  "Falou com secretária",
   "Cliente sem interesse",
 ];
 
@@ -144,15 +144,17 @@ const finalizacaoComProximaAcao = new Set<PostCallResultOption>([
 ]);
 
 const nextActionComFollowUp = new Set([
+  "Agendar Vídeo Chamada",
   "Agendar Video Chamada",
+  "Agendar Ligação",
   "Agendar Ligacao",
   "Agendar WhatsApp",
   "Confirmou possibilidade de contato",
 ]);
 
 const secondaryOptionsByFinalizacao: Record<"Falou com cliente" | "Falou com secretaria", string[]> = {
-  "Falou com cliente": ["Agendar Video Chamada", "Agendar Ligacao", "Agendar WhatsApp"],
-  "Falou com secretaria": ["Confirmou possibilidade de contato", "Nao houve confirmacao"],
+  "Falou com cliente": ["Agendar Vídeo Chamada", "Agendar Ligação", "Agendar WhatsApp"],
+  "Falou com secretaria": ["Confirmou possibilidade de contato", "Não houve confirmação"],
 };
 
 const OFFICIAL_FINALIZACOES = new Set(baseFinalizacaoOptions.filter((value) => value !== "Todas"));
@@ -218,28 +220,33 @@ function normalizeFinalizacaoLabel(value: string) {
   if (OFFICIAL_FINALIZACOES.has(value)) return value;
 
   const legacyMap: Record<string, string> = {
+    "falou com cliente": "Falou com cliente",
+    "falou com secretaria": "Falou com secretária",
+    "cliente sem interesse": "Cliente sem interesse",
     "falou com a pessoa": "Falou com cliente",
-    "era a pessoa errada": "Pessoa nao conhece",
-    "pessoa errada": "Pessoa nao conhece",
+    "era a pessoa errada": "Pessoa não conhece",
+    "pessoa errada": "Pessoa não conhece",
     "nao atendeu": "Caixa postal",
     "não atendeu": "Caixa postal",
     "caixa postal": "Caixa postal",
-    "numero invalido": "Numero invalido",
-    "número inválido": "Numero invalido",
-    "ligacao caiu": "Ligacao caiu",
-    "ligação caiu": "Ligacao caiu",
+    "numero invalido": "Número inválido",
+    "número inválido": "Número inválido",
+    "ligacao caiu": "Ligação caiu",
+    "ligação caiu": "Ligação caiu",
+    "ligacao muda": "Ligação muda",
+    "ligação muda": "Ligação muda",
     "pediu retorno": "Falou com cliente",
-    "deixou recado": "Falou com secretaria",
+    "deixou recado": "Falou com secretária",
     outro: "Falou com cliente",
     falou_com_pessoa: "Falou com cliente",
-    pessoa_errada: "Pessoa nao conhece",
+    pessoa_errada: "Pessoa não conhece",
     nao_atendeu: "Caixa postal",
     caixa_postal: "Caixa postal",
-    numero_invalido: "Numero invalido",
-    ligacao_caiu: "Ligacao caiu",
+    numero_invalido: "Número inválido",
+    ligacao_caiu: "Ligação caiu",
+    ligacao_muda: "Ligação muda",
     pediu_retorno: "Falou com cliente",
-    deixou_recado: "Falou com secretaria",
-    "cliente sem interesse": "Cliente sem interesse",
+    deixou_recado: "Falou com secretária",
     cliente_sem_interesse: "Cliente sem interesse",
   };
 
@@ -320,7 +327,7 @@ function createDefaultPostCallForm(): PostCallFormState {
 }
 
 function getSuggestedNextActionByFinalizacao(result: PostCallResultOption): string {
-  if (result === "Falou com cliente") return "Agendar Video Chamada";
+  if (result === "Falou com cliente") return "Agendar Vídeo Chamada";
   if (result === "Falou com secretaria") return "Confirmou possibilidade de contato";
   return "";
 }
@@ -434,7 +441,7 @@ function clearWrapupDraft(sessionId: string) {
 
 function humanizeHangupCause(value: string): string {
   const normalized = value.trim();
-  if (!normalized) return "Nao atendida";
+  if (!normalized) return "Não atendida";
   const lower = normalized.toLowerCase();
 
   if (lower.includes("busy")) return "Ocupado";
@@ -462,7 +469,7 @@ function mapApiCallToRow(
   const endedAt = parseDateMaybe(item.ended_at ?? item.endedAt);
   const durationSeconds = parseDuration(item.duration);
   const rawStatus = String(item.hangup_cause ?? item.hangupCause ?? "").trim();
-  const status = rawStatus ? humanizeHangupCause(rawStatus) : durationSeconds > 0 ? "Atendida" : "Nao atendida";
+  const status = rawStatus ? humanizeHangupCause(rawStatus) : durationSeconds > 0 ? "Atendida" : "Não atendida";
   const rawId = String(item.id ?? item.uniqueid ?? item.call_id ?? "").trim();
   const metadata =
     item.metadata && typeof item.metadata === "object" ? (item.metadata as Record<string, unknown>) : null;
@@ -553,7 +560,7 @@ function mapApiCallToRow(
   const atendente =
     atendenteFromWrapupResponsavelId ||
     atendenteFromResponsavelId ||
-    "Responsavel nao vinculado";
+    "Responsável não vinculado";
 
   return {
     id:
@@ -615,10 +622,10 @@ function mapInternalCallToRow(
     startedAt: item.startedAt || null,
     endedAt: item.endedAt || null,
     durationSeconds: Number(item.durationSeconds || 0),
-    status: item.status || "Nao atendida",
+    status: item.status || "Não atendida",
     finalizacao,
     subfinalizacao,
-    atendente: atendenteFromWrapupResponsavelId || "Responsavel nao vinculado",
+    atendente: atendenteFromWrapupResponsavelId || "Responsável não vinculado",
     origem: "interna",
     raw: {},
   };
@@ -694,21 +701,21 @@ const FINALIZACAO_UI: Record<FinalizacaoTipo, FinalizacaoUiConfig> = {
     badgeClass: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/35",
   },
   pessoa_nao_conhece: {
-    label: "Pessoa nao conhece",
+    label: "Pessoa não conhece",
     hex: "#3b82f6",
     barClass: "bg-blue-500",
     ringClass: "stroke-blue-500",
     badgeClass: "bg-blue-500/15 text-blue-300 border border-blue-500/35",
   },
   falou_com_secretaria: {
-    label: "Falou com secretaria",
+    label: "Falou com secretária",
     hex: "#f59e0b",
     barClass: "bg-amber-500",
     ringClass: "stroke-amber-500",
     badgeClass: "bg-amber-500/15 text-amber-300 border border-amber-500/35",
   },
   numero_invalido: {
-    label: "Numero invalido",
+    label: "Número inválido",
     hex: "#f43f5e",
     barClass: "bg-rose-500",
     ringClass: "stroke-rose-500",
@@ -722,14 +729,14 @@ const FINALIZACAO_UI: Record<FinalizacaoTipo, FinalizacaoUiConfig> = {
     badgeClass: "bg-yellow-500/15 text-yellow-300 border border-yellow-500/35",
   },
   ligacao_caiu: {
-    label: "Ligacao caiu",
+    label: "Ligação caiu",
     hex: "#8b5cf6",
     barClass: "bg-violet-500",
     ringClass: "stroke-violet-500",
     badgeClass: "bg-violet-500/15 text-violet-300 border border-violet-500/35",
   },
   ligacao_muda: {
-    label: "Ligacao muda",
+    label: "Ligação muda",
     hex: "#06b6d4",
     barClass: "bg-cyan-500",
     ringClass: "stroke-cyan-500",
@@ -737,10 +744,10 @@ const FINALIZACAO_UI: Record<FinalizacaoTipo, FinalizacaoUiConfig> = {
   },
   cliente_sem_interesse: {
     label: "Cliente sem interesse",
-    hex: "#ef4444",
-    barClass: "bg-red-500",
-    ringClass: "stroke-red-500",
-    badgeClass: "bg-red-500/15 text-red-300 border border-red-500/35",
+    hex: "#f97316",
+    barClass: "bg-orange-500",
+    ringClass: "stroke-orange-500",
+    badgeClass: "bg-orange-500/15 text-orange-300 border border-orange-500/35",
   },
   outros: {
     label: "Outros",
@@ -784,7 +791,7 @@ function normalizeMeetingPersonName(value?: string) {
 function statusBadgeClass(status?: string) {
   const normalized = (status || "").toLowerCase();
   if (normalized === "atendida") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
-  if (normalized === "nao atendida" || normalized === "sem resposta") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+  if (normalized === "nao atendida" || normalized === "não atendida" || normalized === "sem resposta") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
   if (normalized === "ocupado") return "border-sky-500/40 bg-sky-500/10 text-sky-300";
   return "border-rose-500/40 bg-rose-500/10 text-rose-300";
 }
@@ -827,7 +834,7 @@ export default function LigacoesPage() {
     postCallForm.result === "Falou com cliente" || postCallForm.result === "Falou com secretaria"
       ? secondaryOptionsByFinalizacao[postCallForm.result]
       : [];
-  const secondaryFieldLabel = "Subfinalizacao";
+  const secondaryFieldLabel = "Subfinalização";
   const showFollowUpFields = showNextActionField && nextActionComFollowUp.has(postCallForm.nextAction);
   const responsavelById = useMemo(() => {
     const map: ResponsavelByIdIndex = new Map();
@@ -890,7 +897,7 @@ export default function LigacoesPage() {
             );
 
       if (!externalResponse.ok || !externalData.ok) {
-        setError(externalData.error || "Historico externo indisponivel. Exibindo ligacoes internas.");
+        setError(externalData.error || "Histórico externo indisponível. Exibindo ligações internas.");
       } else {
         setError(null);
       }
@@ -913,7 +920,7 @@ export default function LigacoesPage() {
       return true;
     } catch (requestError) {
       if (requestError instanceof DOMException && requestError.name === "AbortError") return false;
-      setError("Nao foi possivel carregar ligacoes.");
+      setError("Não foi possível carregar ligações.");
       setCalls([]);
       console.error(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD FAIL`, {
         reason,
@@ -1220,8 +1227,8 @@ export default function LigacoesPage() {
     if (selectedIds.length === 0) return;
     const ok = window.confirm(
       selectedIds.length === 1
-        ? "Deseja excluir a ligacao selecionada?"
-        : `Deseja excluir ${selectedIds.length} ligacoes selecionadas?`,
+        ? "Deseja excluir a ligação selecionada?"
+        : `Deseja excluir ${selectedIds.length} ligações selecionadas?`,
     );
     if (!ok) return;
 
@@ -1489,7 +1496,7 @@ export default function LigacoesPage() {
     const lead = leads[leadIndex];
     const observationId = `OBS-CALL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const freeTextObservationId = `OBS-CALL-TEXT-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const resultLabel = normalizeFinalizacaoLabel(formState.result) || "Finalizacao registrada";
+    const resultLabel = normalizeFinalizacaoLabel(formState.result) || "Finalização registrada";
     const durationText = formatDurationHuman(callEvidence?.durationSeconds);
     const callDate = formatDate(callEvidence?.startedAt || now.date);
     const callTime = formatTime(callEvidence?.startedAt || `${now.date}T${now.time}:00`);
@@ -1501,11 +1508,11 @@ export default function LigacoesPage() {
         : "-";
 
     const structuredLines = [
-      `Finalizacao: ${resultLabel}`,
+      `Finalização: ${resultLabel}`,
       `Motivo: ${formState.reason || "-"}`,
       `Proxima acao: ${formState.nextAction.trim() || "-"}`,
       `Follow-up: ${followUpText}`,
-      `Duracao: ${durationText}`,
+      `Duração: ${durationText}`,
       `Data/Hora da ligacao: ${callDate} ${callTime !== "-" ? `- ${callTime}` : ""}`.trim(),
     ];
 
@@ -1532,7 +1539,7 @@ export default function LigacoesPage() {
 
     const linkedObservationId = freeTextObservation?.id || structuredObservation.id;
 
-    const historyEventDescription = `Ligacao realizada com o lead. Finalizacao: ${resultLabel}.`;
+    const historyEventDescription = `Ligação realizada com o lead. Finalização: ${resultLabel}.`;
 
     const nextLead: Lead = {
       ...lead,
@@ -1594,8 +1601,8 @@ export default function LigacoesPage() {
     if (hasExistingMeeting) return;
 
     const notes = [
-      "Origem: Ligacao",
-      `Finalizacao: ${normalizeFinalizacaoLabel(formState.result)}`,
+      "Origem: Ligação",
+      `Finalização: ${normalizeFinalizacaoLabel(formState.result)}`,
       `Proxima acao: ${formState.nextAction || "-"}`,
       `Telefone: ${lead?.phone || session.telefone}`,
       sessionMarker,
@@ -1623,7 +1630,7 @@ export default function LigacoesPage() {
       if (acao.includes("video")) return "Reuniao agendada com o lead.";
       if (acao.includes("whatsapp")) return "Retorno agendado com o lead.";
       if (acao.includes("reuniao")) return "Reuniao agendada com o lead.";
-      if (acao.includes("ligar")) return "Ligacao agendada com o lead.";
+      if (acao.includes("ligar")) return "Ligação agendada com o lead.";
       if (acao.includes("retorno")) return "Retorno agendado com o lead.";
       return "Follow-up agendado para o lead.";
     })();
@@ -1662,7 +1669,7 @@ export default function LigacoesPage() {
       return;
     }
     if (!postCallForm.result) {
-      setWrapupError("Selecione o resultado da ligacao.");
+      setWrapupError("Selecione o resultado da ligação.");
       return;
     }
     if (postCallForm.result === "Cliente sem interesse" && !postCallForm.reason) {
@@ -1670,7 +1677,7 @@ export default function LigacoesPage() {
       return;
     }
     if (showNextActionField && !postCallForm.nextAction.trim()) {
-      setWrapupError("Selecione a proxima acao para continuar.");
+      setWrapupError("Selecione a próxima ação para continuar.");
       return;
     }
     if (showFollowUpFields && (!postCallForm.followUpDate || !postCallForm.followUpTime)) {
@@ -1686,7 +1693,7 @@ export default function LigacoesPage() {
       const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);
       if (!resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {
         setWrapupError(
-          "Seu usuario ainda nao esta vinculado a um responsavel no CRM. Cadastre esse e-mail em Configuracoes > Responsaveis antes de finalizar ligacoes.",
+          "Seu usuário ainda não está vinculado a um responsável no CRM. Cadastre esse e-mail em Configurações > Responsáveis antes de finalizar ligações.",
         );
         return;
       }
@@ -1769,11 +1776,11 @@ export default function LigacoesPage() {
       });
       setPostCallForm(createDefaultPostCallForm());
       setWrapupOpen(false);
-      setWrapupMessage("Finalizacao da ligacao registrada com sucesso.");
+      setWrapupMessage("Finalização da ligação registrada com sucesso.");
       await runWrapupReconciliation();
       await loadCallsWithRetry("after-wrapup-save", 2);
     } catch {
-      setWrapupError("Nao foi possivel registrar a finalizacao desta ligacao.");
+      setWrapupError("Não foi possível registrar a finalização desta ligação.");
     } finally {
       setWrapupSaving(false);
     }
@@ -1804,7 +1811,7 @@ export default function LigacoesPage() {
               </select>
             </label>
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
-              Finalizacao
+              Finalização
               <select
                 className="field mt-1 h-9 min-w-[190px] border-slate-700 bg-slate-900/80 px-2.5 py-1.5 text-xs"
                 value={finalizacaoFilter}
@@ -1836,9 +1843,9 @@ export default function LigacoesPage() {
         <div className="panel border-amber-500/30 bg-amber-500/5 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-[10px] uppercase tracking-[0.12em] text-amber-200">Finalizacao pendente</p>
+              <p className="text-[10px] uppercase tracking-[0.12em] text-amber-200">Finalização pendente</p>
               <p className="mt-1 text-sm text-amber-100/90">
-                Ligacao {activeSession.status === "dialing" ? "em andamento" : "encerrada"} para{" "}
+                Ligação {activeSession.status === "dialing" ? "em andamento" : "encerrada"} para{" "}
                 <span className="font-semibold">{activeSession.nome || activeSession.telefone}</span>.
               </p>
             </div>
@@ -1857,36 +1864,34 @@ export default function LigacoesPage() {
               <p className="text-[11px] text-slate-400">Panorama principal da operação de ligações</p>
             </div>
           </div>
-          <div className="grid gap-2 lg:grid-cols-12">
-            <article className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-3.5 lg:col-span-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <article className="h-full rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-4 shadow-sm shadow-emerald-950/30">
               <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-emerald-200">Taxa de Atendimento</p>
               <p className="mt-1.5 text-4xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
               <p className="mt-1.5 text-[12px] text-emerald-100/80">
                 <span className="font-semibold text-emerald-100">{summary.answered}</span> de {filteredCalls.length} atendidas
               </p>
             </article>
-            <div className="grid gap-2 sm:grid-cols-2 lg:col-span-7">
-              <article className="rounded-lg border border-slate-800/80 bg-slate-950/85 p-3">
-                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Ligações Gerais</p>
-                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{filteredCalls.length}</p>
-                <p className="mt-1.5 text-[12px] text-slate-400">Volume total</p>
-              </article>
-              <article className="rounded-lg border border-slate-800/80 bg-slate-950/85 p-3">
-                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Tempo Total</p>
-                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{summary.totalCallTime}</p>
-                <p className="mt-1.5 text-[12px] text-slate-400">Duração acumulada</p>
-              </article>
-              <article className="rounded-lg border border-slate-800/80 bg-slate-950/85 p-3">
-                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Cliente</p>
-                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.cliente.tma}</p>
-                <p className="mt-1.5 text-[12px] text-slate-400">Somente &quot;Falou com cliente&quot;</p>
-              </article>
-              <article className="rounded-lg border border-slate-800/80 bg-slate-950/85 p-3">
-                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Secretaria</p>
-                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.secretaria.tma}</p>
-                <p className="mt-1.5 text-[12px] text-slate-400">Somente &quot;Falou com secretaria&quot;</p>
-              </article>
-            </div>
+            <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Ligações Gerais</p>
+              <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{filteredCalls.length}</p>
+              <p className="mt-1.5 text-[12px] text-slate-400">Volume total</p>
+            </article>
+            <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Tempo Total</p>
+              <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{summary.totalCallTime}</p>
+              <p className="mt-1.5 text-[12px] text-slate-400">Duração acumulada</p>
+            </article>
+            <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Cliente</p>
+              <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.cliente.tma}</p>
+              <p className="mt-1.5 text-[12px] text-slate-400">Somente &quot;Falou com cliente&quot;</p>
+            </article>
+            <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Secretaria</p>
+              <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.secretaria.tma}</p>
+              <p className="mt-1.5 text-[12px] text-slate-400">Somente &quot;Falou com secretária&quot;</p>
+            </article>
           </div>
         </div>
 
@@ -1899,15 +1904,15 @@ export default function LigacoesPage() {
           </div>
           <div className="rounded-lg border border-slate-800/85 bg-slate-950/85 p-3">
             <div className="space-y-2.5">
-              <div className="grid grid-cols-[minmax(0,170px)_1fr_auto] items-center gap-2">
+              <div className="grid grid-cols-[minmax(0,170px)_1fr_auto] items-center gap-2 rounded-md border border-emerald-500/25 bg-emerald-500/5 px-2.5 py-2">
                 <div className="flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  <p className="text-[12px] font-medium text-slate-200">CPC Positivo</p>
+                  <p className="text-[12px] font-semibold text-emerald-100">CPC Positivo</p>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
                   <div className="h-full bg-emerald-500" style={{ width: `${contactQuality.cpcPositiveRate}%` }} />
                 </div>
-                <p className="text-[12px] text-slate-300">{contactQuality.cpcPositiveRate}% · {contactQuality.cpcPositive}</p>
+                <p className="text-[12px] font-medium text-emerald-100">{contactQuality.cpcPositiveRate}% · {contactQuality.cpcPositive}</p>
               </div>
 
               <div className="grid grid-cols-[minmax(0,170px)_1fr_auto] items-center gap-2">
@@ -1961,9 +1966,9 @@ export default function LigacoesPage() {
               <p className="mt-1 text-[12px] text-slate-400">{followUpRates.vsContatosPositivos}% dos contatos positivos</p>
               <p className="mt-1 text-[12px] text-slate-400">{followUpRates.vsLigacoesGerais}% das ligações gerais</p>
             </article>
-            <article className="rounded-lg border border-rose-500/25 bg-rose-500/8 p-3.5">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-rose-200">Cliente sem interesse / CPC</p>
-              <p className="mt-1.5 text-3xl font-semibold leading-none text-rose-100">{clienteSemInteresseNoCpc.percentual}%</p>
+            <article className="rounded-lg border border-orange-500/25 bg-orange-500/8 p-3.5">
+              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-orange-200">Cliente sem interesse / CPC</p>
+              <p className="mt-1.5 text-3xl font-semibold leading-none text-orange-100">{clienteSemInteresseNoCpc.percentual}%</p>
               <p className="mt-1.5 text-[12px] text-slate-300">
                 {clienteSemInteresseNoCpc.quantidade} de {clienteSemInteresseNoCpc.base}
               </p>
@@ -2112,7 +2117,7 @@ export default function LigacoesPage() {
             Excluir selecionadas
           </button>
         </div>
-        {loading ? <p className="px-4 py-4 text-sm text-slate-400">Carregando ligacoes...</p> : null}
+        {loading ? <p className="px-4 py-4 text-sm text-slate-400">Carregando ligações...</p> : null}
         {error ? <p className="px-4 py-4 text-sm text-rose-300">{error}</p> : null}
 
         {!loading && !error ? (
@@ -2134,21 +2139,21 @@ export default function LigacoesPage() {
                   <th className="whitespace-nowrap px-3 py-2.5">Telefone</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Atendente</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Data</th>
-                  <th className="whitespace-nowrap px-3 py-2.5">Inicio</th>
+                  <th className="whitespace-nowrap px-3 py-2.5">Início</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Fim</th>
-                  <th className="whitespace-nowrap px-3 py-2.5">Duracao</th>
+                  <th className="whitespace-nowrap px-3 py-2.5">Duração</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Status</th>
-                  <th className="whitespace-nowrap px-3 py-2.5">Finalizacao</th>
-                  <th className="whitespace-nowrap px-3 py-2.5">Subfinalizacao</th>
+                  <th className="whitespace-nowrap px-3 py-2.5">Finalização</th>
+                  <th className="whitespace-nowrap px-3 py-2.5">Subfinalização</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Origem</th>
-                  <th className="whitespace-nowrap px-3 py-2.5">Acao</th>
+                  <th className="whitespace-nowrap px-3 py-2.5">Ação</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredCalls.length === 0 ? (
                   <tr>
                     <td className="px-3 py-4 text-sm text-slate-400" colSpan={14}>
-                      Nenhuma ligacao encontrada.
+                      Nenhuma ligação encontrada.
                     </td>
                   </tr>
                 ) : (
@@ -2161,7 +2166,7 @@ export default function LigacoesPage() {
                           <td className="whitespace-nowrap px-3 py-3">
                             <input
                               type="checkbox"
-                              aria-label={`Selecionar ligacao ${call.id}`}
+                              aria-label={`Selecionar ligação ${call.id}`}
                               className="h-4 w-4 accent-cyan-400"
                               checked={isSelected}
                               onChange={() => toggleSelectOne(call.id)}
@@ -2170,14 +2175,14 @@ export default function LigacoesPage() {
                           <td className="whitespace-nowrap px-3 py-3">{call.nome}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.empresa}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.telefone}</td>
-                          <td className="whitespace-nowrap px-3 py-3">{call.atendente || "Responsavel nao vinculado"}</td>
+                          <td className="whitespace-nowrap px-3 py-3">{call.atendente || "Responsável não vinculado"}</td>
                           <td className="whitespace-nowrap px-3 py-3">{formatDate(call.startedAt)}</td>
                           <td className="whitespace-nowrap px-3 py-3">{formatTime(call.startedAt)}</td>
                           <td className="whitespace-nowrap px-3 py-3">{formatTime(call.endedAt)}</td>
                           <td className="whitespace-nowrap px-3 py-3">{formatDuration(call.durationSeconds)}</td>
                           <td className="whitespace-nowrap px-3 py-3">
                             <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${statusBadgeClass(call.status)}`}>
-                              {call.status || "Nao atendida"}
+                              {call.status || "Não atendida"}
                             </span>
                           </td>
                           <td className="whitespace-nowrap px-3 py-3">
@@ -2219,38 +2224,38 @@ export default function LigacoesPage() {
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Atendente</p>
-                                  <p className="mt-1 text-sm text-slate-100">{call.atendente || "Responsavel nao vinculado"}</p>
+                                  <p className="mt-1 text-sm text-slate-100">{call.atendente || "Responsável não vinculado"}</p>
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Data</p>
                                   <p className="mt-1 text-sm text-slate-100">{formatDate(call.startedAt)}</p>
                                 </div>
                                 <div>
-                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Inicio</p>
+                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Início</p>
                                   <p className="mt-1 text-sm text-slate-100">{formatTime(call.startedAt)}</p>
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Atendimento</p>
-                                  <p className="mt-1 text-sm text-slate-100">{Number(call.durationSeconds) > 0 ? "Sim" : "Nao"}</p>
+                                  <p className="mt-1 text-sm text-slate-100">{Number(call.durationSeconds) > 0 ? "Sim" : "Não"}</p>
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Fim</p>
                                   <p className="mt-1 text-sm text-slate-100">{formatTime(call.endedAt)}</p>
                                 </div>
                                 <div>
-                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Duracao</p>
+                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Duração</p>
                                   <p className="mt-1 text-sm text-slate-100">{formatDuration(call.durationSeconds)}</p>
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Status</p>
-                                  <p className="mt-1 text-sm text-slate-100">{call.status || "Nao atendida"}</p>
+                                  <p className="mt-1 text-sm text-slate-100">{call.status || "Não atendida"}</p>
                                 </div>
                                 <div>
-                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Finalizacao</p>
+                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Finalização</p>
                                   <p className="mt-1 text-sm text-slate-100">{call.finalizacao || "-"}</p>
                                 </div>
                                 <div>
-                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Subfinalizacao</p>
+                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Subfinalização</p>
                                   <p className="mt-1 text-sm text-slate-100">{call.subfinalizacao || "-"}</p>
                                 </div>
                                 <div>
@@ -2272,7 +2277,7 @@ export default function LigacoesPage() {
                                       rel="noreferrer"
                                       className="mt-1 inline-flex text-sm text-emerald-300 underline underline-offset-2"
                                     >
-                                      Abrir gravacao
+                                      Abrir gravação
                                     </a>
                                   ) : typeof call.raw.record_url === "string" && call.raw.record_url ? (
                                     <a
@@ -2281,18 +2286,18 @@ export default function LigacoesPage() {
                                       rel="noreferrer"
                                       className="mt-1 inline-flex text-sm text-emerald-300 underline underline-offset-2"
                                     >
-                                      Abrir gravacao
+                                      Abrir gravação
                                     </a>
                                   ) : (
                                     <p className="mt-1 text-sm text-slate-500">Em breve</p>
                                   )}
                                 </div>
                                 <div>
-                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Transcricao</p>
+                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Transcrição</p>
                                   <p className="mt-1 text-sm text-slate-500">Em breve</p>
                                 </div>
                                 <div>
-                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Analise IA</p>
+                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Análise IA</p>
                                   <p className="mt-1 text-sm text-slate-500">Em breve</p>
                                 </div>
                               </div>
@@ -2310,7 +2315,7 @@ export default function LigacoesPage() {
       </div>
 
       <Modal
-        title="Finalizacao de ligacao"
+        title="Finalização de ligação"
         open={wrapupOpen}
         onClose={handleWrapupModalClose}
       >
@@ -2325,7 +2330,7 @@ export default function LigacoesPage() {
               <input className="field mt-1" value={activeSession?.nome || "-"} readOnly />
             </label>
             <label className="text-sm md:col-span-2">
-              Finalizacao
+              Finalização
               <select
                 className="field mt-1"
                 value={postCallForm.result}
@@ -2361,13 +2366,13 @@ export default function LigacoesPage() {
                   }
                 >
                   <option value="">Selecione...</option>
-                  <option value="Ja possui CRM e nao tem interesse">Ja possui CRM e nao tem interesse</option>
+                  <option value="Ja possui CRM e nao tem interesse">Já possui CRM e não tem interesse</option>
                   <option value="Outros">Outros</option>
                 </select>
               </label>
             ) : null}
             <label className="text-sm md:col-span-2">
-              Observacoes
+              Observações
               <textarea
                 className="field mt-1 min-h-[110px]"
                 value={postCallForm.observations}
@@ -2403,7 +2408,7 @@ export default function LigacoesPage() {
                   />
                 </label>
                 <label className="text-sm">
-                  Horario de follow-up
+                  Horário de follow-up
                   <input
                     type="time"
                     className="field mt-1"
@@ -2417,7 +2422,7 @@ export default function LigacoesPage() {
 
           {activeSession && !activeSession.matchedCallId ? (
             <p className="text-xs text-amber-300">
-              Esta finalizacao sera salva como pendente de conciliacao ate a chamada oficial ser identificada.
+              Esta finalização será salva como pendente de conciliação até a chamada oficial ser identificada.
             </p>
           ) : null}
 
@@ -2428,7 +2433,7 @@ export default function LigacoesPage() {
               Minimizar
             </button>
             <button type="submit" className="btn-primary" disabled={wrapupSaving}>
-              {wrapupSaving ? "Salvando..." : "Salvar finalizacao"}
+              {wrapupSaving ? "Salvando..." : "Salvar finalização"}
             </button>
           </div>
         </form>
