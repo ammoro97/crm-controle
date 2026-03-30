@@ -306,6 +306,7 @@ export default function ConfiguracoesPage() {
     setWebhookOutLoading(true);
     setWebhookOutError(null);
     setWebhookOutMessage(null);
+    const local = readWebhookOutLocalConfig();
     try {
       const response = await fetch("/api/integrations/webhook-out", {
         method: "GET",
@@ -314,9 +315,9 @@ export default function ConfiguracoesPage() {
       const data = (await response.json()) as WebhookOutConfigResponse;
 
       if (!response.ok || !data.success || !data.config) {
-        const local = readWebhookOutLocalConfig();
         if (local?.url) {
           setWebhookOutUrl(local.url);
+          setWebhookOutSecret(local.secret || "");
           setWebhookOutConfigured(true);
           setWebhookOutMessage("Webhook carregado do navegador (modo compatibilidade).");
           return;
@@ -325,18 +326,36 @@ export default function ConfiguracoesPage() {
         return;
       }
 
-      setWebhookOutUrl(data.config.url || "");
-      setWebhookOutConfigured(Boolean(data.config.enabled && data.config.url));
-      if (data.config.url) {
+      const serverUrl = normalizeWebhookOutUrlInput(data.config.url || "");
+      const serverConfigured = Boolean(data.config.enabled && isValidHttpUrl(serverUrl));
+
+      if (serverConfigured) {
+        setWebhookOutUrl(serverUrl);
+        if (local?.secret) {
+          setWebhookOutSecret(local.secret);
+        }
+        setWebhookOutConfigured(true);
         writeWebhookOutLocalConfig({
-          url: data.config.url,
-          secret: webhookOutSecret,
+          url: serverUrl,
+          secret: local?.secret || webhookOutSecret,
         });
+        return;
       }
-    } catch {
-      const local = readWebhookOutLocalConfig();
+
       if (local?.url) {
         setWebhookOutUrl(local.url);
+        setWebhookOutSecret(local.secret || "");
+        setWebhookOutConfigured(true);
+        setWebhookOutMessage("Webhook carregado do navegador (modo compatibilidade).");
+        return;
+      }
+
+      setWebhookOutUrl("");
+      setWebhookOutConfigured(false);
+    } catch {
+      if (local?.url) {
+        setWebhookOutUrl(local.url);
+        setWebhookOutSecret(local.secret || "");
         setWebhookOutConfigured(true);
         setWebhookOutMessage("Webhook carregado do navegador (modo compatibilidade).");
       } else {
