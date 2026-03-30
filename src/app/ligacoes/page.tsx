@@ -105,6 +105,8 @@ type GenerateAnaliseIaResponse = {
   message?: string;
   error?: string;
   detail?: string | null;
+  code?: string;
+  status?: number;
   requestId?: string;
   callId?: string;
 };
@@ -1511,10 +1513,25 @@ export default function LigacoesPage() {
         }),
       });
 
-      const data = (await response.json()) as GenerateAnaliseIaResponse;
+      let data: GenerateAnaliseIaResponse = { success: false };
+      let rawResponseText = "";
+      try {
+        rawResponseText = await response.text();
+        data = rawResponseText ? (JSON.parse(rawResponseText) as GenerateAnaliseIaResponse) : { success: false };
+      } catch {
+        data = { success: false, detail: rawResponseText || "Resposta invalida da API interna." };
+      }
+
       if (!response.ok || !data.success) {
+        const statusText = response.status ? `HTTP ${response.status}` : "";
+        const codeText = data.code ? `[${data.code}]` : "";
         const detailedMessage =
-          [data.message || data.error || "Falha ao enviar analise para processamento externo.", data.detail || ""]
+          [
+            data.message || data.error || "Falha ao enviar analise para processamento externo.",
+            statusText,
+            codeText,
+            data.detail || "",
+          ]
             .filter(Boolean)
             .join(" ");
         setCalls((prev) =>
@@ -1528,6 +1545,14 @@ export default function LigacoesPage() {
               : item,
           ),
         );
+        console.error(`${LIGACOES_DEBUG_PREFIX} CALL_ANALYSIS_REQUEST_FAILED`, {
+          callId: call.id,
+          leadId: call.leadId || null,
+          responseStatus: response.status,
+          code: data.code || null,
+          detail: data.detail || null,
+          rawResponseText: rawResponseText || null,
+        });
         setAnalysisFeedbackByCallId((prev) => ({
           ...prev,
           [call.id]: {
@@ -1558,14 +1583,18 @@ export default function LigacoesPage() {
         ),
       );
       await loadCallsWithRetry("analysis-requested", 1);
-    } catch {
+    } catch (requestError) {
+      const errorMessage =
+        requestError instanceof Error
+          ? requestError.message
+          : "Erro inesperado ao iniciar geracao da analise.";
       setCalls((prev) =>
         prev.map((item) =>
           item.id === call.id
             ? {
                 ...item,
                 processingStatus: "error",
-                analysisError: "Nao foi possivel enviar analise. Verifique a configuracao do webhook.",
+                analysisError: `Nao foi possivel enviar analise. ${errorMessage}`,
               }
             : item,
         ),
@@ -1574,9 +1603,14 @@ export default function LigacoesPage() {
         ...prev,
         [call.id]: {
           type: "error",
-          message: "Nao foi possivel enviar analise. Verifique a configuracao do webhook.",
+          message: `Nao foi possivel enviar analise. ${errorMessage}`,
         },
       }));
+      console.error(`${LIGACOES_DEBUG_PREFIX} CALL_ANALYSIS_REQUEST_EXCEPTION`, {
+        callId: call.id,
+        leadId: call.leadId || null,
+        message: errorMessage,
+      });
     } finally {
       setAnalysisLoadingCallId(null);
     }
@@ -2666,7 +2700,8 @@ export default function LigacoesPage() {
                                     </p>
                                   ) : null}
                                   {webhookOutError ? <p className="mt-1 text-xs text-rose-300">{webhookOutError}</p> : null}
-                                  {call.analysisError ? (
+                                  {call.analysisError &&
+                                  (!analysisFeedback || analysisFeedback.message !== call.analysisError) ? (
                                     <p className="mt-1 text-xs text-rose-300">{call.analysisError}</p>
                                   ) : null}
                                   {analysisFeedback ? (
