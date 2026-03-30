@@ -36,8 +36,13 @@ async function ensureDataDir() {
 }
 
 function normalizeUrl(value?: string) {
-  const url = String(value || "").trim();
-  if (!url) return "";
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const url = /^ps:\/\//i.test(raw)
+    ? `https://${raw.slice(5)}`
+    : !/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(raw)
+      ? `https://${raw}`
+      : raw;
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";

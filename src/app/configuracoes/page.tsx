@@ -55,6 +55,61 @@ type WebhookOutConfigResponse = {
   config?: WebhookOutConfigView;
 };
 
+const WEBHOOK_OUT_LOCAL_STORAGE_KEY = "crm:webhook-out-config:v1";
+
+function normalizeWebhookOutUrlInput(value?: string | null) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^ps:\/\//i.test(raw)) return `https://${raw.slice(5)}`;
+  if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(raw)) return `https://${raw}`;
+  return raw;
+}
+
+function isValidHttpUrl(value?: string | null) {
+  const url = String(value || "").trim();
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function readWebhookOutLocalConfig() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(WEBHOOK_OUT_LOCAL_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { url?: string; secret?: string };
+    const url = normalizeWebhookOutUrlInput(parsed.url);
+    if (!isValidHttpUrl(url)) return null;
+    return {
+      url,
+      secret: String(parsed.secret || "").trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeWebhookOutLocalConfig(input: { url: string; secret?: string }) {
+  if (typeof window === "undefined") return;
+  const url = normalizeWebhookOutUrlInput(input.url);
+  if (!isValidHttpUrl(url)) {
+    window.localStorage.removeItem(WEBHOOK_OUT_LOCAL_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(
+    WEBHOOK_OUT_LOCAL_STORAGE_KEY,
+    JSON.stringify({
+      url,
+      secret: String(input.secret || "").trim(),
+      updatedAt: new Date().toISOString(),
+    }),
+  );
+}
+
 function formatDateTime(value: string) {
   const date = new Date(value);
   return date.toLocaleString("pt-BR", {
@@ -259,14 +314,34 @@ export default function ConfiguracoesPage() {
       const data = (await response.json()) as WebhookOutConfigResponse;
 
       if (!response.ok || !data.success || !data.config) {
+        const local = readWebhookOutLocalConfig();
+        if (local?.url) {
+          setWebhookOutUrl(local.url);
+          setWebhookOutConfigured(true);
+          setWebhookOutMessage("Webhook carregado do navegador (modo compatibilidade).");
+          return;
+        }
         setWebhookOutError(data.error || "Nao foi possivel carregar webhook de saida.");
         return;
       }
 
       setWebhookOutUrl(data.config.url || "");
       setWebhookOutConfigured(Boolean(data.config.enabled && data.config.url));
+      if (data.config.url) {
+        writeWebhookOutLocalConfig({
+          url: data.config.url,
+          secret: webhookOutSecret,
+        });
+      }
     } catch {
-      setWebhookOutError("Nao foi possivel carregar webhook de saida.");
+      const local = readWebhookOutLocalConfig();
+      if (local?.url) {
+        setWebhookOutUrl(local.url);
+        setWebhookOutConfigured(true);
+        setWebhookOutMessage("Webhook carregado do navegador (modo compatibilidade).");
+      } else {
+        setWebhookOutError("Nao foi possivel carregar webhook de saida.");
+      }
     } finally {
       setWebhookOutLoading(false);
     }
@@ -520,6 +595,8 @@ export default function ConfiguracoesPage() {
     setWebhookOutSaving(true);
     setWebhookOutError(null);
     setWebhookOutMessage(null);
+    const normalizedUrl = normalizeWebhookOutUrlInput(webhookOutUrl);
+    setWebhookOutUrl(normalizedUrl);
     try {
       const response = await fetch("/api/integrations/webhook-out", {
         method: "POST",
@@ -527,15 +604,22 @@ export default function ConfiguracoesPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          url: webhookOutUrl.trim(),
+          url: normalizedUrl,
           secret: webhookOutSecret.trim() ? webhookOutSecret : undefined,
           method: "POST",
-          enabled: Boolean(webhookOutUrl.trim()),
+          enabled: Boolean(normalizedUrl),
         }),
       });
 
       const data = (await response.json()) as WebhookOutConfigResponse;
       if (!response.ok || !data.success || !data.config) {
+        if (isValidHttpUrl(normalizedUrl)) {
+          writeWebhookOutLocalConfig({ url: normalizedUrl, secret: webhookOutSecret });
+          setWebhookOutConfigured(true);
+          setWebhookOutMessage("Webhook salvo localmente neste navegador (modo compatibilidade).");
+          pushLog("Configuracao salva (local)", "Webhook de saida", "Info");
+          return;
+        }
         const message = data.error || "Nao foi possivel salvar webhook de saida.";
         setWebhookOutError(message);
         pushLog("Configuracao salva", "Webhook de saida", "Falha");
@@ -545,27 +629,47 @@ export default function ConfiguracoesPage() {
       setWebhookOutConfigured(Boolean(data.config.enabled && data.config.url));
       setWebhookOutUrl(data.config.url || "");
       setWebhookOutMessage(data.message || "Webhook de saida salvo com sucesso.");
+      writeWebhookOutLocalConfig({ url: data.config.url || normalizedUrl, secret: webhookOutSecret });
       pushLog("Configuracao salva", "Webhook de saida", "Sucesso");
     } catch {
-      setWebhookOutError("Nao foi possivel salvar webhook de saida.");
-      pushLog("Configuracao salva", "Webhook de saida", "Falha");
+      if (isValidHttpUrl(normalizedUrl)) {
+        writeWebhookOutLocalConfig({ url: normalizedUrl, secret: webhookOutSecret });
+        setWebhookOutConfigured(true);
+        setWebhookOutMessage("Webhook salvo localmente neste navegador (modo compatibilidade).");
+        pushLog("Configuracao salva (local)", "Webhook de saida", "Info");
+      } else {
+        setWebhookOutError("Nao foi possivel salvar webhook de saida.");
+        pushLog("Configuracao salva", "Webhook de saida", "Falha");
+      }
     } finally {
       setWebhookOutSaving(false);
     }
   };
 
   const handleSendWebhookOutTest = async () => {
-    if (!webhookOutUrl.trim()) {
+    const normalizedUrl = normalizeWebhookOutUrlInput(webhookOutUrl);
+    if (!normalizedUrl.trim()) {
       setWebhookOutError("Informe a URL do webhook de saida antes de testar.");
       pushLog("Teste sem URL configurada", "Webhook de saida", "Falha");
       return;
     }
+    setWebhookOutUrl(normalizedUrl);
     setWebhookOutTesting(true);
     setWebhookOutError(null);
     setWebhookOutMessage(null);
     try {
       const response = await fetch("/api/integrations/webhook-out/test", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          webhook: {
+            url: normalizedUrl,
+            secret: webhookOutSecret.trim() ? webhookOutSecret : undefined,
+            method: "POST",
+          },
+        }),
       });
       const data = (await response.json()) as WebhookOutConfigResponse;
       if (!response.ok || !data.success) {

@@ -182,6 +182,7 @@ const secondaryOptionsByFinalizacao: Record<"Falou com cliente" | "Falou com sec
 const OFFICIAL_FINALIZACOES = new Set(baseFinalizacaoOptions.filter((value) => value !== "Todas"));
 const HIDDEN_CALL_IDS_STORAGE_KEY = "crm:ligacoes:hidden-call-ids";
 const WRAPUP_DRAFT_STORAGE_KEY = "crm:calls:wrapup-draft:v1";
+const WEBHOOK_OUT_LOCAL_STORAGE_KEY = "crm:webhook-out-config:v1";
 const LIGACOES_DEBUG_PREFIX = "[LIGACOES_DEBUG]";
 
 function sleep(ms: number) {
@@ -395,6 +396,47 @@ function getCallRecordingUrl(call: MappedCall): string | null {
     return call.raw.record_url.trim();
   }
   return null;
+}
+
+type WebhookOutClientConfig = {
+  url: string;
+  secret: string;
+};
+
+function normalizeWebhookOutUrlInput(value?: string | null) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^ps:\/\//i.test(raw)) return `https://${raw.slice(5)}`;
+  if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(raw)) return `https://${raw}`;
+  return raw;
+}
+
+function isValidHttpUrl(value?: string | null) {
+  const url = String(value || "").trim();
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function readWebhookOutClientConfig(): WebhookOutClientConfig | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(WEBHOOK_OUT_LOCAL_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { url?: string; secret?: string };
+    const url = normalizeWebhookOutUrlInput(parsed.url);
+    if (!isValidHttpUrl(url)) return null;
+    return {
+      url,
+      secret: String(parsed.secret || "").trim(),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function parseDuration(value: unknown): number {
@@ -1003,14 +1045,21 @@ export default function LigacoesPage() {
       });
       const data = (await response.json()) as WebhookOutConfigResponse;
       if (!response.ok || !data.success) {
-        setWebhookOutConfigured(false);
-        setWebhookOutError(data.error || "Nao foi possivel carregar configuracao de webhook de saida.");
+        const local = readWebhookOutClientConfig();
+        setWebhookOutConfigured(Boolean(local?.url));
+        if (!local?.url) {
+          setWebhookOutError(data.error || "Nao foi possivel carregar configuracao de webhook de saida.");
+        }
         return;
       }
-      setWebhookOutConfigured(Boolean(data.configured));
+      const local = readWebhookOutClientConfig();
+      setWebhookOutConfigured(Boolean(data.configured || local?.url));
     } catch {
-      setWebhookOutConfigured(false);
-      setWebhookOutError("Nao foi possivel carregar configuracao de webhook de saida.");
+      const local = readWebhookOutClientConfig();
+      setWebhookOutConfigured(Boolean(local?.url));
+      if (!local?.url) {
+        setWebhookOutError("Nao foi possivel carregar configuracao de webhook de saida.");
+      }
     } finally {
       setWebhookOutLoading(false);
     }
@@ -1324,8 +1373,9 @@ export default function LigacoesPage() {
 
   const handleGenerateAnaliseIa = async (call: MappedCall) => {
     if (analysisLoadingCallId) return;
+    const localWebhook = readWebhookOutClientConfig();
 
-    if (!webhookOutConfigured) {
+    if (!webhookOutConfigured && !localWebhook?.url) {
       setAnalysisFeedbackByCallId((prev) => ({
         ...prev,
         [call.id]: {
@@ -1363,6 +1413,13 @@ export default function LigacoesPage() {
           triggeredByUserId: currentUser?.id || undefined,
           triggeredByName: currentUser?.nome || undefined,
           triggeredByEmail: currentUser?.email || undefined,
+          webhook: localWebhook
+            ? {
+                url: localWebhook.url,
+                secret: localWebhook.secret || undefined,
+                method: "POST",
+              }
+            : undefined,
           call: {
             id: call.id,
             callId: call.id,

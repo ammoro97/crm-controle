@@ -16,8 +16,21 @@ type GenerateAnalysisBody = {
   triggeredByUserId?: string;
   triggeredByName?: string;
   triggeredByEmail?: string;
+  webhook?: {
+    url?: string;
+    secret?: string;
+    method?: "POST";
+  };
   call?: CallAnalysisCallPayload;
 };
+
+function normalizeWebhookUrl(value?: string) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^ps:\/\//i.test(raw)) return `https://${raw.slice(5)}`;
+  if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(raw)) return `https://${raw}`;
+  return raw;
+}
 
 function normalizeCallPayload(input?: CallAnalysisCallPayload): CallAnalysisCallPayload | null {
   if (!input) return null;
@@ -37,7 +50,19 @@ function normalizeCallPayload(input?: CallAnalysisCallPayload): CallAnalysisCall
 
 export async function POST(request: Request) {
   try {
-    const config = await getWebhookOutConfig();
+    const body = (await request.json()) as GenerateAnalysisBody;
+    let config = await getWebhookOutConfig();
+    const overrideUrl = normalizeWebhookUrl(body.webhook?.url);
+    if (overrideUrl) {
+      config = {
+        ...config,
+        url: overrideUrl,
+        method: "POST",
+        secret: String(body.webhook?.secret || "").trim() || config.secret,
+        enabled: true,
+      };
+    }
+
     if (!isWebhookOutConfigured(config)) {
       return NextResponse.json(
         {
@@ -49,7 +74,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as GenerateAnalysisBody;
     const normalizedCall = normalizeCallPayload(body.call);
     if (!normalizedCall) {
       return NextResponse.json(

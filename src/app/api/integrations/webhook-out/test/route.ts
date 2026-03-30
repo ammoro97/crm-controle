@@ -1,9 +1,43 @@
 import { NextResponse } from "next/server";
 import { getWebhookOutConfig, isWebhookOutConfigured } from "@/lib/webhook-out-config-store";
 
-export async function POST() {
+type TestWebhookBody = {
+  webhook?: {
+    url?: string;
+    secret?: string;
+    method?: "POST";
+  };
+};
+
+function normalizeUrl(value?: string) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^ps:\/\//i.test(raw)) return `https://${raw.slice(5)}`;
+  if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(raw)) return `https://${raw}`;
+  return raw;
+}
+
+export async function POST(request: Request) {
   try {
-    const config = await getWebhookOutConfig();
+    let config = await getWebhookOutConfig();
+    let requestBody: TestWebhookBody | null = null;
+    try {
+      requestBody = (await request.json()) as TestWebhookBody;
+    } catch {
+      requestBody = null;
+    }
+
+    const overrideUrl = normalizeUrl(requestBody?.webhook?.url);
+    if (overrideUrl) {
+      config = {
+        ...config,
+        url: overrideUrl,
+        secret: String(requestBody?.webhook?.secret || "").trim(),
+        method: "POST",
+        enabled: true,
+      };
+    }
+
     if (!isWebhookOutConfigured(config)) {
       return NextResponse.json(
         {
