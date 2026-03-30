@@ -7,7 +7,7 @@ import { Modal } from "@/components/ui/modal";
 import { getLeadsSnapshot, setLeadsSnapshot } from "@/lib/crm-data-store";
 import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
-import { Lead, LeadChannel, LeadHistoryEvent, LeadObservation, LeadStatus } from "@/types/crm";
+import { CallLog, Lead, LeadChannel, LeadHistoryEvent, LeadObservation, LeadStatus } from "@/types/crm";
 import { LeadDetailDrawer } from "./lead-detail-drawer";
 import { LeadsTable } from "./leads-table";
 
@@ -51,6 +51,11 @@ type LeadAiObservationItem = {
 type LeadAiObservationResponse = {
   success?: boolean;
   observations?: LeadAiObservationItem[];
+};
+
+type InternalCallsApiResponse = {
+  success?: boolean;
+  calls?: CallLog[];
 };
 
 const statusOptions: LeadStatus[] = [
@@ -136,6 +141,27 @@ function toLeadObservationFromAi(item: LeadAiObservationItem): LeadObservation |
     date: String(item?.date || "").trim() || new Date().toISOString().slice(0, 10),
     time: String(item?.time || "").trim() || "00:00",
     owner: String(item?.owner || "Analise da IA").trim() || "Analise da IA",
+    type: "analise ia",
+    content,
+  };
+}
+
+function toLeadObservationFromCallLog(call: CallLog): LeadObservation | null {
+  const leadId = String(call.leadId || "").trim();
+  const content = String(call.aiAnalysis || "").trim();
+  if (!leadId || !content) return null;
+  const id = String(call.analysisObservationId || "").trim() || `OBS-IA-CALL-${call.id}`;
+  const created = String(call.updatedAt || call.endedAt || call.startedAt || call.createdAt || "").trim();
+  const parsed = created ? new Date(created) : null;
+  const safeDate =
+    parsed && !Number.isNaN(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const safeTime =
+    parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "00:00";
+  return {
+    id,
+    date: safeDate,
+    time: safeTime,
+    owner: "Analise da IA",
     type: "analise ia",
     content,
   };
@@ -364,11 +390,18 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
     const syncAiObservations = async () => {
       try {
-        const response = await fetch("/api/integracoes/analise-ia/observacoes", {
-          method: "GET",
-          cache: "no-store",
-        });
+        const [response, internalCallsResponse] = await Promise.all([
+          fetch("/api/integracoes/analise-ia/observacoes", {
+            method: "GET",
+            cache: "no-store",
+          }),
+          fetch("/api/ligacoes", {
+            method: "GET",
+            cache: "no-store",
+          }),
+        ]);
         const data = (await response.json()) as LeadAiObservationResponse;
+        const internalCallsData = (await internalCallsResponse.json()) as InternalCallsApiResponse;
         if (!response.ok || !data.success || !Array.isArray(data.observations)) return;
 
         const byLeadId = new Map<string, LeadObservation[]>();
@@ -380,6 +413,18 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           const current = byLeadId.get(leadId) || [];
           current.push(observation);
           byLeadId.set(leadId, current);
+        }
+
+        if (internalCallsResponse.ok && internalCallsData.success && Array.isArray(internalCallsData.calls)) {
+          for (const call of internalCallsData.calls) {
+            const leadId = String(call.leadId || "").trim();
+            if (!leadId) continue;
+            const observation = toLeadObservationFromCallLog(call);
+            if (!observation) continue;
+            const current = byLeadId.get(leadId) || [];
+            current.push(observation);
+            byLeadId.set(leadId, current);
+          }
         }
 
         if (cancelled || byLeadId.size === 0) return;

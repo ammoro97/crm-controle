@@ -543,7 +543,7 @@ function mapApiCallToRow(
   index: number,
   context: {
     leadsIndexes: LeadsIndexes;
-    internalById: Map<string, CallLog>;
+    internalByLookup: Map<string, CallLog>;
     wrapupsIndexes: WrapupsIndexes;
     responsavelById: ResponsavelByIdIndex;
   },
@@ -567,7 +567,24 @@ function mapApiCallToRow(
   const metadataExternalCallId = String(metadata?.externalCallId ?? "").trim();
   const metadataGateway = String(metadata?.gateway ?? "").trim();
 
-  const internal = context.internalById.get(callLookupId);
+  const internalLookupCandidates = Array.from(
+    new Set([
+      callLookupId,
+      rawId,
+      metadataExternalCallId,
+      metadataSessionId,
+      String(item.call_id ?? "").trim(),
+      String(item.uniqueid ?? "").trim(),
+    ].filter(Boolean)),
+  );
+  let internal: CallLog | undefined;
+  for (const key of internalLookupCandidates) {
+    const found = context.internalByLookup.get(key);
+    if (found) {
+      internal = found;
+      break;
+    }
+  }
   const leadFromId =
     (metadataLeadId ? context.leadsIndexes.byId.get(metadataLeadId) : undefined) ||
     (internal?.leadId ? context.leadsIndexes.byId.get(internal.leadId) : undefined);
@@ -925,6 +942,7 @@ export default function LigacoesPage() {
   const [webhookOutError, setWebhookOutError] = useState<string | null>(null);
   const [analysisLoadingCallId, setAnalysisLoadingCallId] = useState<string | null>(null);
   const [analysisFeedbackByCallId, setAnalysisFeedbackByCallId] = useState<Record<string, AnalysisFeedbackEntry>>({});
+  const [analysisPollUntilMs, setAnalysisPollUntilMs] = useState(0);
   const hiddenCallIdsRef = useRef<Set<string>>(new Set());
 
   const [activeSession, setActiveSession] = useState<ActiveCallSession | null>(null);
@@ -983,13 +1001,20 @@ export default function LigacoesPage() {
       const externalData = (await externalResponse.json()) as CallsApiResponse;
       const internalData = (await internalResponse.json()) as InternalCallsApiResponse;
 
-      const internalMap = new Map<string, CallLog>();
+      const internalMapById = new Map<string, CallLog>();
+      const internalMapByLookup = new Map<string, CallLog>();
       if (internalResponse.ok && internalData.success && Array.isArray(internalData.calls)) {
         for (const item of internalData.calls) {
-          internalMap.set(item.id, item);
+          internalMapById.set(item.id, item);
+          const id = String(item.id || "").trim();
+          const external = String(item.externalCallId || "").trim();
+          const session = String(item.sessionId || "").trim();
+          if (id) internalMapByLookup.set(id, item);
+          if (external) internalMapByLookup.set(external, item);
+          if (session) internalMapByLookup.set(session, item);
         }
       }
-      setInternalById(internalMap);
+      setInternalById(internalMapById);
 
       const leadsIndexes = buildLeadsIndexes(leadsSnapshot);
       const wrapupsIndexes = buildWrapupsIndexes(wrapups);
@@ -1000,12 +1025,12 @@ export default function LigacoesPage() {
           ? externalItems.map((item, index) =>
                 mapApiCallToRow(item, index, {
                   leadsIndexes,
-                  internalById: internalMap,
+                  internalByLookup: internalMapByLookup,
                   wrapupsIndexes,
                   responsavelById,
                 }),
             )
-          : Array.from(internalMap.values()).map((item) =>
+          : Array.from(internalMapById.values()).map((item) =>
               mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),
             );
 
@@ -1026,7 +1051,7 @@ export default function LigacoesPage() {
         reason,
         externalOk: externalResponse.ok && externalData.ok,
         externalCount: externalItems.length,
-        internalCount: internalMap.size,
+        internalCount: internalMapById.size,
         renderedCount: visibleRows.length,
         source: externalItems.length > 0 ? "api4com" : "internal-fallback",
       });
@@ -1189,12 +1214,13 @@ export default function LigacoesPage() {
 
   useEffect(() => {
     const hasProcessingAnalysis = calls.some((call) => call.processingStatus === "processing");
-    if (!hasProcessingAnalysis) return;
+    const shouldKeepPolling = Date.now() < analysisPollUntilMs;
+    if (!hasProcessingAnalysis && !shouldKeepPolling) return;
     const intervalId = window.setInterval(() => {
       void loadCallsWithRetry("analysis-processing-poll", 1);
     }, 5000);
     return () => window.clearInterval(intervalId);
-  }, [calls]);
+  }, [analysisPollUntilMs, calls]);
 
   useEffect(() => {
     let unmounted = false;
@@ -1570,6 +1596,7 @@ export default function LigacoesPage() {
           message: "Solicitacao enviada. Aguarde o processamento para liberar Ver analise.",
         },
       }));
+      setAnalysisPollUntilMs(Date.now() + 120000);
       setCalls((prev) =>
         prev.map((item) =>
           item.id === call.id
