@@ -142,7 +142,7 @@ export async function POST(request: Request) {
       const candidates = requests.filter(
         (item) =>
           item.status === "processing" &&
-          item.callId === callbackCallId &&
+          (item.callId === callbackCallId || String(item.externalCallId || "").trim() === callbackCallId) &&
           item.phoneDigits === callbackPhoneDigits,
       );
       if (candidates.length === 1) {
