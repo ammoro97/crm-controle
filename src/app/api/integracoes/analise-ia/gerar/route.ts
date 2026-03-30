@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { createHmac } from "crypto";
 import { getUserBySessionToken } from "@/lib/auth-store";
 import { saveCallAnalysisRequest, updateCallAnalysisRequest } from "@/lib/call-analysis-store";
 import { getCallLogs, upsertCallLog } from "@/lib/calls-store";
@@ -40,6 +41,30 @@ function normalizeDigits(value?: string | null) {
 
 function generateAnalysisRequestId() {
   return `ANL-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+type CallbackCorrelationContext = {
+  requestId: string;
+  callId: string;
+  leadId: string;
+  phoneDigits: string;
+  externalCallId?: string | null;
+  sessionId?: string | null;
+  triggeredAt: string;
+};
+
+function buildCallbackSigningSecret(configSecret?: string | null) {
+  const fromConfig = String(configSecret || "").trim();
+  if (fromConfig) return fromConfig;
+  return String(process.env.CALL_ANALYSIS_CALLBACK_SECRET || "").trim();
+}
+
+function encodeCallbackContext(context: CallbackCorrelationContext) {
+  return Buffer.from(JSON.stringify(context), "utf8").toString("base64url");
+}
+
+function signCallbackContext(encodedContext: string, secret: string) {
+  return createHmac("sha256", secret).update(encodedContext).digest("hex");
 }
 
 function normalizeCallPayload(input?: CallAnalysisCallPayload): CallAnalysisCallPayload | null {
@@ -127,8 +152,26 @@ export async function POST(request: Request) {
     const triggeredByName = sessionUser?.nome || body.triggeredByName || undefined;
     const triggeredByEmail = sessionUser?.email || body.triggeredByEmail || undefined;
     const requestId = generateAnalysisRequestId();
-    const callbackUrl = `${new URL(request.url).origin}/api/integracoes/analise-ia/retorno`;
     const triggeredAt = new Date().toISOString();
+    const callbackContext: CallbackCorrelationContext = {
+      requestId,
+      callId: canonicalCallId,
+      leadId,
+      phoneDigits,
+      externalCallId,
+      sessionId,
+      triggeredAt,
+    };
+    const encodedCallbackContext = encodeCallbackContext(callbackContext);
+    const callbackSigningSecret = buildCallbackSigningSecret(config.secret);
+    const callbackSignature = callbackSigningSecret
+      ? signCallbackContext(encodedCallbackContext, callbackSigningSecret)
+      : "";
+    const callbackBaseUrl = `${new URL(request.url).origin}/api/integracoes/analise-ia/retorno`;
+    const callbackParams = new URLSearchParams();
+    callbackParams.set("ctx", encodedCallbackContext);
+    if (callbackSignature) callbackParams.set("sig", callbackSignature);
+    const callbackUrl = `${callbackBaseUrl}?${callbackParams.toString()}`;
     createdRequestId = requestId;
     createdCallId = canonicalCallId;
 
@@ -156,6 +199,8 @@ export async function POST(request: Request) {
       phoneDigits,
       externalCallId,
       sessionId,
+      callbackHasContext: true,
+      callbackHasSignature: Boolean(callbackSignature),
     });
 
     const payload: CallAnalysisRequestedPayload = {

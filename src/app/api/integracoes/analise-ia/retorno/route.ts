@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHmac, timingSafeEqual } from "crypto";
 import {
   getCallAnalysisObservationByRequestId,
   getCallAnalysisRequests,
@@ -46,6 +47,16 @@ type AnalysisCallbackBody = {
   };
 };
 
+type CallbackCorrelationContext = {
+  requestId: string;
+  callId: string;
+  leadId: string;
+  phoneDigits: string;
+  externalCallId?: string | null;
+  sessionId?: string | null;
+  triggeredAt?: string;
+};
+
 function normalizeDigits(value?: string | null) {
   return String(value || "").replace(/\D/g, "");
 }
@@ -72,6 +83,75 @@ function extractExternalCallId(body: AnalysisCallbackBody) {
 
 function extractSessionId(body: AnalysisCallbackBody) {
   return String(body.call?.sessionId || body.sessionId || "").trim();
+}
+
+function buildCallbackSigningSecret(configSecret?: string | null) {
+  const fromConfig = String(configSecret || "").trim();
+  if (fromConfig) return fromConfig;
+  return String(process.env.CALL_ANALYSIS_CALLBACK_SECRET || "").trim();
+}
+
+function signCallbackContext(encodedContext: string, secret: string) {
+  return createHmac("sha256", secret).update(encodedContext).digest("hex");
+}
+
+function safeEqualHexSignature(left: string, right: string) {
+  const a = Buffer.from(String(left || "").trim().toLowerCase(), "utf8");
+  const b = Buffer.from(String(right || "").trim().toLowerCase(), "utf8");
+  if (a.length === 0 || b.length === 0 || a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+function parseCorrelationContextFromRequest(request: Request, signingSecret: string): CallbackCorrelationContext | null {
+  const url = new URL(request.url);
+  const encoded = String(url.searchParams.get("ctx") || "").trim();
+  if (!encoded) return null;
+
+  const receivedSignature = String(url.searchParams.get("sig") || "").trim();
+  if (signingSecret) {
+    if (!receivedSignature) {
+      throw new Error("CALL_ANALYSIS_CALLBACK_SIGNATURE_REQUIRED");
+    }
+    const expected = signCallbackContext(encoded, signingSecret);
+    if (!safeEqualHexSignature(expected, receivedSignature)) {
+      throw new Error("CALL_ANALYSIS_CALLBACK_SIGNATURE_MISMATCH");
+    }
+  }
+
+  let parsed: unknown;
+  try {
+    const decoded = Buffer.from(encoded, "base64url").toString("utf8");
+    parsed = JSON.parse(decoded);
+  } catch {
+    throw new Error("CALL_ANALYSIS_CALLBACK_CONTEXT_INVALID");
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("CALL_ANALYSIS_CALLBACK_CONTEXT_INVALID");
+  }
+
+  const candidate = parsed as Record<string, unknown>;
+  const requestId = String(candidate.requestId || "").trim();
+  const callId = String(candidate.callId || "").trim();
+  const leadId = String(candidate.leadId || "").trim();
+  const phoneDigits = normalizeDigits(String(candidate.phoneDigits || ""));
+  const externalCallId = String(candidate.externalCallId || "").trim() || null;
+  const sessionId = String(candidate.sessionId || "").trim() || null;
+  const triggeredAt = String(candidate.triggeredAt || "").trim() || undefined;
+
+  if (!requestId || !callId || !leadId || !phoneDigits) {
+    throw new Error("CALL_ANALYSIS_CALLBACK_CONTEXT_MISSING_FIELDS");
+  }
+
+  return {
+    requestId,
+    callId,
+    leadId,
+    phoneDigits,
+    externalCallId,
+    sessionId,
+    triggeredAt,
+  };
 }
 
 function extractAnalysisText(body: AnalysisCallbackBody) {
@@ -124,30 +204,81 @@ export async function POST(request: Request) {
       );
     }
 
+    const callbackSigningSecret = buildCallbackSigningSecret(config.secret);
+    let correlationContext: CallbackCorrelationContext | null = null;
+    try {
+      correlationContext = parseCorrelationContextFromRequest(request, callbackSigningSecret);
+    } catch (contextError) {
+      const code =
+        contextError instanceof Error ? contextError.message : "CALL_ANALYSIS_CALLBACK_CONTEXT_INVALID";
+      if (
+        code === "CALL_ANALYSIS_CALLBACK_SIGNATURE_REQUIRED" ||
+        code === "CALL_ANALYSIS_CALLBACK_SIGNATURE_MISMATCH"
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Assinatura invalida no contexto do callback de analise.",
+            code,
+          },
+          { status: 401 },
+        );
+      }
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Contexto de callback invalido para correlacao da analise.",
+          code,
+        },
+        { status: 400 },
+      );
+    }
     const body = (await request.json()) as AnalysisCallbackBody;
-    let requestId = extractRequestId(body);
-    const callbackCallId = extractCallId(body);
-    let callbackLeadId = extractLeadId(body);
-    const callbackPhoneDigits = extractPhoneDigits(body);
-    const callbackExternalCallId = extractExternalCallId(body);
-    const callbackSessionId = extractSessionId(body);
+    let requestId = extractRequestId(body) || correlationContext?.requestId || "";
+    const callbackCallId = extractCallId(body) || correlationContext?.callId || "";
+    let callbackLeadId = extractLeadId(body) || correlationContext?.leadId || "";
+    const callbackPhoneDigits = extractPhoneDigits(body) || correlationContext?.phoneDigits || "";
+    const callbackExternalCallId =
+      extractExternalCallId(body) || String(correlationContext?.externalCallId || "").trim();
+    const callbackSessionId = extractSessionId(body) || String(correlationContext?.sessionId || "").trim();
     const callbackStatus = String(body.status || "").trim().toLowerCase();
     const isErrorStatus = callbackStatus === "error" || callbackStatus === "failed";
     const callbackError = String(body.error || "").trim();
     const analysisText = extractAnalysisText(body);
+
+    if (correlationContext) {
+      const mismatchReasons: string[] = [];
+      if (requestId && requestId !== correlationContext.requestId) mismatchReasons.push("requestId");
+      if (callbackCallId && callbackCallId !== correlationContext.callId) mismatchReasons.push("callId");
+      if (callbackPhoneDigits && callbackPhoneDigits !== correlationContext.phoneDigits) mismatchReasons.push("phoneDigits");
+      if (callbackLeadId && callbackLeadId !== correlationContext.leadId) mismatchReasons.push("leadId");
+      if (mismatchReasons.length > 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Retorno inconsistente com contexto assinado da solicitacao.",
+            code: "CALL_ANALYSIS_CALLBACK_CONTEXT_MISMATCH",
+            mismatches: mismatchReasons,
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     console.log("[ANALISE_IA] CALLBACK_RECEIVED", {
       requestId: requestId || null,
       callId: callbackCallId || null,
       leadId: callbackLeadId || null,
       phoneDigits: callbackPhoneDigits || null,
       status: callbackStatus || "done",
+      hasSignedContext: Boolean(correlationContext),
     });
 
-    if (!callbackCallId || !callbackPhoneDigits) {
+    if (!requestId || !callbackCallId || !callbackPhoneDigits) {
       return NextResponse.json(
         {
           success: false,
-          message: "Retorno de analise sem dados obrigatorios de correlacao (callId/phone).",
+          message: "Retorno de analise sem dados obrigatorios de correlacao (requestId/callId/phone).",
           code: "CALL_ANALYSIS_MISSING_CORRELATION_FIELDS",
         },
         { status: 400 },
@@ -156,6 +287,29 @@ export async function POST(request: Request) {
 
     const allRequests = await getCallAnalysisRequests();
     let requestRecord = requestId ? await getCallAnalysisRequestById(requestId) : null;
+
+    if (!requestRecord && correlationContext) {
+      requestRecord = await saveCallAnalysisRequest({
+        requestId: correlationContext.requestId,
+        callId: correlationContext.callId,
+        leadId: correlationContext.leadId,
+        phoneDigits: correlationContext.phoneDigits,
+        externalCallId: correlationContext.externalCallId || null,
+        sessionId: correlationContext.sessionId || null,
+        triggeredAt: correlationContext.triggeredAt || new Date().toISOString(),
+        status: "processing",
+        observationId: null,
+        analysisText: null,
+        errorMessage: null,
+        completedAt: null,
+      });
+      requestId = correlationContext.requestId;
+      console.warn("[ANALISE_IA] CALLBACK_REQUEST_RECREATED_FROM_CONTEXT", {
+        requestId,
+        callId: correlationContext.callId,
+        leadId: correlationContext.leadId,
+      });
+    }
 
     if (!requestRecord) {
       const correlatedByCallAndPhone = allRequests.filter((item) => {
