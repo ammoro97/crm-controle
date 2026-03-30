@@ -9,6 +9,10 @@ import {
 const DATA_DIR = path.join(process.cwd(), "data");
 const REQUESTS_FILE = path.join(DATA_DIR, "call-analysis-requests.json");
 const OBSERVATIONS_FILE = path.join(DATA_DIR, "lead-ai-observations.json");
+const ANALISE_IA_DEBUG_PREFIX = "[ANALISE_IA_STORE]";
+
+const volatileRequests = new Map<string, CallAnalysisRequestRecord>();
+const volatileObservations = new Map<string, CallAnalysisObservationRecord>();
 
 function nowIso() {
   return new Date().toISOString();
@@ -36,6 +40,19 @@ async function readJsonArrayFile<T>(filePath: string): Promise<T[]> {
 async function writeJsonArrayFile<T>(filePath: string, rows: T[]) {
   await ensureDataDir();
   await fs.writeFile(filePath, JSON.stringify(rows, null, 2), "utf8");
+}
+
+async function safeWriteJsonArrayFile<T>(filePath: string, rows: T[]) {
+  try {
+    await writeJsonArrayFile(filePath, rows);
+    return true;
+  } catch (error) {
+    console.warn(`${ANALISE_IA_DEBUG_PREFIX} write_failed`, {
+      filePath,
+      message: error instanceof Error ? error.message : "erro desconhecido",
+    });
+    return false;
+  }
 }
 
 function normalizeRequest(input: CallAnalysisRequestRecord): CallAnalysisRequestRecord {
@@ -78,10 +95,18 @@ function normalizeObservation(input: CallAnalysisObservationRecord): CallAnalysi
 
 export async function getCallAnalysisRequests() {
   const rows = await readJsonArrayFile<CallAnalysisRequestRecord>(REQUESTS_FILE);
-  return rows
+  const normalizedDisk = rows
     .map((row) => normalizeRequest(row))
     .filter((row) => row.requestId && row.callId && row.leadId && row.phoneDigits)
     .sort((a, b) => b.triggeredAt.localeCompare(a.triggeredAt));
+  const merged = new Map<string, CallAnalysisRequestRecord>();
+  for (const row of normalizedDisk) {
+    merged.set(row.requestId, row);
+  }
+  for (const row of volatileRequests.values()) {
+    merged.set(row.requestId, row);
+  }
+  return Array.from(merged.values()).sort((a, b) => b.triggeredAt.localeCompare(a.triggeredAt));
 }
 
 export async function getCallAnalysisRequestById(requestId: string) {
@@ -105,7 +130,11 @@ export async function saveCallAnalysisRequest(record: CallAnalysisRequestRecord)
   } else {
     next.unshift(normalized);
   }
-  await writeJsonArrayFile(REQUESTS_FILE, next);
+  volatileRequests.set(normalized.requestId, normalized);
+  const persisted = await safeWriteJsonArrayFile(REQUESTS_FILE, next);
+  if (persisted) {
+    volatileRequests.delete(normalized.requestId);
+  }
   return normalized;
 }
 
@@ -125,16 +154,28 @@ export async function updateCallAnalysisRequest(
   });
   const next = [...rows];
   next[index] = updated;
-  await writeJsonArrayFile(REQUESTS_FILE, next);
+  volatileRequests.set(updated.requestId, updated);
+  const persisted = await safeWriteJsonArrayFile(REQUESTS_FILE, next);
+  if (persisted) {
+    volatileRequests.delete(updated.requestId);
+  }
   return updated;
 }
 
 export async function getCallAnalysisObservations() {
   const rows = await readJsonArrayFile<CallAnalysisObservationRecord>(OBSERVATIONS_FILE);
-  return rows
+  const normalizedDisk = rows
     .map((row) => normalizeObservation(row))
     .filter((row) => row.id && row.leadId && row.callId && row.requestId && row.content)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const merged = new Map<string, CallAnalysisObservationRecord>();
+  for (const row of normalizedDisk) {
+    merged.set(row.id, row);
+  }
+  for (const row of volatileObservations.values()) {
+    merged.set(row.id, row);
+  }
+  return Array.from(merged.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function saveCallAnalysisObservation(observation: CallAnalysisObservationRecord) {
@@ -151,7 +192,11 @@ export async function saveCallAnalysisObservation(observation: CallAnalysisObser
   } else {
     next.unshift(normalized);
   }
-  await writeJsonArrayFile(OBSERVATIONS_FILE, next);
+  volatileObservations.set(normalized.id, normalized);
+  const persisted = await safeWriteJsonArrayFile(OBSERVATIONS_FILE, next);
+  if (persisted) {
+    volatileObservations.delete(normalized.id);
+  }
   return normalized;
 }
 

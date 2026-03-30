@@ -1513,13 +1513,17 @@ export default function LigacoesPage() {
 
       const data = (await response.json()) as GenerateAnaliseIaResponse;
       if (!response.ok || !data.success) {
+        const detailedMessage =
+          [data.message || data.error || "Falha ao enviar analise para processamento externo.", data.detail || ""]
+            .filter(Boolean)
+            .join(" ");
         setCalls((prev) =>
           prev.map((item) =>
             item.id === call.id
               ? {
                   ...item,
                   processingStatus: "error",
-                  analysisError: data.message || data.error || "Falha ao enviar analise para processamento externo.",
+                  analysisError: detailedMessage,
                 }
               : item,
           ),
@@ -1528,7 +1532,7 @@ export default function LigacoesPage() {
           ...prev,
           [call.id]: {
             type: "error",
-            message: data.message || data.error || "Falha ao enviar analise para processamento externo.",
+            message: detailedMessage,
           },
         }));
         return;
