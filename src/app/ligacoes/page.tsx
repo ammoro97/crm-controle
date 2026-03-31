@@ -38,6 +38,7 @@ type Api4ComCallItem = {
   id?: string | number;
   uniqueid?: string;
   call_id?: string;
+  callid?: string;
   first_name?: string;
   nome?: string;
   empresa?: string;
@@ -558,7 +559,9 @@ function mapApiCallToRow(
   const durationSeconds = parseDuration(item.duration);
   const rawStatus = String(item.hangup_cause ?? item.hangupCause ?? "").trim();
   const status = rawStatus ? humanizeHangupCause(rawStatus) : durationSeconds > 0 ? "Atendida" : "Não atendida";
-  const rawId = String(item.id ?? item.uniqueid ?? item.call_id ?? "").trim();
+  const rawCallId = String(item.call_id ?? item.callid ?? item.uniqueid ?? "").trim();
+  const rawRowId = String(item.id ?? "").trim();
+  const rawId = rawCallId || rawRowId;
   const fallbackLookupId = `api4com-${normalizeDigits(String(item.telefone ?? item.to ?? "semfone"))}-${(startedAt || String(index)).replace(/[^0-9A-Za-z_-]/g, "")}`;
   const callLookupId = rawId || fallbackLookupId;
   const metadata =
@@ -569,17 +572,23 @@ function mapApiCallToRow(
   const metadataTelefone = String(metadata?.telefone ?? "").trim();
   const metadataResponsavelId = String(metadata?.responsavelId ?? "").trim();
   const metadataSessionId = String(metadata?.sessionId ?? "").trim();
-  const metadataExternalCallId = String(metadata?.externalCallId ?? "").trim();
+  const metadataCallId = String(metadata?.callId ?? metadata?.callid ?? "").trim();
+  const metadataExternalCallId = String(metadata?.externalCallId ?? metadata?.external_call_id ?? metadataCallId).trim();
   const metadataGateway = String(metadata?.gateway ?? "").trim();
 
   const internalLookupCandidates = Array.from(
     new Set([
       callLookupId,
+      rawCallId,
+      rawRowId,
       rawId,
+      metadataCallId,
       metadataExternalCallId,
       metadataSessionId,
       String(item.call_id ?? "").trim(),
+      String(item.callid ?? "").trim(),
       String(item.uniqueid ?? "").trim(),
+      String(item.id ?? "").trim(),
     ].filter(Boolean)),
   );
   let internal: CallLog | undefined;
@@ -672,11 +681,12 @@ function mapApiCallToRow(
 
   return {
     id:
-      rawId ||
+      rawCallId ||
+      rawRowId ||
       `api4com-${normalizeDigits(resolvedTelefone || metadataTelefone || item.telefone || item.to || "semfone")}-${(resolvedStartedAt || startedAt || String(index)).replace(/[^0-9A-Za-z_-]/g, "")}`,
     storeCallId: internal?.id || null,
     leadId: linkedLead?.id || internal?.leadId || metadataLeadId || null,
-    externalCallId: rawId || metadataExternalCallId || internal?.externalCallId || null,
+    externalCallId: rawCallId || metadataExternalCallId || internal?.externalCallId || rawRowId || null,
     sessionId: sessionIdCandidate || internal?.sessionId || null,
     nome: resolvedNome,
     empresa: resolvedEmpresa,
@@ -1292,6 +1302,107 @@ export default function LigacoesPage() {
   }, []);
 
   useEffect(() => {
+    const hasProcessing = calls.some((call) => resolveAnalysisStatus(call) === "processing");
+    if (!hasProcessing) return;
+
+    let disposed = false;
+
+    const pollProcessingAnalysisStatus = async () => {
+      try {
+        const response = await fetch("/api/ligacoes", {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const data = (await response.json()) as InternalCallsApiResponse;
+        if (!data.success || !Array.isArray(data.calls)) return;
+
+        const internalLookup = new Map<string, CallLog>();
+        const registerLookup = (key: string, item: CallLog) => {
+          const normalized = String(key || "").trim();
+          if (!normalized) return;
+          const current = internalLookup.get(normalized);
+          if (!current || shouldReplaceLookupRecord(current, item)) {
+            internalLookup.set(normalized, item);
+          }
+        };
+
+        for (const item of data.calls) {
+          registerLookup(String(item.id || "").trim(), item);
+          registerLookup(String(item.externalCallId || "").trim(), item);
+          registerLookup(String(item.sessionId || "").trim(), item);
+        }
+
+        if (disposed) return;
+
+        setCalls((prev) => {
+          let changed = false;
+          const next = prev.map((call) => {
+            if (resolveAnalysisStatus(call) !== "processing") return call;
+
+            const lookupCandidates = Array.from(
+              new Set(
+                [
+                  String(call.storeCallId || "").trim(),
+                  String(call.id || "").trim(),
+                  String(call.externalCallId || "").trim(),
+                  String(call.sessionId || "").trim(),
+                ].filter(Boolean),
+              ),
+            );
+
+            let internal: CallLog | undefined;
+            for (const candidate of lookupCandidates) {
+              const found = internalLookup.get(candidate);
+              if (found) {
+                internal = found;
+                break;
+              }
+            }
+            if (!internal) return call;
+
+            const resolvedStatus = resolveAnalysisStatus({ analysisStatus: internal.analysisStatus });
+            if (resolvedStatus === "processing") return call;
+
+            const nextObservationId = String(internal.analysisObservationId || "").trim() || null;
+            const nextLeadId = String(internal.analysisLeadId || internal.leadId || "").trim() || null;
+
+            if (
+              call.analysisStatus === resolvedStatus &&
+              (call.analysisObservationId || null) === nextObservationId &&
+              (call.analysisLeadId || null) === nextLeadId
+            ) {
+              return call;
+            }
+
+            changed = true;
+            return {
+              ...call,
+              analysisStatus: resolvedStatus,
+              analysisObservationId: nextObservationId,
+              analysisLeadId: nextLeadId,
+            };
+          });
+
+          return changed ? next : prev;
+        });
+      } catch {
+        // noop: mantém mecanismos existentes
+      }
+    };
+
+    void pollProcessingAnalysisStatus();
+    const intervalId = window.setInterval(() => {
+      void pollProcessingAnalysisStatus();
+    }, 5000);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [calls]);
+
+  useEffect(() => {
     let unmounted = false;
 
     const checkCallEnd = async () => {
@@ -1660,7 +1771,9 @@ export default function LigacoesPage() {
         ? (call.raw.metadata as Record<string, unknown>)
         : null;
     const ramalFromMetadata = String(metadata?.gateway ?? metadata?.ramal ?? "").trim();
-    const externalCallIdFromRaw = String(call.raw.call_id ?? call.raw.uniqueid ?? "").trim();
+    const externalCallIdFromRaw = String(
+      call.raw.call_id ?? call.raw.callid ?? call.raw.uniqueid ?? call.raw.id ?? "",
+    ).trim();
 
     try {
       const response = await fetch("/api/integracoes/analise-ia/gerar", {
