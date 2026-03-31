@@ -99,7 +99,7 @@ const ESTADOS_BR = [
 ] as const;
 
 type AutomationTipo = "api" | "cnpj";
-type AutomationStep = "tipo" | "formulario" | "sucesso";
+type AutomationStep = "tipo" | "formulario" | "aguardando" | "sucesso";
 
 type FormApi = {
   totalLeads: string;
@@ -120,6 +120,7 @@ type AutomationApiResponse = {
   success?: boolean;
   leads?: Lead[];
   count?: number;
+  pending?: boolean;
   message?: string;
 };
 
@@ -712,9 +713,13 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
       const returnedLeads = data.leads ?? [];
       if (returnedLeads.length > 0) {
+        // n8n respondeu sincronamente com leads
         setLeads((prev) => [...prev, ...returnedLeads.map(normalizeLead)]);
         setAutomationLeadsCount(returnedLeads.length);
         setAutomationStep("sucesso");
+      } else if (data.pending) {
+        // n8n processa async — aguarda callback via /retorno + polling /pendentes
+        setAutomationStep("aguardando");
       } else {
         setAutomationError("Nenhum lead foi retornado pela automacao. Verifique os parametros e tente novamente.");
       }
@@ -838,6 +843,40 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   }, [leads]);
 
   useEffect(() => {
+    if (automationStep !== "aguardando") return;
+
+    let attempts = 0;
+    const MAX_ATTEMPTS = 24; // 2 minutos a cada 5s
+
+    const intervalId = setInterval(async () => {
+      attempts++;
+      try {
+        const response = await fetch("/api/leads/automatizado/pendentes", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = (await response.json()) as AutomationApiResponse;
+        if (response.ok && data.success && data.leads && data.leads.length > 0) {
+          setLeads((prev) => [...prev, ...data.leads!.map(normalizeLead)]);
+          setAutomationLeadsCount(data.leads.length);
+          setAutomationStep("sucesso");
+          return;
+        }
+      } catch {
+        // Ignora falhas de poll
+      }
+      if (attempts >= MAX_ATTEMPTS) {
+        setAutomationError(
+          "Tempo limite excedido. Verifique se o n8n processou a solicitacao e tente novamente.",
+        );
+        setAutomationStep("formulario");
+      }
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+  }, [automationStep]);
+
+  useEffect(() => {
     if (!addMenuOpen) return;
     const handler = (event: MouseEvent) => {
       if (!addMenuRef.current?.contains(event.target as Node)) {
@@ -957,16 +996,41 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         title={
           automationStep === "tipo"
             ? "Automacao de Leads"
-            : automationStep === "sucesso"
-              ? "Leads Importados"
-              : automationTipo === "api"
-                ? "Automacao por API"
-                : "Automacao por CNPJ"
+            : automationStep === "aguardando"
+              ? "Processando..."
+              : automationStep === "sucesso"
+                ? "Leads Importados"
+                : automationTipo === "api"
+                  ? "Automacao por API"
+                  : "Automacao por CNPJ"
         }
         open={automationOpen}
         onClose={closeAutomation}
       >
-        {automationStep === "tipo" ? (
+        {automationStep === "aguardando" ? (
+          <div className="space-y-5 py-4 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-sky-500/10">
+              <svg
+                className="h-7 w-7 animate-spin text-sky-400"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-base font-semibold text-slate-100">Buscando leads...</p>
+              <p className="mt-1 text-sm text-slate-400">
+                O n8n esta processando a solicitacao. Isso pode levar alguns instantes.
+              </p>
+            </div>
+            <button type="button" className="btn-ghost h-9 px-4 text-sm" onClick={closeAutomation}>
+              Fechar — os leads serao adicionados automaticamente ao chegar
+            </button>
+          </div>
+        ) : automationStep === "tipo" ? (
           <div className="space-y-4">
             <p className="text-sm text-slate-400">Escolha como a automacao deve buscar os leads outbound.</p>
             <div className="grid gap-3 sm:grid-cols-2">

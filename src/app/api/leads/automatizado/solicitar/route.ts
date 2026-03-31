@@ -51,6 +51,7 @@ export type SolicitacaoResponse = {
   success: boolean;
   leads?: Lead[];
   count?: number;
+  pending?: boolean;
   message?: string;
 };
 
@@ -210,7 +211,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       .map((raw) => buildOutboundLead(raw, body.tipoAutomacao))
       .filter((lead): lead is Lead => lead !== null);
 
-    return NextResponse.json<SolicitacaoResponse>({ success: true, leads, count: leads.length });
+    // Se n8n respondeu com leads sincronamente, retorna direto.
+    // Se retornou vazio (respond immediately / async), sinaliza pending
+    // para o frontend aguardar o callback via /retorno + /pendentes.
+    return NextResponse.json<SolicitacaoResponse>({
+      success: true,
+      leads,
+      count: leads.length,
+      pending: leads.length === 0,
+    });
   } catch (error) {
     console.error(
       "[LEADS_AUTOMATIZADO][SOLICITAR] Erro:",
