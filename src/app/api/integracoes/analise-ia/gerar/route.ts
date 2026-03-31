@@ -88,6 +88,7 @@ export async function POST(request: Request) {
   let createdCallId = "";
   try {
     const body = (await request.json()) as GenerateAnalysisBody;
+    console.log("[gerar-analise] body recebido:", body);
     let config = await getWebhookOutConfig();
     const overrideUrl = normalizeWebhookUrl(body.webhook?.url);
     if (overrideUrl) {
@@ -120,10 +121,34 @@ export async function POST(request: Request) {
     }
 
     const allCalls = await getCallLogs();
+    console.log("[gerar-analise] IDs disponíveis no store:", allCalls.map((c) => c.id));
+    const requestedId = String(normalizedCall.id || "").trim();
+    const requestedCallId = String(normalizedCall.callId || "").trim();
+    const requestedExternalCallId = String(normalizedCall.externalCallId || "").trim();
+    const requestedSessionId = String(normalizedCall.sessionId || "").trim();
+    console.log("[gerar-analise] identificadores recebidos:", {
+      id: requestedId || null,
+      callId: requestedCallId || null,
+      externalCallId: requestedExternalCallId || null,
+      sessionId: requestedSessionId || null,
+    });
     const matchedCallLog =
-      allCalls.find((entry) => entry.id === normalizedCall.id) ||
-      allCalls.find((entry) => String(entry.externalCallId || "").trim() === normalizedCall.id) ||
+      allCalls.find((entry) => entry.id === requestedCallId) ||
+      allCalls.find((entry) => entry.id === requestedId) ||
+      allCalls.find((entry) => String(entry.externalCallId || "").trim() === requestedCallId) ||
+      allCalls.find((entry) => String(entry.externalCallId || "").trim() === requestedId) ||
+      allCalls.find((entry) => String(entry.externalCallId || "").trim() === requestedExternalCallId) ||
+      allCalls.find((entry) => String(entry.sessionId || "").trim() === requestedSessionId) ||
       null;
+    console.log("[gerar-analise] call encontrada no store:", matchedCallLog
+      ? {
+          id: matchedCallLog.id,
+          externalCallId: matchedCallLog.externalCallId || null,
+          sessionId: matchedCallLog.sessionId || null,
+          leadId: matchedCallLog.leadId || null,
+        }
+      : null,
+    );
 
     const canonicalCallId = String(matchedCallLog?.id || normalizedCall.id).trim();
     const recordingUrl = normalizedCall.recordingUrl || matchedCallLog?.recordUrl || null;

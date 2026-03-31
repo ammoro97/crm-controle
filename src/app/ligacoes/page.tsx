@@ -58,6 +58,7 @@ type Api4ComCallItem = {
 
 type MappedCall = {
   id: string;
+  storeCallId?: string | null;
   leadId?: string | null;
   externalCallId?: string | null;
   sessionId?: string | null;
@@ -673,6 +674,7 @@ function mapApiCallToRow(
     id:
       rawId ||
       `api4com-${normalizeDigits(resolvedTelefone || metadataTelefone || item.telefone || item.to || "semfone")}-${(resolvedStartedAt || startedAt || String(index)).replace(/[^0-9A-Za-z_-]/g, "")}`,
+    storeCallId: internal?.id || null,
     leadId: linkedLead?.id || internal?.leadId || metadataLeadId || null,
     externalCallId: rawId || metadataExternalCallId || internal?.externalCallId || null,
     sessionId: sessionIdCandidate || internal?.sessionId || null,
@@ -793,6 +795,7 @@ function mapInternalCallToRow(
 
   return {
     id: item.id,
+    storeCallId: item.id,
     leadId: linkedLead?.id || item.leadId || null,
     externalCallId: item.externalCallId || null,
     sessionId: item.sessionId || null,
@@ -1524,6 +1527,17 @@ export default function LigacoesPage() {
       await handleViewAnaliseIa(call);
       return;
     }
+    const canonicalCallId = String(call.storeCallId || call.id || "").trim();
+    if (!canonicalCallId) {
+      setAnalysisFeedbackByCallId((prev) => ({
+        ...prev,
+        [call.id]: {
+          type: "error",
+          message: "Ligacao sem identificador canônico para analise.",
+        },
+      }));
+      return;
+    }
     const localWebhook = readWebhookOutClientConfig();
 
     if (!webhookOutConfigured && !localWebhook?.url) {
@@ -1553,8 +1567,15 @@ export default function LigacoesPage() {
       analysisUpdatedAt: processingAt,
       analysisError: null,
     } as const;
+    console.log(`${LIGACOES_DEBUG_PREFIX} GERAR_ANALISE_IDS`, {
+      tableCallId: call.id,
+      storeCallId: call.storeCallId || null,
+      externalCallId: call.externalCallId || null,
+      sessionId: call.sessionId || null,
+      leadId: call.leadId || null,
+    });
     try {
-      const persistProcessingResponse = await fetch(`/api/ligacoes/${encodeURIComponent(call.id)}`, {
+      const persistProcessingResponse = await fetch(`/api/ligacoes/${encodeURIComponent(canonicalCallId)}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1563,6 +1584,7 @@ export default function LigacoesPage() {
       });
       const persistProcessingData = (await persistProcessingResponse.json().catch(() => ({}))) as {
         success?: boolean;
+        resolvedCallId?: string;
         message?: string;
         detail?: string;
         call?: CallLog;
@@ -1590,6 +1612,11 @@ export default function LigacoesPage() {
                 ...item,
                 analysisStatus: "processing",
                 processingStatus: "processing",
+                storeCallId:
+                  persistProcessingData.resolvedCallId ||
+                  persistProcessingData.call?.id ||
+                  item.storeCallId ||
+                  canonicalCallId,
                 analysisLeadId:
                   persistProcessingData.call?.analysisLeadId || item.analysisLeadId || item.leadId || call.leadId || null,
                 analysisUpdatedAt: persistProcessingData.call?.analysisUpdatedAt || processingAt,
@@ -1640,8 +1667,8 @@ export default function LigacoesPage() {
               }
             : undefined,
           call: {
-            id: call.id,
-            callId: call.id,
+            id: canonicalCallId,
+            callId: canonicalCallId,
             leadId: call.leadId || null,
             externalCallId: call.externalCallId || externalCallIdFromRaw || null,
             sessionId: call.sessionId || null,
@@ -1745,7 +1772,7 @@ export default function LigacoesPage() {
           ? requestError.message
           : "Erro inesperado ao iniciar geracao da analise.";
 
-      void fetch(`/api/ligacoes/${encodeURIComponent(call.id)}`, {
+      void fetch(`/api/ligacoes/${encodeURIComponent(canonicalCallId)}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1778,7 +1805,7 @@ export default function LigacoesPage() {
         },
       }));
       console.error(`${LIGACOES_DEBUG_PREFIX} CALL_ANALYSIS_REQUEST_EXCEPTION`, {
-        callId: call.id,
+        callId: canonicalCallId,
         leadId: call.leadId || null,
         message: errorMessage,
       });

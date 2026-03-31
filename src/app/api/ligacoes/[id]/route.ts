@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CallAnalysisStatus } from "@/types/crm";
-import { updateCall } from "@/lib/calls-store";
+import { getCallLogs, updateCall } from "@/lib/calls-store";
 
 type PatchCallBody = {
   analysisStatus?: CallAnalysisStatus;
@@ -78,10 +78,31 @@ export async function PATCH(
       );
     }
 
-    const updated = await updateCall(callId, patch);
+    let targetCallId = callId;
+    let updated;
+    try {
+      updated = await updateCall(targetCallId, patch);
+    } catch (updateError) {
+      const updateMessage = updateError instanceof Error ? updateError.message : "Erro desconhecido";
+      if (updateMessage !== "CALL_LOG_NOT_FOUND") {
+        throw updateError;
+      }
+      const calls = await getCallLogs();
+      const fallback = calls.find(
+        (entry) =>
+          String(entry.externalCallId || "").trim() === callId ||
+          String(entry.sessionId || "").trim() === callId,
+      );
+      if (!fallback) {
+        throw updateError;
+      }
+      targetCallId = fallback.id;
+      updated = await updateCall(targetCallId, patch);
+    }
 
     return NextResponse.json({
       success: true,
+      resolvedCallId: targetCallId,
       call: updated,
     });
   } catch (error) {
