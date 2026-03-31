@@ -127,6 +127,12 @@ export type Lead = {
   outboundQualification?: OutboundQualification;
   internalNotes: string[];
   observationLog: LeadObservation[];
+  // Outbound automation fields
+  site?: string | null;
+  nota?: number | string | null;
+  avaliacoes?: number | string | null;
+  horario_funcionamento?: string | null;
+  expediente?: "Aberto" | "Fechado" | "Indefinido" | null;
 };
 
 export type CallReason = "apresentacao" | "acompanhamento" | "fechamento" | "follow-up";

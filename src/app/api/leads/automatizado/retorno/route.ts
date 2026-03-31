@@ -2,16 +2,27 @@ import { NextResponse } from "next/server";
 import { savePendingAutomatedLeads } from "@/lib/leads-automatizado-store";
 import { Lead } from "@/types/crm";
 
-type N8nLeadItem = {
+export type OutboundLeadPayload = {
+  empresa: string;
+  responsavel?: string | null;
+  telefone?: string | null;
+  email?: string | null;
+  site?: string | null;
+  expediente?: "Aberto" | "Fechado" | "Indefinido" | string | null;
+  nota?: number | string | null;
+  avaliacoes?: number | string | null;
+  cidade?: string | null;
+  estado?: string | null;
+  dataCadastro?: string | null;
+  origem?: string | null;
+  horario_funcionamento?: string | null;
+  // backward-compat aliases
   name?: string;
   nome?: string;
   company?: string;
-  empresa?: string;
   phone?: string;
-  telefone?: string;
-  email?: string;
+  telefone_alt?: string;
   city?: string;
-  cidade?: string;
   niche?: string;
   nicho?: string;
   [key: string]: unknown;
@@ -20,28 +31,50 @@ type N8nLeadItem = {
 type RetornoBody = {
   requestId?: string;
   tipoAutomacao?: "api" | "cnpj";
-  leads?: N8nLeadItem[];
-  data?: N8nLeadItem[];
+  leads?: OutboundLeadPayload[];
+  data?: OutboundLeadPayload[];
   [key: string]: unknown;
 };
 
-function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lead | null {
-  const name = String(raw.name || raw.nome || "").trim();
-  const company = String(raw.company || raw.empresa || "").trim();
-  if (!name && !company) return null;
+function normalizeExpediente(value?: string | null): "Aberto" | "Fechado" | "Indefinido" {
+  if (!value) return "Indefinido";
+  const v = value.trim().toLowerCase();
+  if (v === "aberto" || v === "open" || v === "aberto agora") return "Aberto";
+  if (v === "fechado" || v === "closed" || v === "fechado agora") return "Fechado";
+  if (v.startsWith("aberto")) return "Aberto";
+  if (v.startsWith("fechado")) return "Fechado";
+  return "Indefinido";
+}
+
+function buildCityField(cidade?: string | null, estado?: string | null): string {
+  const c = String(cidade || "").trim();
+  const s = String(estado || "").trim();
+  if (c && s) return `${c} - ${s}`;
+  return c || s || "";
+}
+
+function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnpj"): Lead | null {
+  // Support both new format (empresa/responsavel) and old format (name/company)
+  const empresa = String(raw.empresa || raw.company || "").trim();
+  const responsavel = String(raw.responsavel || raw.name || raw.nome || "").trim();
+  if (!empresa && !responsavel) return null;
 
   const now = new Date();
-  const dateStr = now.toISOString().slice(0, 10);
+  const dateStr = raw.dataCadastro
+    ? String(raw.dataCadastro).trim().slice(0, 10)
+    : now.toISOString().slice(0, 10);
   const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  const sourceLabel = tipoAutomacao === "api" ? "Automacao por API" : "Automacao por CNPJ";
+
+  const origem = String(raw.origem || "").trim();
+  const sourceLabel = origem || (tipoAutomacao === "api" ? "Automacao por API" : "Automacao por CNPJ");
   const id = `L-AUTO-${now.getTime()}-${Math.random().toString(36).slice(2, 7)}`;
 
   return {
     id,
-    name: name || company,
-    names: name ? [name] : [],
-    company,
-    phone: String(raw.phone || raw.telefone || "").trim(),
+    name: responsavel || empresa,
+    names: responsavel ? [responsavel] : [],
+    company: empresa,
+    phone: String(raw.telefone || raw.phone || "").trim(),
     phones: [],
     email: String(raw.email || "").trim(),
     emails: [],
@@ -50,7 +83,7 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
     owner: "",
     notes: "",
     channel: "outbound",
-    city: String(raw.city || raw.cidade || "").trim(),
+    city: buildCityField(raw.cidade || raw.city, raw.estado),
     niche: String(raw.niche || raw.nicho || "").trim(),
     entryDate: dateStr,
     firstContactDate: "",
@@ -71,6 +104,12 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
     ],
     internalNotes: [],
     observationLog: [],
+    // Outbound-specific fields
+    site: raw.site ? String(raw.site).trim() : null,
+    nota: raw.nota != null ? raw.nota : null,
+    avaliacoes: raw.avaliacoes != null ? raw.avaliacoes : null,
+    horario_funcionamento: raw.horario_funcionamento ? String(raw.horario_funcionamento).trim() : null,
+    expediente: normalizeExpediente(raw.expediente),
     outboundQualification: {
       decisionContacts: [{ name: "", phone: "", email: "" }],
       whoAnswered: "",
@@ -101,7 +140,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const body = (await request.json()) as RetornoBody;
     const tipoAutomacao: "api" | "cnpj" = body.tipoAutomacao === "cnpj" ? "cnpj" : "api";
 
-    const rawLeads: N8nLeadItem[] = Array.isArray(body.leads)
+    const rawLeads: OutboundLeadPayload[] = Array.isArray(body.leads)
       ? body.leads
       : Array.isArray(body.data)
         ? body.data

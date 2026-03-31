@@ -10,6 +10,7 @@ import { useResponsaveis } from "@/lib/responsaveis-store";
 import { CallLog, Lead, LeadChannel, LeadHistoryEvent, LeadObservation, LeadStatus } from "@/types/crm";
 import { LeadDetailDrawer } from "./lead-detail-drawer";
 import { LeadsTable } from "./leads-table";
+import { OutboundLeadsTable } from "./outbound-leads-table";
 
 type LeadFilter = "all" | LeadChannel;
 type ImportDestination = "" | LeadChannel;
@@ -990,7 +991,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         </div>
       </section>
 
-      <LeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onSaveRow={updateLeadById} />
+      {filter === "outbound" ? (
+        <OutboundLeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} />
+      ) : (
+        <LeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onSaveRow={updateLeadById} />
+      )}
 
       <Modal
         title={

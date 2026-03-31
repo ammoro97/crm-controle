@@ -390,6 +390,13 @@ export function LeadGeneralTab({
               <ChannelBadge channel={lead.channel} />
             </div>
           </div>
+
+          {lead.channel === "outbound" && lead.horario_funcionamento ? (
+            <div className="rounded-lg border border-border/80 bg-slate-950/40 px-3 py-2.5 md:col-span-2">
+              <p className="text-[11px] uppercase tracking-[0.09em] text-muted">Horario de Funcionamento</p>
+              <p className="mt-1.5 whitespace-pre-line text-sm text-slate-100">{lead.horario_funcionamento}</p>
+            </div>
+          ) : null}
         </div>
       </LeadSectionCard>
     </div>
