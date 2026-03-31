@@ -113,7 +113,7 @@ export function mapWebhookStatus(input: {
   const cause = (input.hangupCause || "").toLowerCase();
   const causeCode = (input.hangupCauseCode || "").toLowerCase();
 
-  if (eventType.includes("hangup") || duration >= 0) {
+  if (eventType.includes("hangup") || duration > 0) {
     if (duration > 0) return "Atendida";
     if (cause.includes("busy") || causeCode.includes("busy") || causeCode === "17") return "Ocupado";
     if (cause.includes("cancel") || cause.includes("cancelada")) return "Cancelada";

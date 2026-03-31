@@ -48,12 +48,9 @@ export async function POST(request: Request) {
       message: "Conta criada com sucesso.",
     });
   } catch (error) {
+    console.error("[AUTH][REGISTER] Erro interno:", error instanceof Error ? error.message : "Erro desconhecido");
     return NextResponse.json(
-      {
-        success: false,
-        message: "Nao foi possivel concluir o cadastro.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
-      },
+      { success: false, message: "Nao foi possivel concluir o cadastro." },
       { status: 500 },
     );
   }

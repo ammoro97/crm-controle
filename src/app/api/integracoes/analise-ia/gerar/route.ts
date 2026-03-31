@@ -5,6 +5,7 @@ import { getUserBySessionToken } from "@/lib/auth-store";
 import { saveCallAnalysisRequest, updateCallAnalysisRequest } from "@/lib/call-analysis-store";
 import { getCallLogs, upsertCallLog } from "@/lib/calls-store";
 import { getWebhookOutConfig, isWebhookOutConfigured } from "@/lib/webhook-out-config-store";
+import { requireAuth } from "@/lib/require-auth";
 import {
   CALL_ANALYSIS_EVENT,
   CALL_ANALYSIS_RESULT_EVENT,
@@ -88,11 +89,13 @@ function normalizeCallPayload(input?: CallAnalysisCallPayload): CallAnalysisCall
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAuth();
+  if (!auth.authenticated) return auth.response;
+
   let createdRequestId = "";
   let createdCallId = "";
   try {
     const body = (await request.json()) as GenerateAnalysisBody;
-    console.log("[gerar-analise] body recebido:", body);
     let config = await getWebhookOutConfig();
     const overrideUrl = normalizeWebhookUrl(body.webhook?.url);
     if (overrideUrl) {
@@ -125,17 +128,11 @@ export async function POST(request: Request) {
     }
 
     const allCalls = await getCallLogs();
-    console.log("[gerar-analise] IDs disponíveis no store:", allCalls.map((c) => c.id));
     const requestedId = String(normalizedCall.id || "").trim();
     const requestedCallId = String(normalizedCall.callId || "").trim();
     const requestedExternalCallId = String(normalizedCall.externalCallId || "").trim();
     const requestedSessionId = String(normalizedCall.sessionId || "").trim();
-    console.log("[gerar-analise] identificadores recebidos:", {
-      id: requestedId || null,
-      callId: requestedCallId || null,
-      externalCallId: requestedExternalCallId || null,
-      sessionId: requestedSessionId || null,
-    });
+
     const matchedCallLog =
       allCalls.find((entry) => entry.id === requestedCallId) ||
       allCalls.find((entry) => entry.id === requestedId) ||
@@ -144,15 +141,6 @@ export async function POST(request: Request) {
       allCalls.find((entry) => String(entry.externalCallId || "").trim() === requestedExternalCallId) ||
       allCalls.find((entry) => String(entry.sessionId || "").trim() === requestedSessionId) ||
       null;
-    console.log("[gerar-analise] call encontrada no store:", matchedCallLog
-      ? {
-          id: matchedCallLog.id,
-          externalCallId: matchedCallLog.externalCallId || null,
-          sessionId: matchedCallLog.sessionId || null,
-          leadId: matchedCallLog.leadId || null,
-        }
-      : null,
-    );
 
     const canonicalCallId = String(matchedCallLog?.id || normalizedCall.id).trim();
     const recordingUrl = normalizedCall.recordingUrl || matchedCallLog?.recordUrl || null;
@@ -221,16 +209,6 @@ export async function POST(request: Request) {
       errorMessage: null,
       completedAt: null,
     });
-    console.log("[ANALISE_IA] REQUEST_CREATED", {
-      requestId,
-      callId: canonicalCallId,
-      leadId,
-      phoneDigits,
-      externalCallId,
-      sessionId,
-      callbackHasContext: true,
-      callbackHasSignature: Boolean(callbackSignature),
-    });
 
     await upsertCallLog({
       id: canonicalCallId,
@@ -255,12 +233,6 @@ export async function POST(request: Request) {
       analysisPreview: null,
       aiAnalysis: null,
       analysisError: null,
-    });
-    console.log("[ANALISE_IA] REQUEST_CALLLOG_UPSERTED_BEFORE_DISPATCH", {
-      requestId,
-      callId: canonicalCallId,
-      leadId,
-      phoneDigits,
     });
 
     const payload: CallAnalysisRequestedPayload = {
@@ -298,7 +270,7 @@ export async function POST(request: Request) {
       const detail = await webhookResponse.text();
       await updateCallAnalysisRequest(requestId, {
         status: "error",
-        errorMessage: `Webhook status ${webhookResponse.status}${detail ? `: ${detail}` : ""}`,
+        errorMessage: `Webhook status ${webhookResponse.status}`,
         completedAt: new Date().toISOString(),
       });
       await upsertCallLog({
@@ -320,36 +292,6 @@ export async function POST(request: Request) {
         { status: 502 },
       );
     }
-    console.log("[ANALISE_IA] REQUEST_DISPATCHED", {
-      requestId,
-      callId: canonicalCallId,
-      webhookUrl: config.url,
-    });
-
-    await upsertCallLog({
-      id: canonicalCallId,
-      externalCallId,
-      sessionId,
-      leadId,
-      telefone: normalizedCall.phone || matchedCallLog?.telefone || "",
-      nome: normalizedCall.contactName || matchedCallLog?.nome || "",
-      empresa: normalizedCall.companyName || matchedCallLog?.empresa || "",
-      startedAt: normalizedCall.startedAt || matchedCallLog?.startedAt || null,
-      endedAt: normalizedCall.endedAt || matchedCallLog?.endedAt || null,
-      durationSeconds: Number(normalizedCall.durationSeconds || matchedCallLog?.durationSeconds || 0),
-      status: normalizedCall.status || matchedCallLog?.status || "Nao atendida",
-      gateway: normalizedCall.ramal || matchedCallLog?.gateway || null,
-      recordUrl: recordingUrl,
-      analysisStatus: "processing",
-      processingStatus: "processing",
-      analysisRequestId: requestId,
-      analysisLeadId: leadId,
-      analysisUpdatedAt: new Date().toISOString(),
-      analysisObservationId: null,
-      analysisPreview: null,
-      aiAnalysis: null,
-      analysisError: null,
-    });
 
     return NextResponse.json({
       success: true,
@@ -378,15 +320,10 @@ export async function POST(request: Request) {
     }
     console.error("[ANALISE_IA] REQUEST_FAILED", {
       requestId: createdRequestId || null,
-      callId: createdCallId || null,
       message: error instanceof Error ? error.message : "Erro desconhecido",
     });
     return NextResponse.json(
-      {
-        success: false,
-        message: "Nao foi possivel gerar analise da ligacao.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
-      },
+      { success: false, message: "Nao foi possivel gerar analise da ligacao." },
       { status: 500 },
     );
   }

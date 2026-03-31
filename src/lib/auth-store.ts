@@ -138,7 +138,7 @@ export async function registerUser(input: {
   }
 
   const nome = String(input.nome || "").trim() || toDefaultNameFromEmail(email);
-  const id = `USR-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const id = `USR-${crypto.randomUUID()}`;
   const senhaHash = await bcrypt.hash(password, 10);
   const responsavelId = String(input.responsavelId || "").trim() || toResponsavelId(`${nome}-${id.slice(-4)}`);
 

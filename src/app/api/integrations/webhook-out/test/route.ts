@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getWebhookOutConfig, isWebhookOutConfigured } from "@/lib/webhook-out-config-store";
+import { requireAuth } from "@/lib/require-auth";
 
 type TestWebhookBody = {
   webhook?: {
@@ -18,6 +19,9 @@ function normalizeUrl(value?: string) {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAuth();
+  if (!auth.authenticated) return auth.response;
+
   try {
     let config = await getWebhookOutConfig();
     let requestBody: TestWebhookBody | null = null;
@@ -40,10 +44,7 @@ export async function POST(request: Request) {
 
     if (!isWebhookOutConfigured(config)) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Webhook de saida nao configurado.",
-        },
+        { success: false, message: "Webhook de saida nao configurado." },
         { status: 400 },
       );
     }
@@ -83,13 +84,9 @@ export async function POST(request: Request) {
       success: true,
       message: "Teste enviado com sucesso.",
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      {
-        success: false,
-        message: "Nao foi possivel enviar teste para webhook de saida.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
-      },
+      { success: false, message: "Nao foi possivel enviar teste para webhook de saida." },
       { status: 500 },
     );
   }

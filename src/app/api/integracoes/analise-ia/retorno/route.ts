@@ -267,16 +267,21 @@ export async function POST(request: Request) {
     const config = await getWebhookOutConfig();
     const expectedSecret = String(config.secret || "").trim();
     const receivedSecret = String(request.headers.get(CALL_ANALYSIS_SECRET_HEADER) || "").trim();
-    if (expectedSecret && receivedSecret !== expectedSecret) {
-      logReturn(401, "invalid-secret-header");
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Assinatura invalida no retorno da analise.",
-          code: "CALL_ANALYSIS_INVALID_SECRET",
-        },
-        { status: 401 },
-      );
+    if (expectedSecret) {
+      const a = Buffer.from(expectedSecret, "utf8");
+      const b = Buffer.from(receivedSecret, "utf8");
+      const valid = a.length > 0 && b.length === a.length && timingSafeEqual(a, b);
+      if (!valid) {
+        logReturn(401, "invalid-secret-header");
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Assinatura invalida no retorno da analise.",
+            code: "CALL_ANALYSIS_INVALID_SECRET",
+          },
+          { status: 401 },
+        );
+      }
     }
 
     const callbackSigningSecret = buildCallbackSigningSecret(config.secret);
@@ -311,7 +316,6 @@ export async function POST(request: Request) {
       );
     }
     const body = (await request.json()) as AnalysisCallbackBody;
-    console.log("[ANALISE_IA][RETORNO] BODY_RECEIVED", body);
     let requestId = extractRequestId(body) || correlationContext?.requestId || "";
     const callbackCallId = extractCallId(body) || correlationContext?.callId || "";
     let callbackLeadId = extractLeadId(body) || correlationContext?.leadId || "";
@@ -351,8 +355,6 @@ export async function POST(request: Request) {
     console.log("[ANALISE_IA] CALLBACK_RECEIVED", {
       requestId: requestId || null,
       callId: callbackCallId || null,
-      leadId: callbackLeadId || null,
-      phoneDigits: callbackPhoneDigits || null,
       status: callbackStatus || "done",
       hasSignedContext: Boolean(correlationContext),
     });
@@ -568,13 +570,6 @@ export async function POST(request: Request) {
     console.log("[ANALISE_IA] CALLBACK_LOOKUP_INPUT", {
       requestId,
       callbackCallId: callbackCallId || null,
-      callbackExternalCallId: callbackExternalCallId || null,
-      callbackSessionId: callbackSessionId || null,
-      requestCallId: requestRecord.callId,
-      requestExternalCallId: requestRecord.externalCallId || null,
-      requestSessionId: requestRecord.sessionId || null,
-      requestLeadId: requestRecord.leadId,
-      requestPhoneDigits: requestRecord.phoneDigits,
     });
 
     const mismatches: string[] = [];
@@ -607,10 +602,7 @@ export async function POST(request: Request) {
 
     console.log("[ANALISE_IA] CALLBACK_CALLLOG_SEARCH", {
       requestId,
-      idCandidates: resolvedCallLog.idCandidates,
-      sessionCandidates: resolvedCallLog.sessionCandidates,
       strongCandidatesCount: resolvedCallLog.strongCandidates.length,
-      filteredCandidatesCount: resolvedCallLog.filteredCandidates.length,
       ambiguous: resolvedCallLog.ambiguous,
       selectedCallLogId: resolvedCallLog.selected?.id || null,
     });
@@ -648,14 +640,6 @@ export async function POST(request: Request) {
       const callLogPhoneDigits = normalizeDigits(callLog.telefone || callLog.called || callLog.caller || "");
       if (callLogLeadId && callLogLeadId !== requestRecord.leadId) mismatches.push("callLogLeadMismatch");
       if (callLogPhoneDigits && callLogPhoneDigits !== requestRecord.phoneDigits) mismatches.push("callLogPhoneMismatch");
-      console.log("[ANALISE_IA] CALLBACK_CALLLOG_RESOLVED", {
-        requestId,
-        callLogId: callLog.id,
-        callLogExternalCallId: callLog.externalCallId || null,
-        callLogSessionId: callLog.sessionId || null,
-        callLogLeadId: callLogLeadId || null,
-        callLogPhoneDigits: callLogPhoneDigits || null,
-      });
     } else {
       mismatches.push("callLogNotFound");
     }
@@ -813,10 +797,7 @@ export async function POST(request: Request) {
     console.log("[ANALISE_IA] CALLBACK_SAVED", {
       requestId,
       callId: canonicalCallLogId,
-      leadId: requestRecord.leadId,
       observationId: observation.id,
-      externalCallId: canonicalExternalCallId,
-      sessionId: canonicalSessionId,
     });
 
     logReturn(200, "analysis-saved-and-call-updated", {
@@ -837,12 +818,9 @@ export async function POST(request: Request) {
     logReturn(500, "unhandled-error", {
       detail: error instanceof Error ? error.message : "Erro desconhecido",
     });
+    console.error("[ANALISE_IA][RETORNO] Erro interno:", error instanceof Error ? error.message : "Erro desconhecido");
     return NextResponse.json(
-      {
-        success: false,
-        message: "Nao foi possivel processar retorno da analise.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
-      },
+      { success: false, message: "Nao foi possivel processar retorno da analise." },
       { status: 500 },
     );
   }

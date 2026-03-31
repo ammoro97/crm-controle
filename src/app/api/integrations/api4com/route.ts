@@ -1,5 +1,6 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getApi4ComConfig, saveApi4ComConfig, toPublicApi4ComConfig } from "@/lib/api4com-config-store";
+import { requireAuth } from "@/lib/require-auth";
 
 type SaveApi4ComPayload = {
   token?: string;
@@ -8,25 +9,27 @@ type SaveApi4ComPayload = {
 };
 
 export async function GET() {
+  const auth = await requireAuth();
+  if (!auth.authenticated) return auth.response;
+
   try {
     const config = await getApi4ComConfig();
     return NextResponse.json({
       success: true,
       config: toPublicApi4ComConfig(config),
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      {
-        success: false,
-        error: "Nao foi possivel carregar configuracoes da API4COM.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
-      },
+      { success: false, error: "Nao foi possivel carregar configuracoes da API4COM." },
       { status: 500 },
     );
   }
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAuth();
+  if (!auth.authenticated) return auth.response;
+
   try {
     const body = (await request.json()) as SaveApi4ComPayload;
     const extension = (body.extension || "").trim();
@@ -69,13 +72,9 @@ export async function POST(request: Request) {
       message: "Credenciais salvas com sucesso.",
       config: toPublicApi4ComConfig(next),
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      {
-        success: false,
-        error: "Falha ao salvar configuracao da API4COM.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
-      },
+      { success: false, error: "Falha ao salvar configuracao da API4COM." },
       { status: 500 },
     );
   }

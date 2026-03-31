@@ -1,5 +1,6 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getApi4ComConfig } from "@/lib/api4com-config-store";
+import { requireAuth } from "@/lib/require-auth";
 
 type DialRequestBody = {
   phone?: string;
@@ -49,7 +50,8 @@ function extractApi4ComCallId(payload: unknown): string | null {
 }
 
 export async function POST(request: Request) {
-  console.log("[API4COM][DIAL] Inicio da rota de discagem");
+  const auth = await requireAuth();
+  if (!auth.authenticated) return auth.response;
 
   try {
     const body = (await request.json()) as DialRequestBody;
@@ -58,10 +60,6 @@ export async function POST(request: Request) {
     const token = config.token.trim();
     const extension = config.extension.trim();
     const gateway = config.gateway.trim();
-
-    console.log("TOKEN:", token ? "OK" : "AUSENTE");
-    console.log("EXTENSION:", extension);
-    console.log("PHONE ORIGINAL:", body.phone || "");
 
     if (!token) {
       return NextResponse.json(
@@ -93,20 +91,11 @@ export async function POST(request: Request) {
     const responsavelId = (body.responsavelId || "").trim();
     const atendenteNome = (body.atendenteNome || "").trim();
 
-    console.log("PHONE NORMALIZADO:", normalizedPhone);
-
     if (!normalizedPhone || !leadId || !nome) {
       return NextResponse.json(
         {
           success: false,
           message: "Campos obrigatorios: phone, leadId, nome.",
-          debug: {
-            phone: rawPhone,
-            normalizedPhone,
-            leadId,
-            sessionId,
-            nome,
-          },
         },
         { status: 400 },
       );
@@ -139,8 +128,6 @@ export async function POST(request: Request) {
       },
     };
 
-    console.log("[API4COM][DIAL] Payload enviado:", payload);
-
     const response = await fetch("https://api.api4com.com/api/v1/dialer", {
       method: "POST",
       headers: {
@@ -159,10 +146,7 @@ export async function POST(request: Request) {
       responseBody = responseText || null;
     }
 
-    console.log("[API4COM][DIAL] Status API4COM:", response.status);
-    console.log("[API4COM][DIAL] Body API4COM:", responseBody);
     const externalCallId = extractApi4ComCallId(responseBody);
-    console.log("[API4COM][DIAL] CallId extraido:", externalCallId);
 
     if (response.status !== 200) {
       const apiMessage =
@@ -176,7 +160,6 @@ export async function POST(request: Request) {
           success: false,
           message: apiMessage,
           status: response.status,
-          data: responseBody,
         },
         { status: response.status },
       );
@@ -188,13 +171,11 @@ export async function POST(request: Request) {
       externalCallId,
       data: responseBody,
     });
-  } catch (error) {
-    console.error("[API4COM][DIAL] Erro interno:", error);
+  } catch {
     return NextResponse.json(
       {
         success: false,
         message: "Erro interno ao disparar ligacao.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     );

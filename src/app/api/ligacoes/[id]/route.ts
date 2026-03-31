@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { CallAnalysisStatus } from "@/types/crm";
 import { getCallLogs, updateCall, upsertCallLog } from "@/lib/calls-store";
+import { requireAuth } from "@/lib/require-auth";
 
 type PatchCallBody = {
   analysisStatus?: CallAnalysisStatus;
@@ -51,6 +52,9 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const auth = await requireAuth();
+  if (!auth.authenticated) return auth.response;
+
   try {
     const params = await context.params;
     const callId = String(params.id || "").trim();
@@ -181,11 +185,7 @@ export async function PATCH(
       );
     }
     return NextResponse.json(
-      {
-        success: false,
-        message: "Nao foi possivel atualizar a ligacao.",
-        detail,
-      },
+      { success: false, message: "Nao foi possivel atualizar a ligacao." },
       { status: 500 },
     );
   }

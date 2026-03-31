@@ -5,6 +5,7 @@ import {
   saveWebhookOutConfig,
   toPublicWebhookOutConfig,
 } from "@/lib/webhook-out-config-store";
+import { requireAuth } from "@/lib/require-auth";
 
 type SaveWebhookOutBody = {
   url?: string;
@@ -14,6 +15,9 @@ type SaveWebhookOutBody = {
 };
 
 export async function GET() {
+  const auth = await requireAuth();
+  if (!auth.authenticated) return auth.response;
+
   try {
     const config = await getWebhookOutConfig();
     return NextResponse.json({
@@ -21,19 +25,18 @@ export async function GET() {
       configured: isWebhookOutConfigured(config),
       config: toPublicWebhookOutConfig(config),
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      {
-        success: false,
-        error: "Nao foi possivel carregar configuracao do webhook de saida.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
-      },
+      { success: false, error: "Nao foi possivel carregar configuracao do webhook de saida." },
       { status: 500 },
     );
   }
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAuth();
+  if (!auth.authenticated) return auth.response;
+
   try {
     const body = (await request.json()) as SaveWebhookOutBody;
     const url = String(body.url || "").trim();
@@ -78,13 +81,9 @@ export async function POST(request: Request) {
       configured: isWebhookOutConfigured(next),
       config: toPublicWebhookOutConfig(next),
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      {
-        success: false,
-        error: "Falha ao salvar webhook de saida.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
-      },
+      { success: false, error: "Falha ao salvar webhook de saida." },
       { status: 500 },
     );
   }

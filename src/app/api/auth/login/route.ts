@@ -43,12 +43,9 @@ export async function POST(request: Request) {
     });
     return response;
   } catch (error) {
+    console.error("[AUTH][LOGIN] Erro interno:", error instanceof Error ? error.message : "Erro desconhecido");
     return NextResponse.json(
-      {
-        success: false,
-        message: "Nao foi possivel realizar login.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
-      },
+      { success: false, message: "Nao foi possivel realizar login." },
       { status: 500 },
     );
   }

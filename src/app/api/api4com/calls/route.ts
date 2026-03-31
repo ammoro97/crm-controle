@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getApi4ComConfig } from "@/lib/api4com-config-store";
+import { requireAuth } from "@/lib/require-auth";
 
 const API4COM_CALLS_ENDPOINTS = [
   "https://api.api4com.com/api/v1/calls",
@@ -50,6 +51,9 @@ async function parseApiResponse(response: Response): Promise<unknown> {
 }
 
 export async function GET(request: Request) {
+  const auth = await requireAuth();
+  if (!auth.authenticated) return auth.response;
+
   try {
     const { searchParams } = new URL(request.url);
     const page = toNumberSafe(searchParams.get("page"), 1);
@@ -90,7 +94,7 @@ export async function GET(request: Request) {
           const message =
             raw && typeof raw === "object" && "message" in raw && typeof (raw as { message?: unknown }).message === "string"
               ? (raw as { message: string }).message
-              : `Falha ao consultar ${endpoint}`;
+              : `Falha ao consultar historico`;
           lastError = message;
           continue;
         }
@@ -107,14 +111,11 @@ export async function GET(request: Request) {
       }
     }
 
+    return NextResponse.json({ ok: false, error: lastError });
+  } catch {
     return NextResponse.json({
       ok: false,
-      error: lastError,
-    });
-  } catch (error) {
-    return NextResponse.json({
-      ok: false,
-      error: error instanceof Error ? error.message : "Erro interno ao buscar ligacoes.",
+      error: "Erro interno ao buscar ligacoes.",
     });
   }
 }

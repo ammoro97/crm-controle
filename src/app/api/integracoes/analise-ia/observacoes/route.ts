@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getCallAnalysisObservations } from "@/lib/call-analysis-store";
+import { requireAuth } from "@/lib/require-auth";
 
 export async function GET(request: Request) {
+  const auth = await requireAuth();
+  if (!auth.authenticated) return auth.response;
+
   try {
     const { searchParams } = new URL(request.url);
     const leadIdFilter = String(searchParams.get("leadId") || "").trim();
@@ -18,13 +22,9 @@ export async function GET(request: Request) {
       success: true,
       observations: filtered,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      {
-        success: false,
-        message: "Nao foi possivel carregar observacoes de analise IA.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
-      },
+      { success: false, message: "Nao foi possivel carregar observacoes de analise IA." },
       { status: 500 },
     );
   }

@@ -1,4 +1,5 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { createHmac, timingSafeEqual } from "crypto";
 import {
   findLeadByPhone,
   mapWebhookStatus,
@@ -60,10 +61,53 @@ function extractCallId(payload: Api4ComWebhookPayload) {
   return String(payload.id || payload.callId || payload.uniqueid || "").trim() || `CALL-${Date.now()}`;
 }
 
+function verifyWebhookSignature(request: Request, body: string): boolean {
+  const secret = process.env.API4COM_WEBHOOK_SECRET;
+  if (!secret) return true; // signature check is opt-in until configured
+
+  const receivedSig = String(
+    request.headers.get("x-api4com-signature") ||
+    request.headers.get("x-webhook-signature") ||
+    request.headers.get("authorization") ||
+    "",
+  ).trim();
+
+  if (!receivedSig) return false;
+
+  // Support both HMAC-SHA256 and static bearer token
+  if (receivedSig.startsWith("sha256=")) {
+    const expected = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+    const a = Buffer.from(expected, "utf8");
+    const b = Buffer.from(receivedSig.padEnd(expected.length, "\0"), "utf8");
+    return a.length > 0 && b.length === a.length && timingSafeEqual(a, b);
+  }
+
+  // Static token comparison
+  const a = Buffer.from(secret, "utf8");
+  const b = Buffer.from(receivedSig, "utf8");
+  return a.length > 0 && b.length === a.length && timingSafeEqual(a, b);
+}
+
 export async function POST(request: Request) {
   try {
-    const payload = (await request.json()) as Api4ComWebhookPayload;
-    console.log("[POSTCALL_DEBUG][WEBHOOK] Payload bruto recebido:", payload);
+    const rawBody = await request.text();
+
+    if (!verifyWebhookSignature(request, rawBody)) {
+      return NextResponse.json(
+        { success: false, message: "Assinatura invalida." },
+        { status: 401 },
+      );
+    }
+
+    let payload: Api4ComWebhookPayload;
+    try {
+      payload = JSON.parse(rawBody) as Api4ComWebhookPayload;
+    } catch {
+      return NextResponse.json(
+        { success: false, message: "Payload invalido." },
+        { status: 400 },
+      );
+    }
 
     const eventType = extractEventType(payload);
     const callId = extractCallId(payload);
@@ -88,28 +132,6 @@ export async function POST(request: Request) {
 
     const principalPhone = normalizeDigits(metaTelefone || called || caller);
 
-    console.log("[POSTCALL_DEBUG][WEBHOOK] Campos extraidos", {
-      eventType,
-      callId,
-      direction: payload.direction || "",
-      caller,
-      called,
-      startedAt,
-      answeredAt,
-      endedAt,
-      durationSeconds,
-      hangupCause,
-      hangupCauseCode,
-      recordUrl,
-      metaLeadId,
-      metaSessionId,
-      metaNome,
-      metaEmpresa,
-      metaGateway,
-      metaTelefone,
-      principalPhone,
-    });
-
     let leadId = metaLeadId;
     let nome = metaNome;
     let empresa = metaEmpresa;
@@ -124,13 +146,6 @@ export async function POST(request: Request) {
         telefone = normalizeDigits(foundLead.telefone) || telefone;
       }
     }
-
-    console.log("[POSTCALL_DEBUG][WEBHOOK] Relacao com lead apos tentativa de match", {
-      leadId,
-      nome,
-      empresa,
-      telefone,
-    });
 
     const status = mapWebhookStatus({
       eventType,
@@ -162,17 +177,6 @@ export async function POST(request: Request) {
       status,
     });
 
-    console.log("[POSTCALL_DEBUG][WEBHOOK] Registro persistido no call store", {
-      id: record.id,
-      leadId: record.leadId,
-      telefone: record.telefone,
-      startedAt: record.startedAt,
-      endedAt: record.endedAt,
-      durationSeconds: record.durationSeconds,
-      status: record.status,
-      eventType: record.eventType,
-    });
-
     if (leadId && (eventType.toLowerCase().includes("hangup") || record.endedAt || record.durationSeconds)) {
       const referenceDate = record.endedAt || record.answeredAt || record.startedAt || record.updatedAt;
       const parsed = new Date(referenceDate);
@@ -183,12 +187,6 @@ export async function POST(request: Request) {
       await setLeadLastContactOverride(leadId, `Ligacao em ${stamp}`);
     }
 
-    console.log("[POSTCALL_DEBUG][WEBHOOK] Processamento concluido", {
-      callId: record.id,
-      eventType,
-      detectedAsEnded: Boolean(eventType.toLowerCase().includes("hangup") || record.endedAt || record.durationSeconds),
-    });
-
     return NextResponse.json({
       success: true,
       received: true,
@@ -196,13 +194,12 @@ export async function POST(request: Request) {
       eventType,
     });
   } catch (error) {
-    console.error("[API4COM][WEBHOOK] Erro ao processar webhook:", error);
+    console.error("[API4COM][WEBHOOK] Erro ao processar webhook:", error instanceof Error ? error.message : "Erro desconhecido");
     return NextResponse.json(
       {
         success: false,
         received: false,
         message: "Webhook recebido com falhas de processamento.",
-        detail: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     );
