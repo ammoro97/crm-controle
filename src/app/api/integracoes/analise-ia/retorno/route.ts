@@ -267,7 +267,15 @@ export async function POST(request: Request) {
     const config = await getWebhookOutConfig();
     const expectedSecret = String(config.secret || "").trim();
     const receivedSecret = String(request.headers.get(CALL_ANALYSIS_SECRET_HEADER) || "").trim();
-    if (expectedSecret) {
+
+    // Callbacks com URL assinada (ctx + sig) sao auto-autenticados via HMAC-SHA256.
+    // O header x-webhook-secret so e exigido em callbacks sem assinatura de URL,
+    // pois o n8n posta de volta para a callbackUrl sem adicionar headers de auth.
+    const requestUrl = new URL(request.url);
+    const hasSignedCallbackUrl =
+      Boolean(requestUrl.searchParams.get("ctx")) && Boolean(requestUrl.searchParams.get("sig"));
+
+    if (expectedSecret && !hasSignedCallbackUrl) {
       const a = Buffer.from(expectedSecret, "utf8");
       const b = Buffer.from(receivedSecret, "utf8");
       const valid = a.length > 0 && b.length === a.length && timingSafeEqual(a, b);
