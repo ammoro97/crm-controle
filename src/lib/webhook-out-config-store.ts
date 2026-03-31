@@ -1,5 +1,4 @@
-import { promises as fs } from "fs";
-import path from "path";
+import { readDataFile, writeDataFile } from "./storage-paths";
 
 export type WebhookOutMethod = "POST";
 
@@ -20,8 +19,7 @@ export type WebhookOutPublicConfig = {
   updatedAt: string | null;
 };
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const CONFIG_PATH = path.join(DATA_DIR, "webhook-out-config.json");
+const FILENAME = "webhook-out-config.json";
 
 const DEFAULT_CONFIG: WebhookOutConfig = {
   url: "",
@@ -30,10 +28,6 @@ const DEFAULT_CONFIG: WebhookOutConfig = {
   enabled: false,
   updatedAt: "",
 };
-
-async function ensureDataDir() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-}
 
 function normalizeUrl(value?: string) {
   const raw = String(value || "").trim();
@@ -88,12 +82,8 @@ export function toPublicWebhookOutConfig(config: WebhookOutConfig): WebhookOutPu
 }
 
 export async function getWebhookOutConfig(): Promise<WebhookOutConfig> {
-  try {
-    const raw = await fs.readFile(CONFIG_PATH, "utf8");
-    return normalizeConfig(JSON.parse(raw) as Partial<WebhookOutConfig>);
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
+  const raw = await readDataFile<Partial<WebhookOutConfig>>(FILENAME, {});
+  return normalizeConfig(raw);
 }
 
 export async function saveWebhookOutConfig(input: {
@@ -116,11 +106,12 @@ export async function saveWebhookOutConfig(input: {
     updatedAt: new Date().toISOString(),
   };
 
-  await ensureDataDir();
-  await fs.writeFile(CONFIG_PATH, JSON.stringify(next, null, 2), "utf8");
+  await writeDataFile(FILENAME, next);
   return next;
 }
 
 export function isWebhookOutConfigured(config: WebhookOutConfig) {
   return Boolean(config.enabled && config.url);
 }
+
+export { DEFAULT_CONFIG as DEFAULT_WEBHOOK_OUT_CONFIG };

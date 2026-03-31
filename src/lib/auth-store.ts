@@ -1,12 +1,10 @@
-import { promises as fs } from "fs";
-import path from "path";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { AuthSessionRecord, PublicUser, UserRecord } from "@/types/auth";
+import { readDataFile, writeDataFile } from "./storage-paths";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const USERS_FILE = path.join(DATA_DIR, "users.json");
-const SESSIONS_FILE = path.join(DATA_DIR, "auth-sessions.json");
+const USERS_FILE = "users.json";
+const SESSIONS_FILE = "auth-sessions.json";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 
@@ -45,27 +43,9 @@ function toResponsavelId(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-async function ensureDataDir() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-}
-
-async function readJSONFile<T>(filePath: string, fallback: T): Promise<T> {
-  try {
-    const raw = await fs.readFile(filePath, "utf8");
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-async function writeJSONFile<T>(filePath: string, value: T) {
-  await ensureDataDir();
-  await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
-}
-
 async function loadUsers(): Promise<UserRecord[]> {
   if (usersCache) return usersCache;
-  const parsed = await readJSONFile<UserRecord[]>(USERS_FILE, []);
+  const parsed = await readDataFile<UserRecord[]>(USERS_FILE, []);
   if (!Array.isArray(parsed) || parsed.length === 0) {
     usersCache = [];
     return usersCache;
@@ -84,19 +64,19 @@ async function loadUsers(): Promise<UserRecord[]> {
 
 async function saveUsers(next: UserRecord[]) {
   usersCache = next;
-  await writeJSONFile(USERS_FILE, next);
+  await writeDataFile(USERS_FILE, next);
 }
 
 async function loadSessions(): Promise<AuthSessionRecord[]> {
   if (sessionsCache) return sessionsCache;
-  const parsed = await readJSONFile<AuthSessionRecord[]>(SESSIONS_FILE, []);
+  const parsed = await readDataFile<AuthSessionRecord[]>(SESSIONS_FILE, []);
   sessionsCache = Array.isArray(parsed) ? parsed : [];
   return sessionsCache;
 }
 
 async function saveSessions(next: AuthSessionRecord[]) {
   sessionsCache = next;
-  await writeJSONFile(SESSIONS_FILE, next);
+  await writeDataFile(SESSIONS_FILE, next);
 }
 
 function removeExpiredSessions(sessions: AuthSessionRecord[]) {

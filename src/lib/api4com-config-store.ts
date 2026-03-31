@@ -1,5 +1,4 @@
-﻿import { promises as fs } from "fs";
-import path from "path";
+import { readDataFile, writeDataFile } from "./storage-paths";
 
 export type Api4ComConfig = {
   token: string;
@@ -18,8 +17,7 @@ export type Api4ComPublicConfig = {
   updatedAt: string | null;
 };
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const CONFIG_PATH = path.join(DATA_DIR, "api4com-config.json");
+const FILENAME = "api4com-config.json";
 
 const DEFAULT_CONFIG: Api4ComConfig = {
   token: "",
@@ -28,10 +26,6 @@ const DEFAULT_CONFIG: Api4ComConfig = {
   isConnected: false,
   updatedAt: "",
 };
-
-async function ensureDataDir() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-}
 
 function normalizeConfig(raw: Partial<Api4ComConfig> | null | undefined): Api4ComConfig {
   return {
@@ -63,13 +57,8 @@ export function toPublicApi4ComConfig(config: Api4ComConfig): Api4ComPublicConfi
 }
 
 export async function getApi4ComConfig(): Promise<Api4ComConfig> {
-  try {
-    const raw = await fs.readFile(CONFIG_PATH, "utf8");
-    const parsed = JSON.parse(raw) as Partial<Api4ComConfig>;
-    return normalizeConfig(parsed);
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
+  const raw = await readDataFile<Partial<Api4ComConfig>>(FILENAME, {});
+  return normalizeConfig(raw);
 }
 
 export async function saveApi4ComConfig(input: {
@@ -88,8 +77,7 @@ export async function saveApi4ComConfig(input: {
     updatedAt: new Date().toISOString(),
   };
 
-  await ensureDataDir();
-  await fs.writeFile(CONFIG_PATH, JSON.stringify(next, null, 2), "utf8");
+  await writeDataFile(FILENAME, next);
   return next;
 }
 
@@ -100,8 +88,6 @@ export async function updateApi4ComConnectionStatus(isConnected: boolean): Promi
     isConnected,
     updatedAt: new Date().toISOString(),
   };
-
-  await ensureDataDir();
-  await fs.writeFile(CONFIG_PATH, JSON.stringify(next, null, 2), "utf8");
+  await writeDataFile(FILENAME, next);
   return next;
 }

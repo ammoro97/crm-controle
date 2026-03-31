@@ -1,13 +1,11 @@
-﻿import { promises as fs } from "fs";
-import path from "path";
-import { initialLeads } from "@/lib/mock-data";
+﻿import { initialLeads } from "@/lib/mock-data";
 import { CallAnalysisStatus, CallLog } from "@/types/crm";
+import { readDataFile, writeDataFile } from "./storage-paths";
 
 type LeadLastContactOverrides = Record<string, string>;
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const CALLS_FILE = path.join(DATA_DIR, "call-logs.json");
-const LEADS_CONTACT_FILE = path.join(DATA_DIR, "lead-last-contact-overrides.json");
+const CALLS_FILE = "call-logs.json";
+const LEADS_CONTACT_FILE = "lead-last-contact-overrides.json";
 
 let callLogsCache: CallLog[] | null = null;
 let callLogsLoadPromise: Promise<CallLog[]> | null = null;
@@ -19,10 +17,6 @@ function sortCallLogsInPlace(logs: CallLog[]) {
     const second = b.startedAt || b.createdAt;
     return second.localeCompare(first);
   });
-}
-
-async function ensureDataDir() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
 }
 
 function safeDateValue(value?: string | null) {
@@ -124,26 +118,19 @@ export function mapWebhookStatus(input: {
 }
 
 async function readCallLogsFromDisk(): Promise<CallLog[]> {
-  try {
-    const raw = await fs.readFile(CALLS_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item) => normalizeCallLog(item as Partial<CallLog> & Pick<CallLog, "id">))
-      .sort((a, b) => {
-        const first = a.startedAt || a.createdAt;
-        const second = b.startedAt || b.createdAt;
-        return second.localeCompare(first);
-      });
-  } catch {
-    return [];
-  }
+  const parsed = await readDataFile<unknown[]>(CALLS_FILE, []);
+  return parsed
+    .map((item) => normalizeCallLog(item as Partial<CallLog> & Pick<CallLog, "id">))
+    .sort((a, b) => {
+      const first = a.startedAt || a.createdAt;
+      const second = b.startedAt || b.createdAt;
+      return second.localeCompare(first);
+    });
 }
 
 async function flushCallLogsToDisk() {
   if (!callLogsCache) return;
-  await ensureDataDir();
-  await fs.writeFile(CALLS_FILE, JSON.stringify(callLogsCache, null, 2), "utf8");
+  await writeDataFile(CALLS_FILE, callLogsCache);
 }
 
 function scheduleCallLogsFlush() {
@@ -257,23 +244,14 @@ export async function findLeadByPhone(phone?: string | null) {
 }
 
 export async function getLeadLastContactOverrides(): Promise<LeadLastContactOverrides> {
-  try {
-    const raw = await fs.readFile(LEADS_CONTACT_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    return parsed as LeadLastContactOverrides;
-  } catch {
-    return {};
-  }
+  const parsed = await readDataFile<LeadLastContactOverrides>(LEADS_CONTACT_FILE, {});
+  if (!parsed || typeof parsed !== "object") return {};
+  return parsed;
 }
 
 export async function setLeadLastContactOverride(leadId: string, value: string) {
   if (!leadId) return;
   const current = await getLeadLastContactOverrides();
-  const next: LeadLastContactOverrides = {
-    ...current,
-    [leadId]: value,
-  };
-  await ensureDataDir();
-  await fs.writeFile(LEADS_CONTACT_FILE, JSON.stringify(next, null, 2), "utf8");
+  const next: LeadLastContactOverrides = { ...current, [leadId]: value };
+  await writeDataFile(LEADS_CONTACT_FILE, next);
 }
