@@ -1747,8 +1747,8 @@ export default function LigacoesPage() {
       setAnalysisFeedbackByCallId((prev) => ({
         ...prev,
         [call.id]: {
-          type: "error",
-          message: "Analise concluida sem vinculo completo com o lead. Atualize a tabela e tente novamente.",
+          type: "info",
+          message: "Análise ainda não disponível para visualização nesta ligação.",
         },
       }));
       return;
@@ -1763,24 +1763,7 @@ export default function LigacoesPage() {
   };
 
   const handleGenerateAnaliseIa = async (call: MappedCall) => {
-    if (analysisLoadingCallId) return;
-    const currentStatus = resolveAnalysisStatus(call);
-    const currentObservationId = getPersistedAnalysisObservationId(call);
-    if (currentStatus === "done" && currentObservationId) {
-      await handleViewAnaliseIa(call);
-      return;
-    }
-    if (currentStatus === "done" && !currentObservationId) {
-      setAnalysisFeedbackByCallId((prev) => ({
-        ...prev,
-        [call.id]: {
-          type: "info",
-          message: "Analise concluida sem observacao vinculada. Atualizando a tabela...",
-        },
-      }));
-      await loadCallsWithRetry("analysis-done-missing-observation", 2);
-      return;
-    }
+    if (analysisLoadingCallId === call.id) return;
     const canonicalCallId = String(call.storeCallId || call.id || "").trim();
     if (!canonicalCallId) {
       setAnalysisFeedbackByCallId((prev) => ({
@@ -3012,18 +2995,8 @@ export default function LigacoesPage() {
                     const isSelected = selectedIds.includes(call.id);
                     const recordingUrl = getCallRecordingUrl(call);
                     const analysisFeedback = analysisFeedbackByCallId[call.id];
-                    const analysisStatus = resolveAnalysisStatus(call);
                     const analysisDone = isAnalysisReady(call);
-                    const analysisProcessing = analysisStatus === "processing" || (analysisStatus === "done" && !analysisDone);
-                    const analysisErrored = analysisStatus === "error";
-                    const analysisButtonLabel =
-                      analysisProcessing
-                        ? "Gerando análise..."
-                        : analysisDone
-                          ? "Ver análise"
-                          : analysisErrored
-                            ? "Tentar novamente"
-                            : "Gerar análise";
+                    const analysisProcessing = analysisLoadingCallId === call.id;
                     return (
                       <Fragment key={call.id}>
                         <tr className="border-b border-border/70 text-sm text-slate-200 transition hover:bg-slate-900/40">
@@ -3153,19 +3126,27 @@ export default function LigacoesPage() {
                                 </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Análise IA</p>
-                                  {webhookOutLoading && !analysisDone ? (
-                                    <p className="mt-1 text-sm text-slate-500">Carregando integração...</p>
-                                  ) : (
+                                  <div className="mt-1 flex flex-wrap items-center gap-2">
                                     <button
                                       type="button"
-                                      className="btn-primary mt-1 h-8 px-2.5 py-1 text-xs"
+                                      className="btn-primary h-8 px-2.5 py-1 text-xs"
                                       onClick={() => void handleGenerateAnaliseIa(call)}
-                                      disabled={analysisProcessing || (!webhookOutConfigured && !analysisDone)}
+                                      disabled={analysisProcessing || webhookOutLoading || !webhookOutConfigured}
                                     >
-                                      {analysisButtonLabel}
+                                      Gerar análise
                                     </button>
-                                  )}
-                                  {!webhookOutLoading && !webhookOutConfigured && !analysisDone ? (
+                                    <button
+                                      type="button"
+                                      className="btn-ghost h-8 px-2.5 py-1 text-xs"
+                                      onClick={() => void handleViewAnaliseIa(call)}
+                                    >
+                                      Ver análise
+                                    </button>
+                                  </div>
+                                  {webhookOutLoading ? (
+                                    <p className="mt-1 text-xs text-slate-500">Carregando integração...</p>
+                                  ) : null}
+                                  {!webhookOutLoading && !webhookOutConfigured ? (
                                     <p className="mt-1 text-xs text-amber-300">
                                       Configure o webhook de saída em Configurações &gt; Integrações.
                                     </p>
@@ -3187,6 +3168,9 @@ export default function LigacoesPage() {
                                     >
                                       {analysisFeedback.message}
                                     </p>
+                                  ) : null}
+                                  {analysisProcessing ? (
+                                    <p className="mt-1 text-xs text-slate-400">Gerando análise...</p>
                                   ) : null}
                                   {analysisDone && call.aiAnalysis ? (
                                     <p className="mt-1 text-xs text-emerald-300">
