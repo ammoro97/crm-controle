@@ -1055,11 +1055,19 @@ export default function LigacoesPage() {
     setError(null);
 
     try {
-      const internalResponse = await fetch("/api/ligacoes", {
-        method: "GET",
-        cache: "no-store",
-        signal,
-      });
+      const [externalResponse, internalResponse] = await Promise.all([
+        fetch("/api/api4com/calls", {
+          method: "GET",
+          cache: "no-store",
+          signal,
+        }),
+        fetch("/api/ligacoes", {
+          method: "GET",
+          cache: "no-store",
+          signal,
+        }),
+      ]);
+      const externalData = (await externalResponse.json()) as CallsApiResponse;
       const internalData = (await internalResponse.json()) as InternalCallsApiResponse;
 
       if (!internalResponse.ok || !internalData.success || !Array.isArray(internalData.calls)) {
@@ -1067,30 +1075,61 @@ export default function LigacoesPage() {
       }
 
       const internalMapById = new Map<string, CallLog>();
+      const internalMapByLookup = new Map<string, CallLog>();
+      const registerLookup = (key: string, item: CallLog) => {
+        const normalized = String(key || "").trim();
+        if (!normalized) return;
+        const current = internalMapByLookup.get(normalized);
+        if (!current || shouldReplaceLookupRecord(current, item)) {
+          internalMapByLookup.set(normalized, item);
+        }
+      };
       for (const item of internalData.calls) {
         internalMapById.set(item.id, item);
+        registerLookup(String(item.id || "").trim(), item);
+        registerLookup(String(item.externalCallId || "").trim(), item);
+        registerLookup(String(item.sessionId || "").trim(), item);
       }
       setInternalById(internalMapById);
 
       const leadsIndexes = buildLeadsIndexes(leadsSnapshot);
       const wrapupsIndexes = buildWrapupsIndexes(wrapups);
-      const rows = Array.from(internalMapById.values()).map((item) =>
-        mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),
-      );
+      const externalItems = externalResponse.ok && externalData.ok && Array.isArray(externalData.items) ? externalData.items : [];
+
+      const rows =
+        externalItems.length > 0
+          ? externalItems.map((item, index) =>
+              mapApiCallToRow(item, index, {
+                leadsIndexes,
+                internalByLookup: internalMapByLookup,
+                wrapupsIndexes,
+                responsavelById,
+              }),
+            )
+          : Array.from(internalMapById.values()).map((item) =>
+              mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),
+            );
 
       rows.sort((a, b) => {
         const first = a.startedAt || "";
         const second = b.startedAt || "";
         return second.localeCompare(first);
       });
+
       const visibleRows = rows.filter((row) => !hiddenCallIdsRef.current.has(row.id));
       setCalls(visibleRows);
-      setError(null);
+      if (!externalResponse.ok || !externalData.ok) {
+        setError(externalData.error || "Histórico externo indisponível. Exibindo ligações internas.");
+      } else {
+        setError(null);
+      }
       console.log(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD SUCCESS`, {
         reason,
+        externalOk: externalResponse.ok && externalData.ok,
+        externalCount: externalItems.length,
         internalCount: internalMapById.size,
         renderedCount: visibleRows.length,
-        source: "internal",
+        source: externalItems.length > 0 ? "api4com" : "internal-fallback",
       });
       return true;
     } catch (requestError) {
