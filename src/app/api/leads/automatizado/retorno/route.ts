@@ -3,7 +3,8 @@ import { savePendingAutomatedLeads } from "@/lib/leads-automatizado-store";
 import { Lead } from "@/types/crm";
 
 export type OutboundLeadPayload = {
-  empresa: string;
+  empresa?: string | null;
+  nome?: string | null;       // alias para empresa quando nao ha responsavel separado
   responsavel?: string | null;
   telefone?: string | null;
   email?: string | null;
@@ -15,16 +16,14 @@ export type OutboundLeadPayload = {
   estado?: string | null;
   dataCadastro?: string | null;
   origem?: string | null;
-  horario_funcionamento?: string | null;
+  horario_funcionamento?: unknown; // aceita string ou array de {dia, horario}
   // backward-compat aliases
-  name?: string;
-  nome?: string;
-  company?: string;
-  phone?: string;
-  telefone_alt?: string;
-  city?: string;
-  niche?: string;
-  nicho?: string;
+  name?: string | null;
+  company?: string | null;
+  phone?: string | null;
+  city?: string | null;
+  niche?: string | null;
+  nicho?: string | null;
   [key: string]: unknown;
 };
 
@@ -46,6 +45,26 @@ function normalizeExpediente(value?: string | null): "Aberto" | "Fechado" | "Ind
   return "Indefinido";
 }
 
+type HorarioItem = { dia?: unknown; horario?: unknown };
+
+function normalizeHorarioFuncionamento(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === "string") return value.trim() || null;
+  if (Array.isArray(value)) {
+    const lines = value
+      .map((item: HorarioItem) => {
+        const dia = String(item?.dia || "").trim();
+        const horario = String(item?.horario || "").trim();
+        if (!dia && !horario) return null;
+        if (!horario || horario.toLowerCase() === "closed") return `${dia}: Fechado`;
+        return `${dia}: ${horario}`;
+      })
+      .filter((line): line is string => line !== null);
+    return lines.length > 0 ? lines.join("\n") : null;
+  }
+  return null;
+}
+
 function buildCityField(cidade?: string | null, estado?: string | null): string {
   const c = String(cidade || "").trim();
   const s = String(estado || "").trim();
@@ -54,9 +73,10 @@ function buildCityField(cidade?: string | null, estado?: string | null): string 
 }
 
 function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnpj"): Lead | null {
-  // Support both new format (empresa/responsavel) and old format (name/company)
-  const empresa = String(raw.empresa || raw.company || "").trim();
-  const responsavel = String(raw.responsavel || raw.name || raw.nome || "").trim();
+  // empresa: campo direto > company > nome (quando nao ha responsavel separado)
+  const empresa = String(raw.empresa || raw.company || raw.nome || "").trim();
+  // responsavel: campo direto > name (quando nome nao foi usado como empresa)
+  const responsavel = String(raw.responsavel || raw.name || "").trim();
   if (!empresa && !responsavel) return null;
 
   const now = new Date();
@@ -104,11 +124,10 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
     ],
     internalNotes: [],
     observationLog: [],
-    // Outbound-specific fields
     site: raw.site ? String(raw.site).trim() : null,
     nota: raw.nota != null ? raw.nota : null,
     avaliacoes: raw.avaliacoes != null ? raw.avaliacoes : null,
-    horario_funcionamento: raw.horario_funcionamento ? String(raw.horario_funcionamento).trim() : null,
+    horario_funcionamento: normalizeHorarioFuncionamento(raw.horario_funcionamento),
     expediente: normalizeExpediente(raw.expediente),
     outboundQualification: {
       decisionContacts: [{ name: "", phone: "", email: "" }],
@@ -137,17 +156,28 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
-    const body = (await request.json()) as RetornoBody;
-    const tipoAutomacao: "api" | "cnpj" = body.tipoAutomacao === "cnpj" ? "cnpj" : "api";
+    const raw = await request.json();
 
-    const rawLeads: OutboundLeadPayload[] = Array.isArray(body.leads)
-      ? body.leads
-      : Array.isArray(body.data)
-        ? body.data
-        : [];
+    // Aceita corpo como array direto [ {...}, {...} ] ou como objeto { leads: [...] }
+    let tipoAutomacao: "api" | "cnpj" = "api";
+    let requestId: string = `RET-${Date.now()}`;
+    let rawLeads: OutboundLeadPayload[] = [];
+
+    if (Array.isArray(raw)) {
+      rawLeads = raw as OutboundLeadPayload[];
+    } else {
+      const body = raw as RetornoBody;
+      tipoAutomacao = body.tipoAutomacao === "cnpj" ? "cnpj" : "api";
+      requestId = String(body.requestId || requestId);
+      rawLeads = Array.isArray(body.leads)
+        ? body.leads
+        : Array.isArray(body.data)
+          ? body.data
+          : [];
+    }
 
     const leads: Lead[] = rawLeads
-      .map((raw) => buildOutboundLead(raw, tipoAutomacao))
+      .map((item) => buildOutboundLead(item, tipoAutomacao))
       .filter((lead): lead is Lead => lead !== null);
 
     if (leads.length === 0) {
@@ -158,7 +188,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     await savePendingAutomatedLeads({
-      requestId: String(body.requestId || `RET-${Date.now()}`),
+      requestId,
       tipoAutomacao,
       leads,
       savedAt: new Date().toISOString(),
