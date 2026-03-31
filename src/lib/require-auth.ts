@@ -1,18 +1,31 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { getUserBySessionToken } from "./auth-store";
-import type { PublicUser } from "@/types/auth";
-
-const SESSION_COOKIE = "crm_auth_token";
+import { createSupabaseServerClient } from "./supabase-server";
 
 export type AuthResult =
-  | { authenticated: true; user: PublicUser }
+  | { authenticated: true; userId: string; email: string }
   | { authenticated: false; response: NextResponse };
 
 export async function requireAuth(): Promise<AuthResult> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value || "";
-  if (!token) {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data.user) {
+      return {
+        authenticated: false,
+        response: NextResponse.json(
+          { success: false, message: "Nao autorizado." },
+          { status: 401 },
+        ),
+      };
+    }
+
+    return {
+      authenticated: true,
+      userId: data.user.id,
+      email: data.user.email ?? "",
+    };
+  } catch {
     return {
       authenticated: false,
       response: NextResponse.json(
@@ -21,15 +34,4 @@ export async function requireAuth(): Promise<AuthResult> {
       ),
     };
   }
-  const user = await getUserBySessionToken(token);
-  if (!user) {
-    return {
-      authenticated: false,
-      response: NextResponse.json(
-        { success: false, message: "Sessao invalida ou expirada." },
-        { status: 401 },
-      ),
-    };
-  }
-  return { authenticated: true, user };
 }
