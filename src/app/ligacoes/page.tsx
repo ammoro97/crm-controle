@@ -210,6 +210,66 @@ function normalizeDigits(value?: string | null) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function normalizeLookupKey(value?: string | null) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getStartedAtMinuteKey(value?: string | null) {
+  const startedAt = String(value || "").trim();
+  if (!startedAt) return "";
+  return startedAt.slice(0, 16);
+}
+
+function buildMappedCallLookupKeys(call: MappedCall) {
+  const keys: string[] = [];
+  const add = (prefix: string, value?: string | null) => {
+    const normalized = normalizeLookupKey(value);
+    if (!normalized) return;
+    keys.push(`${prefix}:${normalized}`);
+  };
+
+  add("id", call.id);
+  add("store", call.storeCallId);
+  add("external", call.externalCallId);
+  add("session", call.sessionId);
+  if (call.leadId) add("lead", call.leadId);
+
+  const phoneDigits = normalizeDigits(call.telefone);
+  const startedAtMinute = getStartedAtMinuteKey(call.startedAt);
+  if (phoneDigits && startedAtMinute) {
+    keys.push(`phone-minute:${phoneDigits}|${startedAtMinute}`);
+    if (call.leadId) {
+      keys.push(`lead-phone-minute:${normalizeLookupKey(call.leadId)}|${phoneDigits}|${startedAtMinute}`);
+    }
+  }
+
+  return Array.from(new Set(keys));
+}
+
+function shouldOverlayAnalysisState(current: MappedCall, fallback: MappedCall) {
+  const currentPriority = getCallAnalysisPriority(current);
+  const fallbackPriority = getCallAnalysisPriority(fallback);
+  if (fallbackPriority <= currentPriority) return false;
+  return resolveAnalysisStatus(fallback) !== "idle";
+}
+
+function mergeAnalysisState(current: MappedCall, fallback: MappedCall): MappedCall {
+  return {
+    ...current,
+    storeCallId: current.storeCallId || fallback.storeCallId || null,
+    analysisStatus: fallback.analysisStatus || current.analysisStatus || "idle",
+    processingStatus: fallback.processingStatus || current.processingStatus || "pending",
+    analysisRequestId: fallback.analysisRequestId || current.analysisRequestId || null,
+    analysisObservationId: fallback.analysisObservationId || current.analysisObservationId || null,
+    analysisLeadId:
+      fallback.analysisLeadId || current.analysisLeadId || current.leadId || fallback.leadId || null,
+    analysisUpdatedAt: fallback.analysisUpdatedAt || current.analysisUpdatedAt || null,
+    analysisPreview: fallback.analysisPreview || current.analysisPreview || null,
+    aiAnalysis: fallback.aiAnalysis || current.aiAnalysis || null,
+    analysisError: fallback.analysisError || current.analysisError || null,
+  };
+}
+
 function buildLeadsIndexes(leads: Lead[]): LeadsIndexes {
   const byId = new Map<string, Lead>();
   const byPhoneDigits = new Map<string, Lead>();
@@ -575,6 +635,8 @@ function mapApiCallToRow(
   const metadataCallId = String(metadata?.callId ?? metadata?.callid ?? "").trim();
   const metadataExternalCallId = String(metadata?.externalCallId ?? metadata?.external_call_id ?? metadataCallId).trim();
   const metadataGateway = String(metadata?.gateway ?? "").trim();
+  const rowPhoneDigits = normalizeDigits(metadataTelefone || item.telefone || item.to || "");
+  const rowStartedAtMinute = getStartedAtMinuteKey(startedAt);
 
   const internalLookupCandidates = Array.from(
     new Set([
@@ -589,11 +651,15 @@ function mapApiCallToRow(
       String(item.callid ?? "").trim(),
       String(item.uniqueid ?? "").trim(),
       String(item.id ?? "").trim(),
+      rowPhoneDigits && rowStartedAtMinute ? `phone-minute:${rowPhoneDigits}|${rowStartedAtMinute}` : "",
+      metadataLeadId && rowPhoneDigits && rowStartedAtMinute
+        ? `lead-phone-minute:${metadataLeadId}|${rowPhoneDigits}|${rowStartedAtMinute}`
+        : "",
     ].filter(Boolean)),
   );
   let internal: CallLog | undefined;
   for (const key of internalLookupCandidates) {
-    const found = context.internalByLookup.get(key);
+    const found = context.internalByLookup.get(normalizeLookupKey(key));
     if (found) {
       internal = found;
       break;
@@ -1090,7 +1156,7 @@ export default function LigacoesPage() {
       const internalMapById = new Map<string, CallLog>();
       const internalMapByLookup = new Map<string, CallLog>();
       const registerLookup = (key: string, item: CallLog) => {
-        const normalized = String(key || "").trim();
+        const normalized = normalizeLookupKey(key);
         if (!normalized) return;
         const current = internalMapByLookup.get(normalized);
         if (!current || shouldReplaceLookupRecord(current, item)) {
@@ -1099,9 +1165,18 @@ export default function LigacoesPage() {
       };
       for (const item of internalData.calls) {
         internalMapById.set(item.id, item);
-        registerLookup(String(item.id || "").trim(), item);
-        registerLookup(String(item.externalCallId || "").trim(), item);
-        registerLookup(String(item.sessionId || "").trim(), item);
+        registerLookup(item.id, item);
+        registerLookup(item.externalCallId || "", item);
+        registerLookup(item.sessionId || "", item);
+        const internalPhoneDigits = normalizeDigits(item.telefone || item.called || item.caller || "");
+        const internalStartedAtMinute = getStartedAtMinuteKey(item.startedAt || item.createdAt || null);
+        if (internalPhoneDigits && internalStartedAtMinute) {
+          registerLookup(`phone-minute:${internalPhoneDigits}|${internalStartedAtMinute}`, item);
+          const internalLeadId = String(item.leadId || "").trim();
+          if (internalLeadId) {
+            registerLookup(`lead-phone-minute:${internalLeadId}|${internalPhoneDigits}|${internalStartedAtMinute}`, item);
+          }
+        }
       }
       setInternalById(internalMapById);
 
@@ -1130,7 +1205,34 @@ export default function LigacoesPage() {
       });
 
       const visibleRows = rows.filter((row) => !hiddenCallIdsRef.current.has(row.id));
-      setCalls(visibleRows);
+      setCalls((prev) => {
+        if (!prev.length) return visibleRows;
+
+        const previousByLookup = new Map<string, MappedCall>();
+        const registerPrevious = (call: MappedCall) => {
+          for (const key of buildMappedCallLookupKeys(call)) {
+            const current = previousByLookup.get(key);
+            if (!current || shouldOverlayAnalysisState(current, call)) {
+              previousByLookup.set(key, call);
+            }
+          }
+        };
+        prev.forEach(registerPrevious);
+
+        return visibleRows.map((row) => {
+          let fallback: MappedCall | undefined;
+          for (const key of buildMappedCallLookupKeys(row)) {
+            const candidate = previousByLookup.get(key);
+            if (!candidate) continue;
+            if (!fallback || shouldOverlayAnalysisState(fallback, candidate)) {
+              fallback = candidate;
+            }
+          }
+
+          if (!fallback || !shouldOverlayAnalysisState(row, fallback)) return row;
+          return mergeAnalysisState(row, fallback);
+        });
+      });
       if (!externalResponse.ok || !externalData.ok) {
         setError(externalData.error || "Histórico externo indisponível. Exibindo ligações internas.");
       } else {
@@ -1319,7 +1421,7 @@ export default function LigacoesPage() {
 
         const internalLookup = new Map<string, CallLog>();
         const registerLookup = (key: string, item: CallLog) => {
-          const normalized = String(key || "").trim();
+          const normalized = normalizeLookupKey(key);
           if (!normalized) return;
           const current = internalLookup.get(normalized);
           if (!current || shouldReplaceLookupRecord(current, item)) {
@@ -1331,6 +1433,15 @@ export default function LigacoesPage() {
           registerLookup(String(item.id || "").trim(), item);
           registerLookup(String(item.externalCallId || "").trim(), item);
           registerLookup(String(item.sessionId || "").trim(), item);
+          const internalPhoneDigits = normalizeDigits(item.telefone || item.called || item.caller || "");
+          const internalStartedAtMinute = getStartedAtMinuteKey(item.startedAt || item.createdAt || null);
+          if (internalPhoneDigits && internalStartedAtMinute) {
+            registerLookup(`phone-minute:${internalPhoneDigits}|${internalStartedAtMinute}`, item);
+            const internalLeadId = String(item.leadId || "").trim();
+            if (internalLeadId) {
+              registerLookup(`lead-phone-minute:${internalLeadId}|${internalPhoneDigits}|${internalStartedAtMinute}`, item);
+            }
+          }
         }
 
         if (disposed) return;
@@ -1347,18 +1458,31 @@ export default function LigacoesPage() {
                   String(call.id || "").trim(),
                   String(call.externalCallId || "").trim(),
                   String(call.sessionId || "").trim(),
+                  (() => {
+                    const digits = normalizeDigits(call.telefone);
+                    const minute = getStartedAtMinuteKey(call.startedAt);
+                    if (!digits || !minute) return "";
+                    return `phone-minute:${digits}|${minute}`;
+                  })(),
+                  (() => {
+                    const leadId = String(call.leadId || "").trim();
+                    const digits = normalizeDigits(call.telefone);
+                    const minute = getStartedAtMinuteKey(call.startedAt);
+                    if (!leadId || !digits || !minute) return "";
+                    return `lead-phone-minute:${leadId}|${digits}|${minute}`;
+                  })(),
                 ].filter(Boolean),
               ),
             );
 
             let internal: CallLog | undefined;
-            for (const candidate of lookupCandidates) {
-              const found = internalLookup.get(candidate);
-              if (found) {
-                internal = found;
-                break;
-              }
+          for (const candidate of lookupCandidates) {
+            const found = internalLookup.get(normalizeLookupKey(candidate));
+            if (found) {
+              internal = found;
+              break;
             }
+          }
             if (!internal) return call;
 
             const resolvedStatus = resolveAnalysisStatus({ analysisStatus: internal.analysisStatus });
@@ -1378,9 +1502,16 @@ export default function LigacoesPage() {
             changed = true;
             return {
               ...call,
+              storeCallId: internal.id || call.storeCallId || null,
               analysisStatus: resolvedStatus,
+              processingStatus: internal.processingStatus || call.processingStatus || "pending",
+              analysisRequestId: internal.analysisRequestId || call.analysisRequestId || null,
               analysisObservationId: nextObservationId,
               analysisLeadId: nextLeadId,
+              analysisUpdatedAt: internal.analysisUpdatedAt || call.analysisUpdatedAt || null,
+              analysisPreview: internal.analysisPreview || call.analysisPreview || null,
+              aiAnalysis: internal.aiAnalysis || call.aiAnalysis || null,
+              analysisError: internal.analysisError || null,
             };
           });
 
@@ -1634,8 +1765,20 @@ export default function LigacoesPage() {
   const handleGenerateAnaliseIa = async (call: MappedCall) => {
     if (analysisLoadingCallId) return;
     const currentStatus = resolveAnalysisStatus(call);
-    if (currentStatus === "done") {
+    const currentObservationId = getPersistedAnalysisObservationId(call);
+    if (currentStatus === "done" && currentObservationId) {
       await handleViewAnaliseIa(call);
+      return;
+    }
+    if (currentStatus === "done" && !currentObservationId) {
+      setAnalysisFeedbackByCallId((prev) => ({
+        ...prev,
+        [call.id]: {
+          type: "info",
+          message: "Analise concluida sem observacao vinculada. Atualizando a tabela...",
+        },
+      }));
+      await loadCallsWithRetry("analysis-done-missing-observation", 2);
       return;
     }
     const canonicalCallId = String(call.storeCallId || call.id || "").trim();
@@ -2870,15 +3013,15 @@ export default function LigacoesPage() {
                     const recordingUrl = getCallRecordingUrl(call);
                     const analysisFeedback = analysisFeedbackByCallId[call.id];
                     const analysisStatus = resolveAnalysisStatus(call);
-                    const analysisDone = analysisStatus === "done";
-                    const analysisProcessing = analysisStatus === "processing";
+                    const analysisDone = isAnalysisReady(call);
+                    const analysisProcessing = analysisStatus === "processing" || (analysisStatus === "done" && !analysisDone);
                     const analysisErrored = analysisStatus === "error";
                     const analysisButtonLabel =
-                      analysisStatus === "processing"
+                      analysisProcessing
                         ? "Gerando análise..."
-                        : analysisStatus === "done"
+                        : analysisDone
                           ? "Ver análise"
-                          : analysisStatus === "error"
+                          : analysisErrored
                             ? "Tentar novamente"
                             : "Gerar análise";
                     return (

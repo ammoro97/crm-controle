@@ -254,12 +254,21 @@ function resolveDeterministicCallLog(
   };
 }
 
+function logReturn(status: number, reason: string, details?: Record<string, unknown>) {
+  console.log("[ANALISE_IA][RETORNO] RETURN", {
+    status,
+    reason,
+    ...(details || {}),
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const config = await getWebhookOutConfig();
     const expectedSecret = String(config.secret || "").trim();
     const receivedSecret = String(request.headers.get(CALL_ANALYSIS_SECRET_HEADER) || "").trim();
     if (expectedSecret && receivedSecret !== expectedSecret) {
+      logReturn(401, "invalid-secret-header");
       return NextResponse.json(
         {
           success: false,
@@ -281,6 +290,7 @@ export async function POST(request: Request) {
         code === "CALL_ANALYSIS_CALLBACK_SIGNATURE_REQUIRED" ||
         code === "CALL_ANALYSIS_CALLBACK_SIGNATURE_MISMATCH"
       ) {
+        logReturn(401, "invalid-callback-context-signature", { code });
         return NextResponse.json(
           {
             success: false,
@@ -290,6 +300,7 @@ export async function POST(request: Request) {
           { status: 401 },
         );
       }
+      logReturn(400, "invalid-callback-context", { code });
       return NextResponse.json(
         {
           success: false,
@@ -300,6 +311,7 @@ export async function POST(request: Request) {
       );
     }
     const body = (await request.json()) as AnalysisCallbackBody;
+    console.log("[ANALISE_IA][RETORNO] BODY_RECEIVED", body);
     let requestId = extractRequestId(body) || correlationContext?.requestId || "";
     const callbackCallId = extractCallId(body) || correlationContext?.callId || "";
     let callbackLeadId = extractLeadId(body) || correlationContext?.leadId || "";
@@ -319,6 +331,11 @@ export async function POST(request: Request) {
       if (callbackPhoneDigits && callbackPhoneDigits !== correlationContext.phoneDigits) mismatchReasons.push("phoneDigits");
       if (callbackLeadId && callbackLeadId !== correlationContext.leadId) mismatchReasons.push("leadId");
       if (mismatchReasons.length > 0) {
+        logReturn(409, "callback-context-mismatch", {
+          mismatchReasons,
+          requestId: requestId || null,
+          callbackCallId: callbackCallId || null,
+        });
         return NextResponse.json(
           {
             success: false,
@@ -341,6 +358,11 @@ export async function POST(request: Request) {
     });
 
     if (!requestId || !callbackCallId || !callbackPhoneDigits) {
+      logReturn(400, "missing-correlation-fields", {
+        requestId: requestId || null,
+        callbackCallId: callbackCallId || null,
+        callbackPhoneDigits: callbackPhoneDigits || null,
+      });
       return NextResponse.json(
         {
           success: false,
@@ -388,6 +410,12 @@ export async function POST(request: Request) {
         requestRecord = correlatedByCallAndPhone[0];
         requestId = requestRecord.requestId;
       } else if (correlatedByCallAndPhone.length > 1) {
+        logReturn(409, "ambiguous-request-by-call-phone", {
+          requestId: requestId || null,
+          callbackCallId: callbackCallId || null,
+          callbackPhoneDigits,
+          callbackLeadId: callbackLeadId || null,
+        });
         return NextResponse.json(
           {
             success: false,
@@ -414,6 +442,11 @@ export async function POST(request: Request) {
       const resolvedLeadId = String(callbackLeadId || callLog.leadId || "").trim();
       const resolvedPhoneDigits = callbackPhoneDigits || normalizeDigits(callLog.telefone || callLog.called || callLog.caller || "");
       if (!resolvedLeadId || !resolvedPhoneDigits) {
+        logReturn(409, "missing-safe-binding-on-synthetic-request", {
+          callbackCallId,
+          callbackPhoneDigits,
+          callbackLeadId: callbackLeadId || null,
+        });
         return NextResponse.json(
           {
             success: false,
@@ -447,6 +480,11 @@ export async function POST(request: Request) {
         reason: "requestId-not-found-fallback-by-call",
       });
     } else if (!requestRecord && matchedCallLogs.length > 1) {
+      logReturn(409, "ambiguous-calllog-by-call-phone", {
+        requestId: requestId || null,
+        callbackCallId: callbackCallId || null,
+        callbackPhoneDigits,
+      });
       return NextResponse.json(
         {
           success: false,
@@ -458,6 +496,11 @@ export async function POST(request: Request) {
     }
 
     if (!requestRecord) {
+      logReturn(404, "request-record-not-found", {
+        requestId: requestId || null,
+        callbackCallId: callbackCallId || null,
+        callbackPhoneDigits,
+      });
       return NextResponse.json(
         {
           success: false,
@@ -476,6 +519,13 @@ export async function POST(request: Request) {
       const existingObservation = await getCallAnalysisObservationByRequestId(requestId);
       const observationId = existingObservation?.id || requestRecord.observationId || null;
       const analysisTextFromStore = String(existingObservation?.content || requestRecord.analysisText || "").trim() || null;
+      console.log("[ANALISE_IA][RETORNO] UPDATE_CALL_BEFORE", {
+        branch: "already-done",
+        callId: requestRecord.callId,
+        requestId,
+        leadId: requestRecord.leadId,
+        observationId,
+      });
       await updateCall(requestRecord.callId, {
         externalCallId: requestRecord.externalCallId || callbackExternalCallId || null,
         sessionId: requestRecord.sessionId || callbackSessionId || null,
@@ -490,6 +540,19 @@ export async function POST(request: Request) {
         analysisPreview: analysisTextFromStore ? analysisTextFromStore.slice(0, 280) : null,
         aiAnalysis: analysisTextFromStore,
         analysisError: null,
+      });
+      console.log("[ANALISE_IA][RETORNO] UPDATE_CALL_AFTER", {
+        branch: "already-done",
+        callId: requestRecord.callId,
+        requestId,
+        leadId: requestRecord.leadId,
+        observationId,
+      });
+      logReturn(200, "already-processed", {
+        requestId,
+        callId: requestRecord.callId,
+        leadId: requestRecord.leadId,
+        observationId,
       });
       return NextResponse.json({
         success: true,
@@ -626,6 +689,12 @@ export async function POST(request: Request) {
         phoneDigits: requestRecord.phoneDigits,
         mismatches,
       });
+      logReturn(409, "correlation-mismatch", {
+        requestId,
+        callId: requestRecord.callId,
+        leadId: requestRecord.leadId,
+        mismatches,
+      });
       return NextResponse.json(
         {
           success: false,
@@ -653,6 +722,11 @@ export async function POST(request: Request) {
         analysisUpdatedAt: new Date().toISOString(),
         analysisError: errorMessage,
       });
+      logReturn(200, "external-processing-error-registered", {
+        requestId,
+        callId: requestRecord.callId,
+        leadId: requestRecord.leadId,
+      });
       return NextResponse.json({
         success: true,
         message: "Erro de processamento registrado com sucesso.",
@@ -661,6 +735,11 @@ export async function POST(request: Request) {
     }
 
     if (!analysisText.trim()) {
+      logReturn(400, "empty-analysis-content", {
+        requestId,
+        callId: requestRecord.callId,
+        leadId: requestRecord.leadId,
+      });
       return NextResponse.json(
         {
           success: false,
@@ -702,6 +781,13 @@ export async function POST(request: Request) {
     const canonicalPhone =
       String(callLog?.telefone || "").trim() || callbackPhoneDigits || requestRecord.phoneDigits || "";
 
+    console.log("[ANALISE_IA][RETORNO] UPDATE_CALL_BEFORE", {
+      branch: "final-done",
+      callId: canonicalCallLogId,
+      requestId,
+      leadId: requestRecord.leadId,
+      observationId: observation.id,
+    });
     await updateCall(canonicalCallLogId, {
       externalCallId: canonicalExternalCallId,
       sessionId: canonicalSessionId,
@@ -717,6 +803,13 @@ export async function POST(request: Request) {
       analysisPreview: analysisText.slice(0, 280),
       analysisError: null,
     });
+    console.log("[ANALISE_IA][RETORNO] UPDATE_CALL_AFTER", {
+      branch: "final-done",
+      callId: canonicalCallLogId,
+      requestId,
+      leadId: requestRecord.leadId,
+      observationId: observation.id,
+    });
     console.log("[ANALISE_IA] CALLBACK_SAVED", {
       requestId,
       callId: canonicalCallLogId,
@@ -726,6 +819,12 @@ export async function POST(request: Request) {
       sessionId: canonicalSessionId,
     });
 
+    logReturn(200, "analysis-saved-and-call-updated", {
+      requestId,
+      callId: requestRecord.callId,
+      leadId: requestRecord.leadId,
+      observationId: observation.id,
+    });
     return NextResponse.json({
       success: true,
       message: "Analise recebida e vinculada ao lead com sucesso.",
@@ -735,6 +834,9 @@ export async function POST(request: Request) {
       observationId: observation.id,
     });
   } catch (error) {
+    logReturn(500, "unhandled-error", {
+      detail: error instanceof Error ? error.message : "Erro desconhecido",
+    });
     return NextResponse.json(
       {
         success: false,
