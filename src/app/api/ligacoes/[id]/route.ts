@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CallAnalysisStatus } from "@/types/crm";
-import { getCallLogs, updateCall } from "@/lib/calls-store";
+import { getCallLogs, updateCall, upsertCallLog } from "@/lib/calls-store";
 
 type PatchCallBody = {
   analysisStatus?: CallAnalysisStatus;
@@ -11,6 +11,19 @@ type PatchCallBody = {
   analysisError?: string | null;
   analysisPreview?: string | null;
   aiAnalysis?: string | null;
+  externalCallId?: string | null;
+  sessionId?: string | null;
+  leadId?: string | null;
+  telefone?: string | null;
+  nome?: string | null;
+  empresa?: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  durationSeconds?: number | null;
+  status?: string | null;
+  gateway?: string | null;
+  recordUrl?: string | null;
+  sourceCallId?: string | null;
 };
 
 function normalizeAnalysisStatus(value?: string | null): CallAnalysisStatus | null {
@@ -28,6 +41,10 @@ function mapLegacyProcessingStatus(status: CallAnalysisStatus | null) {
   if (status === "error") return "error" as const;
   if (status === "idle") return "pending" as const;
   return undefined;
+}
+
+function normalizeDigits(value?: string | null) {
+  return String(value || "").replace(/\D/g, "");
 }
 
 export async function PATCH(
@@ -78,6 +95,14 @@ export async function PATCH(
       );
     }
 
+    const bodyExternalCallId = String(body.externalCallId || "").trim();
+    const bodySessionId = String(body.sessionId || "").trim();
+    const bodyLeadId = String(body.leadId || "").trim();
+    const bodyPhoneDigits = normalizeDigits(body.telefone);
+    const bodySourceCallId = String(body.sourceCallId || "").trim();
+    const bodyStartedAt = String(body.startedAt || "").trim();
+    const bodyStartedAtMinute = bodyStartedAt ? bodyStartedAt.slice(0, 16) : "";
+
     let targetCallId = callId;
     let updated;
     try {
@@ -88,16 +113,58 @@ export async function PATCH(
         throw updateError;
       }
       const calls = await getCallLogs();
-      const fallback = calls.find(
-        (entry) =>
-          String(entry.externalCallId || "").trim() === callId ||
-          String(entry.sessionId || "").trim() === callId,
-      );
-      if (!fallback) {
-        throw updateError;
+      const fallback =
+        calls.find((entry) => String(entry.externalCallId || "").trim() === callId) ||
+        calls.find((entry) => String(entry.sessionId || "").trim() === callId) ||
+        (bodyExternalCallId
+          ? calls.find((entry) => String(entry.externalCallId || "").trim() === bodyExternalCallId)
+          : undefined) ||
+        (bodySessionId
+          ? calls.find((entry) => String(entry.sessionId || "").trim() === bodySessionId)
+          : undefined) ||
+        (bodySourceCallId
+          ? calls.find(
+              (entry) =>
+                entry.id === bodySourceCallId ||
+                String(entry.externalCallId || "").trim() === bodySourceCallId,
+            )
+          : undefined) ||
+        calls.find((entry) => {
+          const entryLeadId = String(entry.leadId || "").trim();
+          const entryPhoneDigits = normalizeDigits(entry.telefone || entry.called || entry.caller || "");
+          const entryStartedAt = String(entry.startedAt || "").trim();
+          const entryStartedAtMinute = entryStartedAt ? entryStartedAt.slice(0, 16) : "";
+          if (!bodyLeadId || !bodyPhoneDigits || !bodyStartedAtMinute) return false;
+          return (
+            entryLeadId === bodyLeadId &&
+            entryPhoneDigits === bodyPhoneDigits &&
+            entryStartedAtMinute === bodyStartedAtMinute
+          );
+        });
+
+      if (fallback) {
+        targetCallId = fallback.id;
+        updated = await updateCall(targetCallId, patch);
+      } else {
+        const created = await upsertCallLog({
+          id: callId,
+          externalCallId: bodyExternalCallId || null,
+          sessionId: bodySessionId || null,
+          leadId: bodyLeadId || null,
+          telefone: String(body.telefone || "").trim(),
+          nome: String(body.nome || "").trim(),
+          empresa: String(body.empresa || "").trim(),
+          startedAt: body.startedAt || null,
+          endedAt: body.endedAt || null,
+          durationSeconds: Number(body.durationSeconds || 0),
+          status: String(body.status || "").trim() || "Nao atendida",
+          gateway: String(body.gateway || "").trim() || null,
+          recordUrl: String(body.recordUrl || "").trim() || null,
+          ...patch,
+        });
+        targetCallId = created.record.id;
+        updated = created.record;
       }
-      targetCallId = fallback.id;
-      updated = await updateCall(targetCallId, patch);
     }
 
     return NextResponse.json({
