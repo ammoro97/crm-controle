@@ -35,7 +35,7 @@ type RetornoBody = {
   [key: string]: unknown;
 };
 
-function normalizeExpediente(value?: string | null): "Aberto" | "Fechado" | "Indefinido" {
+function normalizeExpedienteString(value?: string | null): "Aberto" | "Fechado" | "Indefinido" {
   if (!value) return "Indefinido";
   const v = value.trim().toLowerCase();
   if (v === "aberto" || v === "open" || v === "aberto agora") return "Aberto";
@@ -46,6 +46,64 @@ function normalizeExpediente(value?: string | null): "Aberto" | "Fechado" | "Ind
 }
 
 type HorarioItem = { dia?: unknown; horario?: unknown };
+
+// Converte "7 AM" ou "8 PM" para minutos desde meia-noite
+function parseTimeToMinutes(timeStr: string): number | null {
+  const match = timeStr.trim().match(/^(\d+)(?::(\d+))?\s*(AM|PM)$/i);
+  if (!match) return null;
+  let hour = parseInt(match[1], 10);
+  const minutes = match[2] ? parseInt(match[2], 10) : 0;
+  const period = match[3].toUpperCase();
+  if (period === "PM" && hour !== 12) hour += 12;
+  if (period === "AM" && hour === 12) hour = 0;
+  return hour * 60 + minutes;
+}
+
+// Mapeia dia da semana JS (0=Dom..6=Sab) para nome em portugues
+const DIAS_PT = ["Domingo", "Segunda-feira", "Terca-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sabado"];
+
+function computeExpedienteFromHorarios(
+  horarios: HorarioItem[],
+): "Aberto" | "Fechado" | "Indefinido" {
+  // Usa horario de Brasilia (UTC-3) — Brazil nao tem horario de verao desde 2019
+  const nowBrasilia = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const dayIndex = nowBrasilia.getDay(); // 0=Dom, 6=Sab
+  const todayPt = DIAS_PT[dayIndex];
+  const currentMinutes = nowBrasilia.getHours() * 60 + nowBrasilia.getMinutes();
+
+  // Busca a entrada do dia atual (comparacao sem acento e case-insensitive)
+  const normalize = (s: string) =>
+    s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+  const entry = horarios.find((item) => normalize(String(item?.dia || "")) === normalize(todayPt));
+  if (!entry) return "Indefinido";
+
+  const horario = String(entry?.horario || "").trim();
+  if (!horario || horario.toLowerCase() === "closed") return "Fechado";
+
+  // Formato esperado: "7 AM to 8 PM"
+  const match = horario.match(/^(.+?)\s+to\s+(.+)$/i);
+  if (!match) return "Indefinido";
+
+  const start = parseTimeToMinutes(match[1]);
+  const end = parseTimeToMinutes(match[2]);
+  if (start === null || end === null) return "Indefinido";
+
+  return currentMinutes >= start && currentMinutes < end ? "Aberto" : "Fechado";
+}
+
+function resolveExpediente(
+  expedienteExplicito: string | null | undefined,
+  horarioRaw: unknown,
+): "Aberto" | "Fechado" | "Indefinido" {
+  // Se o payload ja traz expediente explicito, usa ele
+  if (expedienteExplicito) return normalizeExpedienteString(expedienteExplicito);
+  // Caso contrario, calcula a partir do horario_funcionamento
+  if (Array.isArray(horarioRaw) && horarioRaw.length > 0) {
+    return computeExpedienteFromHorarios(horarioRaw as HorarioItem[]);
+  }
+  return "Indefinido";
+}
 
 function normalizeHorarioFuncionamento(value: unknown): string | null {
   if (!value) return null;
@@ -128,7 +186,7 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
     nota: raw.nota != null ? raw.nota : null,
     avaliacoes: raw.avaliacoes != null ? raw.avaliacoes : null,
     horario_funcionamento: normalizeHorarioFuncionamento(raw.horario_funcionamento),
-    expediente: normalizeExpediente(raw.expediente),
+    expediente: resolveExpediente(raw.expediente, raw.horario_funcionamento),
     outboundQualification: {
       decisionContacts: [{ name: "", phone: "", email: "" }],
       whoAnswered: "",
