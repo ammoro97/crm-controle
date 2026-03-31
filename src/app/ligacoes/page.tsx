@@ -1784,12 +1784,23 @@ export default function LigacoesPage() {
       if (call.sessionId) query.set("sessionId", call.sessionId);
       if (call.analysisLeadId || call.leadId) query.set("leadId", String(call.analysisLeadId || call.leadId));
       if (call.analysisObservationId) query.set("analysisObservationId", String(call.analysisObservationId));
+      if (call.telefone) query.set("phone", call.telefone);
+      if (call.startedAt) query.set("startedAt", call.startedAt);
 
       const endpoint = `/api/ligacoes/${encodeURIComponent(canonicalCallId)}/analise${
         query.toString() ? `?${query.toString()}` : ""
       }`;
       const response = await fetch(endpoint);
       const payload = (await response.json().catch(() => null)) as ResolveAnaliseIaResponse | null;
+      console.log(`${LIGACOES_DEBUG_PREFIX} VIEW_ANALYSIS_RESOLVE`, {
+        callId: call.id,
+        canonicalCallId,
+        endpoint,
+        status: response.status,
+        success: payload?.success ?? false,
+        available: payload?.available ?? false,
+        code: payload?.code || null,
+      });
 
       if (!response.ok || !payload?.success) {
         setAnalysisFeedbackByCallId((prev) => ({
@@ -1807,6 +1818,11 @@ export default function LigacoesPage() {
       const isAvailable = payload.available && leadId && observationId;
 
       if (!isAvailable) {
+        console.warn(`${LIGACOES_DEBUG_PREFIX} VIEW_ANALYSIS_NOT_AVAILABLE`, {
+          callId: call.id,
+          canonicalCallId,
+          payload,
+        });
         setAnalysisFeedbackByCallId((prev) => ({
           ...prev,
           [call.id]: {
@@ -1822,8 +1838,19 @@ export default function LigacoesPage() {
       params.set("tab", "observacoes");
       params.set("highlightObservation", observationId);
       params.set("source", "ligacoes");
+      console.log(`${LIGACOES_DEBUG_PREFIX} VIEW_ANALYSIS_NAVIGATE`, {
+        callId: call.id,
+        leadId,
+        observationId,
+        url: `/leads?${params.toString()}`,
+      });
       router.push(`/leads?${params.toString()}`);
-    } catch {
+    } catch (error) {
+      console.error(`${LIGACOES_DEBUG_PREFIX} VIEW_ANALYSIS_ERROR`, {
+        callId: call.id,
+        canonicalCallId,
+        message: error instanceof Error ? error.message : "erro desconhecido",
+      });
       setAnalysisFeedbackByCallId((prev) => ({
         ...prev,
         [call.id]: {
@@ -3232,7 +3259,7 @@ export default function LigacoesPage() {
                                   (!analysisFeedback || analysisFeedback.message !== call.analysisError) ? (
                                     <p className="mt-1 text-xs text-rose-300">{call.analysisError}</p>
                                   ) : null}
-                                  {analysisFeedback && !analysisDone ? (
+                                  {analysisFeedback ? (
                                     <p
                                       className={`mt-1 text-xs ${
                                         analysisFeedback.type === "success"

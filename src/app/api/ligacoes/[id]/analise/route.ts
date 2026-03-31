@@ -12,6 +12,16 @@ function normalizeLookup(value?: string | null) {
   return String(value || "").trim();
 }
 
+function normalizeDigits(value?: string | null) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function getMinuteKey(value?: string | null) {
+  const raw = normalizeLookup(value);
+  if (!raw) return "";
+  return raw.slice(0, 16);
+}
+
 function toIsoDate(value?: string | null) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -61,6 +71,30 @@ function resolveCallByCandidates(
   return ordered[0] || null;
 }
 
+function resolveCallByPhoneMinute(params: {
+  calls: Awaited<ReturnType<typeof getCallLogs>>;
+  phoneDigits: string;
+  startedAtMinute: string;
+  fallbackLeadId?: string | null;
+}) {
+  const leadLookup = normalizeLookup(params.fallbackLeadId);
+  const matches = params.calls.filter((call) => {
+    const callPhone = normalizeDigits(call.telefone || call.called || call.caller || "");
+    const callMinute = getMinuteKey(call.startedAt || call.createdAt || "");
+    if (!callPhone || !callMinute) return false;
+    if (callPhone !== params.phoneDigits || callMinute !== params.startedAtMinute) return false;
+
+    if (!leadLookup) return true;
+    const callLeadId = normalizeLookup(call.analysisLeadId || call.leadId || "");
+    return Boolean(callLeadId) && callLeadId === leadLookup;
+  });
+
+  if (matches.length <= 1) return matches[0] || null;
+  return sortByNewest(matches, (call) =>
+    toIsoDate(call.analysisUpdatedAt || call.updatedAt || call.endedAt || call.startedAt || call.createdAt),
+  )[0];
+}
+
 function resolveObservationForCall(params: {
   leadId: string;
   callCandidates: string[];
@@ -107,6 +141,8 @@ export async function GET(
     const externalCallId = normalizeLookup(searchParams.get("externalCallId"));
     const sessionId = normalizeLookup(searchParams.get("sessionId"));
     const fallbackLeadId = normalizeLookup(searchParams.get("leadId"));
+    const phoneDigits = normalizeDigits(searchParams.get("phone"));
+    const startedAtMinute = getMinuteKey(searchParams.get("startedAt"));
 
     const calls = await getCallLogs();
     const callCandidates = buildCallCandidates({
@@ -114,7 +150,16 @@ export async function GET(
       externalCallId,
       sessionId,
     });
-    const resolvedCall = resolveCallByCandidates(calls, callCandidates);
+    const resolvedCall =
+      resolveCallByCandidates(calls, callCandidates) ||
+      (phoneDigits && startedAtMinute
+        ? resolveCallByPhoneMinute({
+            calls,
+            phoneDigits,
+            startedAtMinute,
+            fallbackLeadId,
+          })
+        : null);
 
     if (!resolvedCall) {
       return NextResponse.json(
@@ -192,4 +237,3 @@ export async function GET(
     );
   }
 }
-
