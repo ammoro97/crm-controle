@@ -143,6 +143,14 @@ export async function GET(
     const fallbackLeadId = normalizeLookup(searchParams.get("leadId"));
     const phoneDigits = normalizeDigits(searchParams.get("phone"));
     const startedAtMinute = getMinuteKey(searchParams.get("startedAt"));
+    console.log("[CALL_ANALYSIS_RESOLVE] REQUEST_RECEIVED", {
+      routeCallId,
+      externalCallId: externalCallId || null,
+      sessionId: sessionId || null,
+      fallbackLeadId: fallbackLeadId || null,
+      phoneDigits: phoneDigits || null,
+      startedAtMinute: startedAtMinute || null,
+    });
 
     const calls = await getCallLogs();
     const callCandidates = buildCallCandidates({
@@ -162,6 +170,13 @@ export async function GET(
         : null);
 
     if (!resolvedCall) {
+      console.warn("[CALL_ANALYSIS_RESOLVE] CALL_NOT_FOUND", {
+        routeCallId,
+        externalCallId: externalCallId || null,
+        sessionId: sessionId || null,
+        phoneDigits: phoneDigits || null,
+        startedAtMinute: startedAtMinute || null,
+      });
       return NextResponse.json(
         {
           success: false,
@@ -177,8 +192,19 @@ export async function GET(
       normalizeLookup(resolvedCall.analysisLeadId) ||
       normalizeLookup(resolvedCall.leadId) ||
       fallbackLeadId;
+    console.log("[CALL_ANALYSIS_RESOLVE] CALL_RESOLVED", {
+      resolvedCallId: resolvedCall.id,
+      resolvedExternalCallId: normalizeLookup(resolvedCall.externalCallId) || null,
+      resolvedSessionId: normalizeLookup(resolvedCall.sessionId) || null,
+      resolvedLeadId: resolvedLeadId || null,
+      analysisObservationId: normalizeLookup(resolvedCall.analysisObservationId) || null,
+      analysisRequestId: normalizeLookup(resolvedCall.analysisRequestId) || null,
+    });
 
     if (!resolvedLeadId) {
+      console.warn("[CALL_ANALYSIS_RESOLVE] LEAD_NOT_RESOLVED", {
+        resolvedCallId: resolvedCall.id,
+      });
       return NextResponse.json({
         success: true,
         available: false,
@@ -206,6 +232,11 @@ export async function GET(
       normalizeLookup(resolvedCall.analysisObservationId);
 
     if (!observationId) {
+      console.warn("[CALL_ANALYSIS_RESOLVE] OBSERVATION_NOT_FOUND", {
+        resolvedCallId: resolvedCall.id,
+        resolvedLeadId,
+        analysisObservationId: normalizeLookup(resolvedCall.analysisObservationId) || null,
+      });
       return NextResponse.json({
         success: true,
         available: false,
@@ -219,6 +250,7 @@ export async function GET(
       observationId,
       callId: resolvedCall.id,
     };
+    console.log("[CALL_ANALYSIS_RESOLVE] SUCCESS", payload);
 
     return NextResponse.json({
       success: true,
