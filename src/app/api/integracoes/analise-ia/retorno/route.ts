@@ -8,7 +8,7 @@ import {
   saveCallAnalysisObservation,
   updateCallAnalysisRequest,
 } from "@/lib/call-analysis-store";
-import { getCallLogs, upsertCallLog } from "@/lib/calls-store";
+import { getCallLogs, updateCall, upsertCallLog } from "@/lib/calls-store";
 import { getWebhookOutConfig } from "@/lib/webhook-out-config-store";
 import { CALL_ANALYSIS_SECRET_HEADER } from "@/types/call-analysis";
 
@@ -472,8 +472,7 @@ export async function POST(request: Request) {
       const existingObservation = await getCallAnalysisObservationByRequestId(requestId);
       const observationId = existingObservation?.id || requestRecord.observationId || null;
       const analysisTextFromStore = String(existingObservation?.content || requestRecord.analysisText || "").trim() || null;
-      await upsertCallLog({
-        id: requestRecord.callId,
+      await updateCall(requestRecord.callId, {
         externalCallId: requestRecord.externalCallId || callbackExternalCallId || null,
         sessionId: requestRecord.sessionId || callbackSessionId || null,
         leadId: requestRecord.leadId,
@@ -699,8 +698,7 @@ export async function POST(request: Request) {
     const canonicalPhone =
       String(callLog?.telefone || "").trim() || callbackPhoneDigits || requestRecord.phoneDigits || "";
 
-    await upsertCallLog({
-      id: canonicalCallLogId,
+    await updateCall(canonicalCallLogId, {
       externalCallId: canonicalExternalCallId,
       sessionId: canonicalSessionId,
       leadId: requestRecord.leadId,

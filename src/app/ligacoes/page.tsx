@@ -703,21 +703,12 @@ function mapApiCallToRow(
 
 function resolveAnalysisStatus(call: {
   analysisStatus?: string | null;
-  processingStatus?: string | null;
-  analysisObservationId?: string | null;
 }): CallAnalysisStatus {
   const explicit = String(call.analysisStatus || "").trim().toLowerCase();
   if (explicit === "processing") return "processing";
   if (explicit === "done") return "done";
   if (explicit === "error") return "error";
   if (explicit === "idle") return "idle";
-
-  const legacy = String(call.processingStatus || "").trim().toLowerCase();
-  if (legacy === "processing") return "processing";
-  if (legacy === "done") return "done";
-  if (legacy === "error") return "error";
-
-  if (String(call.analysisObservationId || "").trim()) return "done";
   return "idle";
 }
 
@@ -735,14 +726,11 @@ function getCallAnalysisPriority(input: {
   analysisStatus?: string | null;
   analysisObservationId?: string | null;
   aiAnalysis?: string | null;
-  processingStatus?: string | null;
 }) {
   let score = 0;
   if (String(input.analysisObservationId || "").trim()) score += 100;
   const status = resolveAnalysisStatus({
     analysisStatus: (input.analysisStatus as CallAnalysisStatus | undefined) || undefined,
-    processingStatus: input.processingStatus || undefined,
-    analysisObservationId: input.analysisObservationId || undefined,
   });
   if (status === "done") score += 90;
   if (status === "processing") score += 30;
@@ -1025,7 +1013,6 @@ export default function LigacoesPage() {
   const [webhookOutError, setWebhookOutError] = useState<string | null>(null);
   const [analysisLoadingCallId, setAnalysisLoadingCallId] = useState<string | null>(null);
   const [analysisFeedbackByCallId, setAnalysisFeedbackByCallId] = useState<Record<string, AnalysisFeedbackEntry>>({});
-  const [analysisPollUntilMs, setAnalysisPollUntilMs] = useState(0);
   const hiddenCallIdsRef = useRef<Set<string>>(new Set());
 
   const [activeSession, setActiveSession] = useState<ActiveCallSession | null>(null);
@@ -1068,68 +1055,28 @@ export default function LigacoesPage() {
     setError(null);
 
     try {
-      const [externalResponse, internalResponse] = await Promise.all([
-        fetch("/api/api4com/calls", {
-          method: "GET",
-          cache: "no-store",
-          signal,
-        }),
-        fetch("/api/ligacoes", {
-          method: "GET",
-          cache: "no-store",
-          signal,
-        }),
-      ]);
-
-      const externalData = (await externalResponse.json()) as CallsApiResponse;
+      const internalResponse = await fetch("/api/ligacoes", {
+        method: "GET",
+        cache: "no-store",
+        signal,
+      });
       const internalData = (await internalResponse.json()) as InternalCallsApiResponse;
 
+      if (!internalResponse.ok || !internalData.success || !Array.isArray(internalData.calls)) {
+        throw new Error("CALLS_INTERNAL_LOAD_FAILED");
+      }
+
       const internalMapById = new Map<string, CallLog>();
-      const internalMapByLookup = new Map<string, CallLog>();
-      const registerLookup = (key: string, item: CallLog) => {
-        const normalized = String(key || "").trim();
-        if (!normalized) return;
-        const current = internalMapByLookup.get(normalized);
-        if (!current || shouldReplaceLookupRecord(current, item)) {
-          internalMapByLookup.set(normalized, item);
-        }
-      };
-      if (internalResponse.ok && internalData.success && Array.isArray(internalData.calls)) {
-        for (const item of internalData.calls) {
-          internalMapById.set(item.id, item);
-          const id = String(item.id || "").trim();
-          const external = String(item.externalCallId || "").trim();
-          const session = String(item.sessionId || "").trim();
-          registerLookup(id, item);
-          registerLookup(external, item);
-          registerLookup(session, item);
-        }
+      for (const item of internalData.calls) {
+        internalMapById.set(item.id, item);
       }
       setInternalById(internalMapById);
 
       const leadsIndexes = buildLeadsIndexes(leadsSnapshot);
       const wrapupsIndexes = buildWrapupsIndexes(wrapups);
-      const externalItems = externalResponse.ok && externalData.ok && Array.isArray(externalData.items) ? externalData.items : [];
-
-      const rows =
-        externalItems.length > 0
-          ? externalItems.map((item, index) =>
-                mapApiCallToRow(item, index, {
-                  leadsIndexes,
-                  internalByLookup: internalMapByLookup,
-                  wrapupsIndexes,
-                  responsavelById,
-                }),
-            )
-          : Array.from(internalMapById.values()).map((item) =>
-              mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),
-            );
-
-      if (!externalResponse.ok || !externalData.ok) {
-        setError(externalData.error || "Histórico externo indisponível. Exibindo ligações internas.");
-      } else {
-        setError(null);
-      }
+      const rows = Array.from(internalMapById.values()).map((item) =>
+        mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),
+      );
 
       rows.sort((a, b) => {
         const first = a.startedAt || "";
@@ -1138,13 +1085,12 @@ export default function LigacoesPage() {
       });
       const visibleRows = rows.filter((row) => !hiddenCallIdsRef.current.has(row.id));
       setCalls(visibleRows);
+      setError(null);
       console.log(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD SUCCESS`, {
         reason,
-        externalOk: externalResponse.ok && externalData.ok,
-        externalCount: externalItems.length,
         internalCount: internalMapById.size,
         renderedCount: visibleRows.length,
-        source: externalItems.length > 0 ? "api4com" : "internal-fallback",
+        source: "internal",
       });
       return true;
     } catch (requestError) {
@@ -1302,18 +1248,6 @@ export default function LigacoesPage() {
     }, 20000);
     return () => window.clearInterval(intervalId);
   }, []);
-
-  useEffect(() => {
-    const hasProcessingAnalysis = calls.some(
-      (call) => resolveAnalysisStatus(call) === "processing",
-    );
-    const shouldKeepPolling = Date.now() < analysisPollUntilMs;
-    if (!hasProcessingAnalysis && !shouldKeepPolling) return;
-    const intervalId = window.setInterval(() => {
-      void loadCallsWithRetry("analysis-processing-poll", 1);
-    }, 5000);
-    return () => window.clearInterval(intervalId);
-  }, [analysisPollUntilMs, calls]);
 
   useEffect(() => {
     let unmounted = false;
@@ -1522,60 +1456,8 @@ export default function LigacoesPage() {
   };
 
   const handleViewAnaliseIa = async (call: MappedCall) => {
-    let leadId = String(call.analysisLeadId || call.leadId || "").trim();
-    let observationId = getPersistedAnalysisObservationId(call);
-
-    if (!leadId || !observationId) {
-      try {
-        const response = await fetch("/api/ligacoes", {
-          method: "GET",
-          cache: "no-store",
-        });
-        const data = (await response.json()) as InternalCallsApiResponse;
-        if (response.ok && data.success && Array.isArray(data.calls)) {
-          const candidates = data.calls.filter((item) => {
-            const itemId = String(item.id || "").trim();
-            const itemExternal = String(item.externalCallId || "").trim();
-            const itemSession = String(item.sessionId || "").trim();
-            return (
-              itemId === call.id ||
-              itemExternal === call.id ||
-              (call.externalCallId && (itemId === call.externalCallId || itemExternal === call.externalCallId)) ||
-              (call.sessionId && itemSession === call.sessionId)
-            );
-          });
-          const sortedCandidates = [...candidates].sort((a, b) => {
-            const scoreDiff = getCallAnalysisPriority(b) - getCallAnalysisPriority(a);
-            if (scoreDiff !== 0) return scoreDiff;
-            const first = String(a.startedAt || a.createdAt || "");
-            const second = String(b.startedAt || b.createdAt || "");
-            return second.localeCompare(first);
-          });
-          const matched = sortedCandidates[0];
-          if (matched) {
-            leadId = leadId || String(matched.analysisLeadId || matched.leadId || "").trim();
-            const matchedObservationId = String(matched.analysisObservationId || "").trim();
-            if (matchedObservationId) observationId = matchedObservationId;
-            setCalls((prev) =>
-              prev.map((item) =>
-                item.id === call.id
-                  ? {
-                      ...item,
-                      leadId: leadId || item.leadId || null,
-                      analysisLeadId: leadId || item.analysisLeadId || item.leadId || null,
-                      analysisObservationId: matchedObservationId || item.analysisObservationId || null,
-                      analysisStatus: matchedObservationId ? "done" : item.analysisStatus,
-                      processingStatus: matchedObservationId ? "done" : item.processingStatus,
-                    }
-                  : item,
-              ),
-            );
-          }
-        }
-      } catch {
-        // noop
-      }
-    }
+    const leadId = String(call.analysisLeadId || call.leadId || "").trim();
+    const observationId = getPersistedAnalysisObservationId(call);
 
     if (!leadId || !observationId) {
       setAnalysisFeedbackByCallId((prev) => ({
@@ -1591,14 +1473,15 @@ export default function LigacoesPage() {
     const params = new URLSearchParams();
     params.set("leadId", leadId);
     params.set("tab", "observacoes");
-    params.set("observationId", observationId);
+    params.set("highlightObservation", observationId);
     params.set("source", "ligacoes");
     router.push(`/leads?${params.toString()}`);
   };
 
   const handleGenerateAnaliseIa = async (call: MappedCall) => {
     if (analysisLoadingCallId) return;
-    if (isAnalysisReady(call)) {
+    const currentStatus = resolveAnalysisStatus(call);
+    if (currentStatus === "done") {
       await handleViewAnaliseIa(call);
       return;
     }
@@ -1620,23 +1503,77 @@ export default function LigacoesPage() {
       ...prev,
       [call.id]: {
         type: "info",
-        message: "Gerando e enviando solicitacao para processamento externo...",
+        message: "Gerando análise...",
       },
     }));
-    setCalls((prev) =>
-      prev.map((item) =>
-        item.id === call.id
-          ? {
-              ...item,
-              analysisStatus: "processing",
-              processingStatus: "processing",
-              analysisLeadId: item.analysisLeadId || item.leadId || call.leadId || null,
-              analysisUpdatedAt: new Date().toISOString(),
-              analysisError: null,
-            }
-          : item,
-      ),
-    );
+
+    const processingAt = new Date().toISOString();
+    const processingPatch = {
+      analysisStatus: "processing",
+      analysisLeadId: call.analysisLeadId || call.leadId || null,
+      analysisUpdatedAt: processingAt,
+      analysisError: null,
+    } as const;
+    try {
+      const persistProcessingResponse = await fetch(`/api/ligacoes/${encodeURIComponent(call.id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(processingPatch),
+      });
+      const persistProcessingData = (await persistProcessingResponse.json().catch(() => ({}))) as {
+        success?: boolean;
+        message?: string;
+        detail?: string;
+        call?: CallLog;
+      };
+      if (!persistProcessingResponse.ok || !persistProcessingData.success) {
+        const persistErrorMessage =
+          persistProcessingData.message ||
+          persistProcessingData.detail ||
+          "Nao foi possivel marcar a ligacao como em processamento.";
+        setAnalysisFeedbackByCallId((prev) => ({
+          ...prev,
+          [call.id]: {
+            type: "error",
+            message: persistErrorMessage,
+          },
+        }));
+        setAnalysisLoadingCallId(null);
+        return;
+      }
+
+      setCalls((prev) =>
+        prev.map((item) =>
+          item.id === call.id
+            ? {
+                ...item,
+                analysisStatus: "processing",
+                processingStatus: "processing",
+                analysisLeadId:
+                  persistProcessingData.call?.analysisLeadId || item.analysisLeadId || item.leadId || call.leadId || null,
+                analysisUpdatedAt: persistProcessingData.call?.analysisUpdatedAt || processingAt,
+                analysisError: null,
+              }
+            : item,
+        ),
+      );
+    } catch (persistError) {
+      const persistErrorMessage =
+        persistError instanceof Error
+          ? persistError.message
+          : "Nao foi possivel marcar a ligacao como em processamento.";
+      setAnalysisFeedbackByCallId((prev) => ({
+        ...prev,
+        [call.id]: {
+          type: "error",
+          message: persistErrorMessage,
+        },
+      }));
+      setAnalysisLoadingCallId(null);
+      return;
+    }
 
     const recordingUrl = getCallRecordingUrl(call);
     const metadata =
@@ -1747,20 +1684,19 @@ export default function LigacoesPage() {
           message: "Solicitacao enviada. Aguarde o processamento para liberar Ver analise.",
         },
       }));
-      setAnalysisPollUntilMs(Date.now() + 120000);
       setCalls((prev) =>
         prev.map((item) =>
           item.id === call.id
             ? {
-                ...item,
-                analysisStatus: "processing",
-                processingStatus: "processing",
-                analysisRequestId: data.requestId || item.analysisRequestId || null,
-                analysisLeadId: item.analysisLeadId || item.leadId || call.leadId || null,
-                analysisUpdatedAt: new Date().toISOString(),
-                analysisError: null,
-              }
-            : item,
+              ...item,
+              analysisStatus: "processing",
+              processingStatus: "processing",
+              analysisRequestId: data.requestId || item.analysisRequestId || null,
+              analysisLeadId: item.analysisLeadId || item.leadId || call.leadId || null,
+              analysisUpdatedAt: new Date().toISOString(),
+              analysisError: null,
+            }
+          : item,
         ),
       );
       await loadCallsWithRetry("analysis-requested", 1);
@@ -1769,6 +1705,19 @@ export default function LigacoesPage() {
         requestError instanceof Error
           ? requestError.message
           : "Erro inesperado ao iniciar geracao da analise.";
+
+      void fetch(`/api/ligacoes/${encodeURIComponent(call.id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          analysisStatus: "error",
+          analysisUpdatedAt: new Date().toISOString(),
+          analysisError: `Nao foi possivel enviar analise. ${errorMessage}`,
+        }),
+      });
+
       setCalls((prev) =>
         prev.map((item) =>
           item.id === call.id
@@ -2728,18 +2677,18 @@ export default function LigacoesPage() {
                     const isSelected = selectedIds.includes(call.id);
                     const recordingUrl = getCallRecordingUrl(call);
                     const analysisFeedback = analysisFeedbackByCallId[call.id];
-                    const analysisBusy = analysisLoadingCallId === call.id;
-                    const analysisDone = isAnalysisReady(call);
                     const analysisStatus = resolveAnalysisStatus(call);
-                    const analysisProcessing = analysisStatus === "processing" || analysisBusy;
+                    const analysisDone = analysisStatus === "done";
+                    const analysisProcessing = analysisStatus === "processing";
                     const analysisErrored = analysisStatus === "error";
-                    const analysisButtonLabel = analysisDone
-                      ? "Ver análise"
-                      : analysisProcessing
+                    const analysisButtonLabel =
+                      analysisStatus === "processing"
                         ? "Gerando análise..."
-                        : analysisErrored
-                          ? "Tentar novamente"
-                          : "Gerar análise";
+                        : analysisStatus === "done"
+                          ? "Ver análise"
+                          : analysisStatus === "error"
+                            ? "Tentar novamente"
+                            : "Gerar análise";
                     return (
                       <Fragment key={call.id}>
                         <tr className="border-b border-border/70 text-sm text-slate-200 transition hover:bg-slate-900/40">
@@ -2876,7 +2825,7 @@ export default function LigacoesPage() {
                                       type="button"
                                       className="btn-primary mt-1 h-8 px-2.5 py-1 text-xs"
                                       onClick={() => void handleGenerateAnaliseIa(call)}
-                                      disabled={(analysisProcessing && !analysisDone) || (!webhookOutConfigured && !analysisDone)}
+                                      disabled={analysisProcessing || (!webhookOutConfigured && !analysisDone)}
                                     >
                                       {analysisButtonLabel}
                                     </button>

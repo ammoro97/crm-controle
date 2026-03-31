@@ -498,7 +498,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           : requestedTab === "qualificacao"
             ? "qualificacao"
             : "resumo";
-    const observationId = String(searchParams.get("observationId") || "").trim() || null;
+    const observationId =
+      String(searchParams.get("highlightObservation") || searchParams.get("observationId") || "").trim() || null;
     const queryKey = `${leadId}|${safeTab}|${observationId || ""}`;
     if (openedFromQueryRef.current === queryKey) return;
     openedFromQueryRef.current = queryKey;

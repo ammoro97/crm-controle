@@ -206,6 +206,39 @@ export async function upsertCallLog(
   return { record: merged, isNew: false };
 }
 
+export async function updateCall(
+  id: string,
+  patch: Partial<Omit<CallLog, "id" | "createdAt" | "updatedAt">>,
+): Promise<CallLog> {
+  const normalizedId = String(id || "").trim();
+  if (!normalizedId) {
+    throw new Error("CALL_LOG_ID_REQUIRED");
+  }
+
+  const logs = await ensureCallLogsCache();
+  const index = logs.findIndex((entry) => entry.id === normalizedId);
+  if (index < 0) {
+    throw new Error("CALL_LOG_NOT_FOUND");
+  }
+
+  const current = logs[index];
+  const now = new Date().toISOString();
+  const merged = normalizeCallLog({
+    ...current,
+    ...patch,
+    id: current.id,
+    externalCallId: patch.externalCallId ?? current.externalCallId ?? null,
+    sessionId: patch.sessionId ?? current.sessionId ?? null,
+    createdAt: current.createdAt,
+    updatedAt: now,
+  });
+
+  logs[index] = merged;
+  sortCallLogsInPlace(logs);
+  scheduleCallLogsFlush();
+  return merged;
+}
+
 export async function findLeadByPhone(phone?: string | null) {
   const normalized = normalizePhone(phone);
   if (!normalized) return null;
