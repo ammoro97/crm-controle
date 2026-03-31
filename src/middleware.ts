@@ -1,23 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const SESSION_COOKIE = "crm_auth_token";
-
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  // API routes handle their own auth via requireAuth()
-  if (pathname.startsWith("/api/")) return NextResponse.next();
-
-  // Public page
-  if (pathname.startsWith("/login")) return NextResponse.next();
-
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
-  if (!token) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
-  }
-
+// Auth de páginas é gerenciada client-side pelo AppShell (Supabase localStorage).
+// Auth de API é gerenciada server-side pelo requireAuth() em cada route handler.
+// Este middleware não bloqueia rotas para evitar conflito com o fluxo Supabase.
+export function middleware(_request: NextRequest) {
   return NextResponse.next();
 }
 
