@@ -1,4 +1,4 @@
-export const CALL_ANALYSIS_EVENT = "call.analysis.requested" as const;
+export const CALL_ANALYSIS_EVENT = "analisar" as const;
 export const CALL_ANALYSIS_RESULT_EVENT = "call.analysis.completed" as const;
 export const CALL_ANALYSIS_SECRET_HEADER = "x-webhook-secret" as const;
 

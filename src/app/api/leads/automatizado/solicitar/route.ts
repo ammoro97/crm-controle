@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/require-auth";
+import { getWebhookOutConfig, isWebhookOutConfigured } from "@/lib/webhook-out-config-store";
+import { CALL_ANALYSIS_SECRET_HEADER } from "@/types/call-analysis";
 import { Lead } from "@/types/crm";
+
+const CRM_EVENT_OUTBOUND = "outbound" as const;
 
 export type SolicitacaoApiPayload = {
   tipoAutomacao: "api";
@@ -165,21 +169,25 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
     }
 
-    const webhookUrl = String(
-      process.env.N8N_WEBHOOK_URL || process.env.N8N_WEBHOOK_SOLICITAR_URL || "",
-    ).trim();
-
-    if (!webhookUrl) {
+    const config = await getWebhookOutConfig();
+    if (!isWebhookOutConfigured(config)) {
       return NextResponse.json<SolicitacaoResponse>(
-        { success: false, message: "URL do webhook de automacao nao configurada. Verifique as variaveis de ambiente." },
-        { status: 500 },
+        { success: false, message: "Webhook de saida nao configurado. Configure em Configuracoes > Integracoes." },
+        { status: 400 },
       );
     }
 
-    const n8nResponse = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    const payload = { event: CRM_EVENT_OUTBOUND, ...body };
+
+    const n8nResponse = await fetch(config.url, {
+      method: config.method,
+      headers: {
+        "Content-Type": "application/json",
+        "x-crm-event": CRM_EVENT_OUTBOUND,
+        ...(config.secret ? { [CALL_ANALYSIS_SECRET_HEADER]: config.secret } : {}),
+      },
+      body: JSON.stringify(payload),
+      cache: "no-store",
     });
 
     if (!n8nResponse.ok) {
