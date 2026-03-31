@@ -1,5 +1,7 @@
 "use client";
 
+import { ReactNode } from "react";
+
 type PageTopbarProps = {
   title: string;
   addLabel?: string;
@@ -13,6 +15,7 @@ type PageTopbarProps = {
   actionsClassName?: string;
   searchClassName?: string;
   addButtonClassName?: string;
+  actionsSlot?: ReactNode;
 };
 
 export function PageTopbar({
@@ -28,6 +31,7 @@ export function PageTopbar({
   actionsClassName,
   searchClassName,
   addButtonClassName,
+  actionsSlot,
 }: PageTopbarProps) {
   return (
     <header className={`mb-6 panel px-5 py-4 ${className || ""}`}>
@@ -61,6 +65,7 @@ export function PageTopbar({
               {addLabel}
             </button>
           ) : null}
+          {actionsSlot}
         </div>
       </div>
     </header>
