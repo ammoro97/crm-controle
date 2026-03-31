@@ -1,0 +1,16 @@
+[CALL_ANALYSIS_RESOLVE] CALL_NOT_FOUND {
+  routeCallId: 'api4com-foo',
+  externalCallId: null,
+  sessionId: null,
+  phoneDigits: null,
+  startedAtMinute: null
+}
+^C^C at C:\Users\Usuário\Desktop\CLINICA\node_modules\next\dist\cli\next-dev.js:253:45
+    at new Promise (<anonymous>)
+    at startServer (C:\Users\Usuário\Desktop\CLINICA\node_modules\next\dist\cli\next-dev.js:221:16)
+    at runDevServer (C:\Users\Usuário\Desktop\CLINICA\node_modules\next\dist\cli\next-dev.js:355:23)
+    at Module.nextDev (C:\Users\Usuário\Desktop\CLINICA\node_modules\next\dist\cli\next-dev.js:363:11) {
+  errno: -4048,
+  code: 'EPERM',
+  syscall: 'spawn'
+}

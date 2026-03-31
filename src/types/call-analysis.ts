@@ -64,6 +64,16 @@ export type CallAnalysisObservationRecord = {
   leadId: string;
   callId: string;
   requestId: string;
+  source?: "analise_ia_ligacao";
+  metadata?: {
+    leadId: string;
+    callId: string;
+    requestId: string;
+    phoneDigits?: string | null;
+    externalCallId?: string | null;
+    sessionId?: string | null;
+    completedAt?: string | null;
+  } | null;
   owner: string;
   type: "analise ia";
   content: string;

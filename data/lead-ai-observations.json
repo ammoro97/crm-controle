@@ -1,0 +1,54 @@
+[
+  {
+    "id": "OBS-IA-1774955402079-3ku7j",
+    "requestId": "ANL-DIRECT-RETORNO-001",
+    "callId": "8fb52012-4b68-41df-8180-1a95f7869014",
+    "leadId": "L-1774783111392",
+    "owner": "Analise da IA",
+    "type": "analise ia",
+    "content": "Teste direto do endpoint de retorno para captura completa dos logs.",
+    "date": "2026-03-31",
+    "time": "08:10",
+    "createdAt": "2026-03-31T11:10:02.004Z",
+    "updatedAt": "2026-03-31T11:10:02.004Z"
+  },
+  {
+    "id": "OBS-IA-1774954735428-0ditc",
+    "requestId": "ANL-DEBUG-RETORNO-THIRD-CALL-001",
+    "callId": "b5a461d2-4434-4afc-a40a-781c4a27b07c",
+    "leadId": "L-1774783111392",
+    "owner": "Analise da IA",
+    "type": "analise ia",
+    "content": "Teste de callback para logs completos do endpoint retorno (terceira call).",
+    "date": "2026-03-31",
+    "time": "07:58",
+    "createdAt": "2026-03-31T10:58:55.355Z",
+    "updatedAt": "2026-03-31T10:58:55.355Z"
+  },
+  {
+    "id": "OBS-IA-1774954659909-z6xct",
+    "requestId": "ANL-DEBUG-RETORNO-SECOND-CALL-001",
+    "callId": "6a3a9330-5d54-4426-86c0-bcea81d743f3",
+    "leadId": "L-003",
+    "owner": "Analise da IA",
+    "type": "analise ia",
+    "content": "Teste de callback para logs completos do endpoint retorno.",
+    "date": "2026-03-31",
+    "time": "07:57",
+    "createdAt": "2026-03-31T10:57:39.909Z",
+    "updatedAt": "2026-03-31T10:57:39.909Z"
+  },
+  {
+    "id": "OBS-IA-1774954503723-73cio",
+    "requestId": "ANL-1774954434214-fh8wcy",
+    "callId": "94697e13-dbcf-41d8-895b-dc7a3a30eb2c",
+    "leadId": "L-1774783111392",
+    "owner": "Analise da IA",
+    "type": "analise ia",
+    "content": "Teste de analise para debug de callback (request existente).",
+    "date": "2026-03-31",
+    "time": "07:55",
+    "createdAt": "2026-03-31T10:55:03.673Z",
+    "updatedAt": "2026-03-31T10:55:03.673Z"
+  }
+]

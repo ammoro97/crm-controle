@@ -1,0 +1,7 @@
+{
+  "url": "https://n8n.caminhocomdeus.com.br/webhook/ligacao",
+  "secret": "token-opcional",
+  "method": "POST",
+  "enabled": true,
+  "updatedAt": "2026-03-31T11:19:06.976Z"
+}
