@@ -117,6 +117,20 @@ type GenerateAnaliseIaResponse = {
   callId?: string;
 };
 
+type ResolveAnaliseIaResponse = {
+  success: boolean;
+  available?: boolean;
+  message?: string;
+  error?: string;
+  code?: string;
+  detail?: string | null;
+  analysis?: {
+    leadId?: string;
+    observationId?: string;
+    callId?: string;
+  };
+};
+
 type AnalysisFeedbackEntry = {
   type: "success" | "error" | "info";
   message: string;
@@ -1091,6 +1105,7 @@ export default function LigacoesPage() {
   const [webhookOutLoading, setWebhookOutLoading] = useState(true);
   const [webhookOutError, setWebhookOutError] = useState<string | null>(null);
   const [analysisLoadingCallId, setAnalysisLoadingCallId] = useState<string | null>(null);
+  const [viewAnalysisLoadingCallId, setViewAnalysisLoadingCallId] = useState<string | null>(null);
   const [analysisFeedbackByCallId, setAnalysisFeedbackByCallId] = useState<Record<string, AnalysisFeedbackEntry>>({});
   const hiddenCallIdsRef = useRef<Set<string>>(new Set());
 
@@ -1740,26 +1755,85 @@ export default function LigacoesPage() {
   };
 
   const handleViewAnaliseIa = async (call: MappedCall) => {
-    const leadId = String(call.analysisLeadId || call.leadId || "").trim();
-    const observationId = getPersistedAnalysisObservationId(call);
+    if (viewAnalysisLoadingCallId === call.id) return;
 
-    if (!leadId || !observationId) {
+    const canonicalCallId = String(call.storeCallId || call.id || "").trim();
+    if (!canonicalCallId) {
       setAnalysisFeedbackByCallId((prev) => ({
         ...prev,
         [call.id]: {
-          type: "info",
-          message: "Análise ainda não disponível para visualização nesta ligação.",
+          type: "error",
+          message: "Ligacao sem identificador canônico para localizar análise.",
         },
       }));
       return;
     }
 
-    const params = new URLSearchParams();
-    params.set("leadId", leadId);
-    params.set("tab", "observacoes");
-    params.set("highlightObservation", observationId);
-    params.set("source", "ligacoes");
-    router.push(`/leads?${params.toString()}`);
+    setViewAnalysisLoadingCallId(call.id);
+    setAnalysisFeedbackByCallId((prev) => ({
+      ...prev,
+      [call.id]: {
+        type: "info",
+        message: "Buscando análise...",
+      },
+    }));
+
+    try {
+      const query = new URLSearchParams();
+      if (call.externalCallId) query.set("externalCallId", call.externalCallId);
+      if (call.sessionId) query.set("sessionId", call.sessionId);
+      if (call.analysisLeadId || call.leadId) query.set("leadId", String(call.analysisLeadId || call.leadId));
+      if (call.analysisObservationId) query.set("analysisObservationId", String(call.analysisObservationId));
+
+      const endpoint = `/api/ligacoes/${encodeURIComponent(canonicalCallId)}/analise${
+        query.toString() ? `?${query.toString()}` : ""
+      }`;
+      const response = await fetch(endpoint);
+      const payload = (await response.json().catch(() => null)) as ResolveAnaliseIaResponse | null;
+
+      if (!response.ok || !payload?.success) {
+        setAnalysisFeedbackByCallId((prev) => ({
+          ...prev,
+          [call.id]: {
+            type: "error",
+            message: payload?.message || "Nao foi possivel localizar a analise desta ligação.",
+          },
+        }));
+        return;
+      }
+
+      const leadId = String(payload.analysis?.leadId || "").trim();
+      const observationId = String(payload.analysis?.observationId || "").trim();
+      const isAvailable = payload.available && leadId && observationId;
+
+      if (!isAvailable) {
+        setAnalysisFeedbackByCallId((prev) => ({
+          ...prev,
+          [call.id]: {
+            type: "info",
+            message: payload.message || "Análise ainda não disponível para visualização nesta ligação.",
+          },
+        }));
+        return;
+      }
+
+      const params = new URLSearchParams();
+      params.set("leadId", leadId);
+      params.set("tab", "observacoes");
+      params.set("highlightObservation", observationId);
+      params.set("source", "ligacoes");
+      router.push(`/leads?${params.toString()}`);
+    } catch {
+      setAnalysisFeedbackByCallId((prev) => ({
+        ...prev,
+        [call.id]: {
+          type: "error",
+          message: "Nao foi possivel localizar a analise desta ligação.",
+        },
+      }));
+    } finally {
+      setViewAnalysisLoadingCallId((prev) => (prev === call.id ? null : prev));
+    }
   };
 
   const handleGenerateAnaliseIa = async (call: MappedCall) => {
@@ -2997,6 +3071,7 @@ export default function LigacoesPage() {
                     const analysisFeedback = analysisFeedbackByCallId[call.id];
                     const analysisDone = isAnalysisReady(call);
                     const analysisProcessing = analysisLoadingCallId === call.id;
+                    const analysisViewLoading = viewAnalysisLoadingCallId === call.id;
                     return (
                       <Fragment key={call.id}>
                         <tr className="border-b border-border/70 text-sm text-slate-200 transition hover:bg-slate-900/40">
@@ -3139,8 +3214,9 @@ export default function LigacoesPage() {
                                       type="button"
                                       className="btn-ghost h-8 px-2.5 py-1 text-xs"
                                       onClick={() => void handleViewAnaliseIa(call)}
+                                      disabled={analysisViewLoading}
                                     >
-                                      Ver análise
+                                      {analysisViewLoading ? "Abrindo..." : "Ver análise"}
                                     </button>
                                   </div>
                                   {webhookOutLoading ? (
