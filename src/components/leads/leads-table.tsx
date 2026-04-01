@@ -75,6 +75,21 @@ function isDialablePhone(value?: string | null): boolean {
   return digits.length >= 8;
 }
 
+function normalizePhoneDigits(value?: string | null): string {
+  return normalizePhoneValue(value).replace(/\D/g, "");
+}
+
+function isSamePhoneValue(left?: string | null, right?: string | null): boolean {
+  const leftDigits = normalizePhoneDigits(left);
+  const rightDigits = normalizePhoneDigits(right);
+  if (leftDigits && rightDigits) return leftDigits === rightDigits;
+  return normalizePhoneValue(left).toLowerCase() === normalizePhoneValue(right).toLowerCase();
+}
+
+function getDialablePhoneItemsForLead(lead: Lead) {
+  return getLeadPhoneItems(lead).filter((item) => isDialablePhone(item.value));
+}
+
 function extractDialCallId(payload: unknown): string | undefined {
   const tryReadId = (value: unknown): string | undefined => {
     if (!value || typeof value !== "object") return undefined;
@@ -324,23 +339,22 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
   };
 
   const requestDial = (lead: Lead, preferredPhone?: string) => {
-    if (preferredPhone) {
-      void callLead(lead, preferredPhone);
-      return;
-    }
-
-    const phones = getLeadPhones(lead);
-    if (phones.length === 0) {
+    const dialablePhoneItems = getDialablePhoneItemsForLead(lead);
+    if (dialablePhoneItems.length === 0) {
       setCallFeedback(lead.id, { type: "error", message: "Lead sem telefone para discagem." });
       return;
     }
-    if (phones.length === 1) {
-      void callLead(lead, phones[0]);
+
+    if (dialablePhoneItems.length === 1) {
+      void callLead(lead, dialablePhoneItems[0].value);
       return;
     }
 
+    const preferredValidPhone = preferredPhone
+      ? dialablePhoneItems.find((item) => isSamePhoneValue(item.value, preferredPhone))?.value
+      : "";
     setPhonePickerLead(lead);
-    setSelectedDialPhone(phones[0]);
+    setSelectedDialPhone(preferredValidPhone || dialablePhoneItems[0].value);
   };
 
   useEffect(() => {
@@ -767,7 +781,12 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
         {phonePickerLead ? (
           <div className="space-y-3">
             {(() => {
-              const phoneItems = getLeadPhoneItems(phonePickerLead);
+              const phoneItems = getDialablePhoneItemsForLead(phonePickerLead);
+              const fallbackPrimaryPhone = phoneItems[0]?.value || "";
+              const configuredPrimaryPhone = isDialablePhone(phonePickerLead.phone)
+                ? String(phonePickerLead.phone)
+                : fallbackPrimaryPhone;
+              const hasSelectedDialPhone = phoneItems.some((item) => isSamePhoneValue(item.value, selectedDialPhone));
               return (
                 <>
             <p className="text-sm text-slate-200">
@@ -780,22 +799,46 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                 value={selectedDialPhone}
                 onChange={(event) => setSelectedDialPhone(event.target.value)}
               >
-                {phoneItems.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.value} - {phoneQualityLabel(item.quality)}
-                  </option>
-                ))}
+                {phoneItems.length === 0 ? <option value="">Nenhum telefone valido</option> : null}
+                {phoneItems.map((item) => {
+                  const isPrimary = isSamePhoneValue(item.value, configuredPrimaryPhone);
+                  return (
+                    <option key={item.value} value={item.value}>
+                      {item.value} - {phoneQualityLabel(item.quality)}
+                      {isPrimary ? " - Principal" : ""}
+                    </option>
+                  );
+                })}
               </select>
             </label>
             <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-border bg-slate-950/50 p-2">
-              {phoneItems.map((item) => (
-                <div key={`phone-quality-${item.value}`} className="flex items-center justify-between gap-2 text-xs text-slate-200">
-                  <span className="font-mono">{item.value}</span>
-                  <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] ${phoneQualityBadgeClass(item.quality)}`}>
-                    {phoneQualityLabel(item.quality)}
-                  </span>
-                </div>
-              ))}
+              {phoneItems.length === 0 ? (
+                <p className="text-xs text-slate-400">Nenhum telefone valido para discagem neste lead.</p>
+              ) : (
+                phoneItems.map((item) => {
+                  const isPrimary = isSamePhoneValue(item.value, configuredPrimaryPhone);
+                  return (
+                    <div
+                      key={`phone-quality-${item.value}`}
+                      className="flex items-center justify-between gap-2 text-xs text-slate-200"
+                    >
+                      <span className="font-mono">{item.value}</span>
+                      <div className="flex items-center gap-1.5">
+                        {isPrimary ? (
+                          <span className="rounded-full border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] text-sky-200">
+                            Principal
+                          </span>
+                        ) : null}
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] ${phoneQualityBadgeClass(item.quality)}`}
+                        >
+                          {phoneQualityLabel(item.quality)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -812,13 +855,15 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                 type="button"
                 className="btn-primary h-9 px-3 py-1.5 text-xs"
                 onClick={() => {
-                  if (!phonePickerLead || !selectedDialPhone) return;
+                  const selectedPhone = phoneItems.find((item) => isSamePhoneValue(item.value, selectedDialPhone));
+                  if (!phonePickerLead || !selectedPhone) return;
                   const lead = phonePickerLead;
-                  const phone = selectedDialPhone;
+                  const phone = selectedPhone.value;
                   setPhonePickerLead(null);
                   setSelectedDialPhone("");
                   void callLead(lead, phone);
                 }}
+                disabled={!hasSelectedDialPhone}
                 >
                   Iniciar ligacao
                 </button>
