@@ -531,6 +531,25 @@ function readWebhookOutClientConfig(): WebhookOutClientConfig | null {
 function parseDuration(value: unknown): number {
   const asNumber = Number(value);
   if (Number.isFinite(asNumber) && asNumber >= 0) return asNumber;
+  // Parse HH:MM:SS or MM:SS string format (API4com returns "00:00:06")
+  if (typeof value === "string") {
+    const parts = value.trim().split(":");
+    if (parts.length === 3) {
+      const h = Number(parts[0]);
+      const m = Number(parts[1]);
+      const s = Number(parts[2]);
+      if (Number.isFinite(h) && Number.isFinite(m) && Number.isFinite(s)) {
+        return h * 3600 + m * 60 + s;
+      }
+    }
+    if (parts.length === 2) {
+      const m = Number(parts[0]);
+      const s = Number(parts[1]);
+      if (Number.isFinite(m) && Number.isFinite(s)) {
+        return m * 60 + s;
+      }
+    }
+  }
   return 0;
 }
 
@@ -610,7 +629,7 @@ function humanizeHangupCause(value: string): string {
   if (lower.includes("busy")) return "Ocupado";
   if (lower.includes("cancel")) return "Cancelada";
   if (lower.includes("no answer") || lower.includes("no-answer")) return "Sem resposta";
-  if (lower.includes("normal")) return "Atendida";
+  if (lower.includes("normal") || lower === "atendida") return "Atendida";
 
   return normalized
     .replace(/_/g, " ")
