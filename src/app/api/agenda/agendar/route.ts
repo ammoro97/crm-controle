@@ -11,6 +11,7 @@ import {
   ScheduleMeetingLike,
   hasOwnerTimeConflict,
   hasReservationConflict,
+  isPastScheduleDateTime,
   isValidHalfHourSlot,
   isValidIsoDate,
   normalizeOwnerKey,
@@ -175,9 +176,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const now = new Date();
-    const target = new Date(`${date}T${time}:00`);
-    if (Number.isNaN(target.getTime()) || target.getTime() < now.getTime()) {
+    if (isPastScheduleDateTime(date, time)) {
       return NextResponse.json<ScheduleResponse>(
         {
           success: false,

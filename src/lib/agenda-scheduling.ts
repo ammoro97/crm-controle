@@ -1,5 +1,5 @@
 import { AgendaBlocks } from "@/components/agenda/agenda-types";
-import { getBlockingInfo, isPastDateTime } from "@/components/agenda/agenda-utils";
+import { getBlockingInfo } from "@/components/agenda/agenda-utils";
 
 export type ScheduleMeetingLike = {
   id?: string;
@@ -26,6 +26,8 @@ export const FULL_DAY_HALF_HOUR_SLOTS = Array.from({ length: 48 }).map((_, index
   return `${hour}:${minute}`;
 });
 
+export const AGENDA_DEFAULT_TIME_ZONE = "America/Sao_Paulo";
+
 export function normalizeOwnerKey(value?: string | null) {
   return String(value || "").trim().toLowerCase();
 }
@@ -50,6 +52,67 @@ export function isValidHalfHourSlot(value: string) {
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return false;
   if (hours < 0 || hours > 23) return false;
   return minutes === 0 || minutes === 30;
+}
+
+type TimeZoneNowParts = {
+  dateIso: string;
+  secondsInDay: number;
+};
+
+function getTimeZoneNowParts(referenceDate: Date, timeZone: string): TimeZoneNowParts | null {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+
+  const parts = formatter.formatToParts(referenceDate);
+  const year = parts.find((item) => item.type === "year")?.value || "";
+  const month = parts.find((item) => item.type === "month")?.value || "";
+  const day = parts.find((item) => item.type === "day")?.value || "";
+  const rawHour = Number(parts.find((item) => item.type === "hour")?.value || "0");
+  const hour = rawHour === 24 ? 0 : rawHour;
+  const minute = Number(parts.find((item) => item.type === "minute")?.value || "0");
+  const second = Number(parts.find((item) => item.type === "second")?.value || "0");
+
+  if (!year || !month || !day) return null;
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || !Number.isFinite(second)) return null;
+
+  return {
+    dateIso: `${year}-${month}-${day}`,
+    secondsInDay: hour * 3600 + minute * 60 + second,
+  };
+}
+
+export function isPastScheduleDateTime(
+  dateIso: string,
+  time: string,
+  options?: {
+    referenceDate?: Date;
+    timeZone?: string;
+  },
+) {
+  if (!isValidIsoDate(dateIso) || !isValidHalfHourSlot(time)) return false;
+
+  const referenceDate = options?.referenceDate ?? new Date();
+  const timeZone = options?.timeZone ?? AGENDA_DEFAULT_TIME_ZONE;
+  const nowParts = getTimeZoneNowParts(referenceDate, timeZone);
+  if (!nowParts) return false;
+
+  if (dateIso < nowParts.dateIso) return true;
+  if (dateIso > nowParts.dateIso) return false;
+
+  return timeToMinutes(time) * 60 < nowParts.secondsInDay;
+}
+
+function timeToMinutes(value: string): number {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
 }
 
 export function hasOwnerTimeConflict(
@@ -113,7 +176,7 @@ export function buildAvailableSlotsForDate(args: {
   } = args;
 
   return FULL_DAY_HALF_HOUR_SLOTS.filter((slot) => {
-    if (isPastDateTime(date, slot, referenceDate)) return false;
+    if (isPastScheduleDateTime(date, slot, { referenceDate })) return false;
     if (blocks && getBlockingInfo(date, slot, blocks)) return false;
     if (hasOwnerTimeConflict(meetings, date, slot, owner, { ignoreSessionId })) return false;
     if (hasReservationConflict(reservations, date, slot, owner, ignoreSessionId)) return false;
