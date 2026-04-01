@@ -720,7 +720,12 @@ function mapApiCallToRow(
     metadataTelefone ||
     String(item.telefone ?? item.to ?? "-").trim() ||
     "-";
-  const resolvedStatus = internal?.status || status;
+  // When live API data shows duration > 0, the call was answered — don't let a
+  // stale internal record (written by webhook before the HH:MM:SS parse fix) override it.
+  const internalStatusWrong =
+    durationSeconds > 0 &&
+    (internal?.status === "Nao atendida" || internal?.status === "Não atendida");
+  const resolvedStatus = internalStatusWrong ? status : (internal?.status || status);
   const resolvedStartedAt = internal?.startedAt || startedAt;
 
   let matchSource: "sessionId" | "externalCallId" | "callId" | null = null;

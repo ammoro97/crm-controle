@@ -53,6 +53,29 @@ function toNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+// API4com can send duration as "HH:MM:SS" string instead of numeric seconds
+function parseDurationSeconds(value: unknown): number {
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber) && asNumber >= 0) return asNumber;
+  if (typeof value === "string") {
+    const parts = value.trim().split(":");
+    if (parts.length === 3) {
+      const h = Number(parts[0]);
+      const m = Number(parts[1]);
+      const s = Number(parts[2]);
+      if (Number.isFinite(h) && Number.isFinite(m) && Number.isFinite(s)) {
+        return h * 3600 + m * 60 + s;
+      }
+    }
+    if (parts.length === 2) {
+      const m = Number(parts[0]);
+      const s = Number(parts[1]);
+      if (Number.isFinite(m) && Number.isFinite(s)) return m * 60 + s;
+    }
+  }
+  return 0;
+}
+
 function extractEventType(payload: Api4ComWebhookPayload) {
   return String(payload.eventType || payload.event_type || "").trim();
 }
@@ -117,7 +140,7 @@ export async function POST(request: Request) {
     const startedAt = toIsoMaybe(payload.startedAt || payload.started_at || null);
     const answeredAt = toIsoMaybe(payload.answeredAt || payload.answered_at || null);
     const endedAt = toIsoMaybe(payload.endedAt || payload.ended_at || null);
-    const durationSeconds = toNumber(payload.duration || payload.billsec || 0);
+    const durationSeconds = parseDurationSeconds(payload.duration ?? payload.billsec ?? 0);
     const hangupCause = String(payload.hangupCause || payload.hangup_cause || "").trim() || null;
     const hangupCauseCode = String(payload.hangupCauseCode || payload.hangup_cause_code || "").trim() || null;
     const recordUrl = String(payload.recordUrl || payload.recording_url || "").trim() || null;
