@@ -858,7 +858,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         });
         const data = (await response.json()) as AutomationApiResponse;
         if (response.ok && data.success && data.leads && data.leads.length > 0) {
-          setLeads((prev) => [...prev, ...data.leads!.map(normalizeLead)]);
+          setLeads((prev) => {
+            const existingIds = new Set(prev.map((l) => l.id));
+            const incoming = data.leads!.map(normalizeLead).filter((l) => !existingIds.has(l.id));
+            return incoming.length > 0 ? [...prev, ...incoming] : prev;
+          });
           setAutomationLeadsCount(data.leads.length);
           setAutomationStep("sucesso");
           return;
@@ -904,7 +908,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           });
           const data = (await response.json()) as AutomationApiResponse;
           if (response.ok && data.success && data.leads && data.leads.length > 0) {
-            setLeads((prev) => [...prev, ...data.leads!.map(normalizeLead)]);
+            setLeads((prev) => {
+              const existingIds = new Set(prev.map((l) => l.id));
+              const incoming = data.leads!.map(normalizeLead).filter((l) => !existingIds.has(l.id));
+              return incoming.length > 0 ? [...prev, ...incoming] : prev;
+            });
           }
         } catch {
           // Ignore poll failures silently
