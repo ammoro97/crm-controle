@@ -1,9 +1,11 @@
 "use client";
 
-import { FormEvent } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import { inferAgendaChannelFromType, inferAgendaEventTypeFromReason } from "@/lib/agenda-events";
-import { CallReason, Meeting } from "@/types/crm";
+import { getLeadsSnapshot, subscribeLeadsSnapshot } from "@/lib/crm-data-store";
+import { getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
+import { CallReason, Lead, Meeting } from "@/types/crm";
 
 type AppointmentModalProps = {
   open: boolean;
@@ -16,6 +18,23 @@ type AppointmentModalProps = {
 
 const reasonOptions: CallReason[] = ["apresentacao", "acompanhamento", "fechamento", "follow-up"];
 
+type LeadSearchItem = {
+  id: string;
+  displayName: string;
+  company: string;
+  phones: string[];
+  emails: string[];
+  searchText: string;
+};
+
+function normalizeText(value?: string | null) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 export function AppointmentModal({
   open,
   isNew,
@@ -24,19 +43,132 @@ export function AppointmentModal({
   onChange,
   onSubmit,
 }: AppointmentModalProps) {
+  const [leads, setLeads] = useState<Lead[]>(() => getLeadsSnapshot());
+  const [query, setQuery] = useState("");
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const sync = () => setLeads(getLeadsSnapshot());
+    sync();
+    return subscribeLeadsSnapshot(sync);
+  }, []);
+
+  useEffect(() => {
+    if (!meeting) {
+      setQuery("");
+      setDropdownOpen(false);
+      return;
+    }
+    setQuery(meeting.personName || "");
+    setDropdownOpen(false);
+  }, [meeting?.id, open]);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!searchContainerRef.current) return;
+      if (searchContainerRef.current.contains(event.target as Node)) return;
+      setDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [dropdownOpen]);
+
+  const leadSearchItems = useMemo<LeadSearchItem[]>(() => {
+    return leads.map((lead) => {
+      const names = getLeadNames(lead);
+      const displayName = String(names[0] || lead.name || lead.company || "").trim() || "Lead sem nome";
+      const company = String(lead.company || "").trim();
+      const phones = getLeadPhones(lead);
+      const emails = getLeadEmails(lead);
+      const searchText = normalizeText(
+        [
+          displayName,
+          ...names,
+          company,
+          ...phones,
+          ...emails,
+          lead.phone || "",
+          lead.email || "",
+        ].join(" "),
+      );
+      return {
+        id: lead.id,
+        displayName,
+        company,
+        phones,
+        emails,
+        searchText,
+      };
+    });
+  }, [leads]);
+
+  const filteredLeadItems = useMemo(() => {
+    const normalizedQuery = normalizeText(query);
+    if (!normalizedQuery) return [];
+    return leadSearchItems.filter((item) => item.searchText.includes(normalizedQuery)).slice(0, 12);
+  }, [leadSearchItems, query]);
+
+  const shouldShowDropdown = dropdownOpen && query.trim().length > 0;
+
   return (
     <Modal title={isNew ? "Novo Agendamento" : "Detalhes do Agendamento"} open={open} onClose={onClose}>
       {meeting ? (
         <form className="space-y-4" onSubmit={onSubmit}>
-          <label className="block text-sm">
-            Nome do cliente
-            <input
-              className="field mt-1"
-              value={meeting.personName}
-              onChange={(e) => onChange({ ...meeting, personName: e.target.value })}
-              required
-            />
-          </label>
+          <div className="relative" ref={searchContainerRef}>
+            <label className="block text-sm">
+              Nome do cliente
+              <input
+                className="field mt-1"
+                value={query}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setQuery(value);
+                  setDropdownOpen(Boolean(value.trim()));
+                  onChange({
+                    ...meeting,
+                    personName: value,
+                    leadId: null,
+                  });
+                }}
+                onFocus={() => setDropdownOpen(Boolean(query.trim()))}
+                placeholder="Busque por nome, empresa, telefone ou e-mail"
+                autoComplete="off"
+                required
+              />
+            </label>
+            {shouldShowDropdown ? (
+              <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-900/95 p-1 shadow-xl">
+                {filteredLeadItems.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-slate-400">Nenhum lead encontrado para essa busca.</p>
+                ) : (
+                  filteredLeadItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="w-full rounded-md px-3 py-2 text-left transition hover:bg-slate-800"
+                      onClick={() => {
+                        setQuery(item.displayName);
+                        setDropdownOpen(false);
+                        onChange({
+                          ...meeting,
+                          personName: item.displayName,
+                          leadId: item.id,
+                        });
+                      }}
+                    >
+                      <p className="text-sm font-semibold text-slate-100">{item.displayName}</p>
+                      <p className="text-xs text-slate-300">{item.company || "Empresa nao informada"}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        {(item.phones[0] || "-")} | {(item.emails[0] || "-")}
+                      </p>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="text-sm">
               Data
