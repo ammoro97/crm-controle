@@ -9,7 +9,6 @@ const LEADS_CONTACT_FILE = "lead-last-contact-overrides.json";
 
 let callLogsCache: CallLog[] | null = null;
 let callLogsLoadPromise: Promise<CallLog[]> | null = null;
-let callLogsFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function sortCallLogsInPlace(logs: CallLog[]) {
   logs.sort((a, b) => {
@@ -133,12 +132,9 @@ async function flushCallLogsToDisk() {
   await writeDataFile(CALLS_FILE, callLogsCache);
 }
 
+// Flush imediato — em Vercel serverless setTimeout pode ser morto antes de disparar
 function scheduleCallLogsFlush() {
-  if (callLogsFlushTimer) return;
-  callLogsFlushTimer = setTimeout(async () => {
-    callLogsFlushTimer = null;
-    await flushCallLogsToDisk();
-  }, 180);
+  void flushCallLogsToDisk();
 }
 
 async function ensureCallLogsCache(): Promise<CallLog[]> {
