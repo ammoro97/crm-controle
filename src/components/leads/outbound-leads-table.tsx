@@ -63,6 +63,17 @@ function formatDateBR(value?: string | null): string {
   return `${day}/${month}/${year}`;
 }
 
+function normalizePhoneValue(value?: string | null): string {
+  return String(value || "").trim();
+}
+
+function isDialablePhone(value?: string | null): boolean {
+  const normalized = normalizePhoneValue(value);
+  if (!normalized || normalized === "-") return false;
+  const digits = normalized.replace(/\D/g, "");
+  return digits.length >= 8;
+}
+
 function formatNota(value?: number | string | null): string {
   if (value == null || value === "") return "-";
   const n = typeof value === "number" ? value : parseFloat(String(value));
@@ -462,36 +473,31 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
                 </td>
                 <td className="px-3 py-2.5 xl:px-3.5 2xl:py-2">
                   <div className="w-[19rem] max-w-[19rem] space-y-1.5">
-                    {phones.length === 0 ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-slate-500">-</span>
-                        <button
-                          type="button"
-                          className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                          disabled
-                          onClick={(event) => event.stopPropagation()}
+                    {(phones.length > 0 ? phones : [""]).map((phone, index) => {
+                      const displayPhone = normalizePhoneValue(phone) || "-";
+                      const canDialPhone = isDialablePhone(phone);
+                      return (
+                        <div
+                          key={`${lead.id}-phone-${displayPhone}-${index}`}
+                          className="flex items-center justify-between gap-2"
                         >
-                          {callingLeadId === lead.id ? "Ligando..." : "📞 Ligar"}
-                        </button>
-                      </div>
-                    ) : (
-                      phones.map((phone, index) => (
-                        <div key={`${lead.id}-phone-${phone}-${index}`} className="flex flex-wrap items-center gap-2">
-                          <TruncatedCellText value={phone} widthClass="w-[11.5rem] max-w-[11.5rem]" />
+                          <TruncatedCellText value={displayPhone} widthClass="w-[11.5rem] max-w-[11.5rem]" />
                           <button
                             type="button"
-                            className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                            disabled={callingLeadId === lead.id}
+                            className="min-w-[74px] rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={callingLeadId === lead.id || !canDialPhone}
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (!canDialPhone) return;
                               requestDial(lead, phone);
                             }}
+                            title={!canDialPhone ? "Telefone indisponivel para ligacao." : undefined}
                           >
-                            {callingLeadId === lead.id ? "Ligando..." : "📞 Ligar"}
+                            {callingLeadId === lead.id ? "Ligando..." : "Ligar"}
                           </button>
                         </div>
-                      ))
-                    )}
+                      );
+                    })}
                     {callFeedbackByLead[lead.id] ? (
                       <p
                         className={`text-[11px] ${
@@ -638,3 +644,4 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
     </div>
   );
 }
+
