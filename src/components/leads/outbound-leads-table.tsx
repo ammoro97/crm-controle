@@ -6,8 +6,15 @@ import { Modal } from "@/components/ui/modal";
 import { getLeadPhoneItems, getLeadPhones } from "@/lib/lead-contact-utils";
 import { resolveLeadExpedienteStatusFromHorario } from "@/lib/lead-expediente";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
-import { createDialSession, generateCallSessionId, resolveBlockingStateBeforeNewDial } from "@/lib/post-call-flow";
-import { Lead } from "@/types/crm";
+import {
+  createDialSession,
+  generateCallSessionId,
+  getPostCallWrapups,
+  resolveBlockingStateBeforeNewDial,
+  subscribePostCallFlow,
+  type PostCallWrapup,
+} from "@/lib/post-call-flow";
+import { CallLog, Lead } from "@/types/crm";
 import { TruncatedCellLink, TruncatedCellText } from "./table-cell-truncate";
 
 type OutboundLeadsTableProps = {
@@ -27,6 +34,25 @@ type DialApiResponse = {
 type CallFeedback = {
   type: "success" | "error";
   message: string;
+};
+
+type InternalCallsApiResponse = {
+  success?: boolean;
+  calls?: CallLog[];
+};
+
+type LeadInteractionMetrics = {
+  totalCalls: number;
+  totalFollowUps: number;
+  hasScheduledCall: boolean;
+  conversionDate: string | null;
+};
+
+type FollowUpChannel = "call" | "message" | "email" | "other";
+
+type FollowUpScheduleCandidate = {
+  date: string;
+  dateTime: Date;
 };
 
 const expedienteStyle: Record<"Aberto" | "Fechado" | "Indefinido", string> = {
@@ -121,6 +147,213 @@ function formatAvaliacoes(value?: number | string | null): string {
   return n.toLocaleString("pt-BR");
 }
 
+const EMPTY_INTERACTION_METRICS: LeadInteractionMetrics = {
+  totalCalls: 0,
+  totalFollowUps: 0,
+  hasScheduledCall: false,
+  conversionDate: null,
+};
+
+function normalizeText(value?: string | null): string {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function normalizeDigits(value?: string | null): string {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function normalizeLeadId(value?: string | null): string {
+  return String(value || "").trim();
+}
+
+function isIsoDate(value?: string | null): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
+}
+
+function parseHalfHourTime(value?: string | null): { hour: number; minute: number } | null {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour < 0 || hour > 23) return null;
+  if (minute < 0 || minute > 59) return null;
+  return { hour, minute };
+}
+
+function buildLocalDateTime(date?: string | null, time?: string | null): Date | null {
+  if (!isIsoDate(date)) return null;
+  const parsedTime = parseHalfHourTime(time);
+  if (!parsedTime) return null;
+
+  const [yearRaw, monthRaw, dayRaw] = String(date).split("-");
+  const year = Number(yearRaw);
+  const monthIndex = Number(monthRaw) - 1;
+  const day = Number(dayRaw);
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || !Number.isFinite(day)) return null;
+
+  const localDate = new Date(year, monthIndex, day, parsedTime.hour, parsedTime.minute, 0, 0);
+  if (Number.isNaN(localDate.getTime())) return null;
+  if (
+    localDate.getFullYear() !== year ||
+    localDate.getMonth() !== monthIndex ||
+    localDate.getDate() !== day ||
+    localDate.getHours() !== parsedTime.hour ||
+    localDate.getMinutes() !== parsedTime.minute
+  ) {
+    return null;
+  }
+
+  return localDate;
+}
+
+function resolveFollowUpChannel(nextAction?: string | null): FollowUpChannel {
+  const normalized = normalizeText(nextAction);
+  if (!normalized) return "other";
+  if (
+    normalized.includes("video") ||
+    normalized.includes("reuniao") ||
+    normalized.includes("ligacao") ||
+    normalized.includes("ligar") ||
+    normalized.includes("call")
+  ) {
+    return "call";
+  }
+  if (
+    normalized.includes("whatsapp") ||
+    normalized.includes("mensagem") ||
+    normalized.includes("retorno")
+  ) {
+    return "message";
+  }
+  if (normalized.includes("e-mail") || normalized.includes("email")) {
+    return "email";
+  }
+  return "other";
+}
+
+function buildLeadPhoneIndex(leads: Lead[]): Map<string, Set<string>> {
+  const byDigits = new Map<string, Set<string>>();
+  for (const lead of leads) {
+    const leadId = normalizeLeadId(lead.id);
+    if (!leadId) continue;
+    for (const phone of getLeadPhones(lead)) {
+      const digits = normalizeDigits(phone);
+      if (!digits) continue;
+      const current = byDigits.get(digits) || new Set<string>();
+      current.add(leadId);
+      byDigits.set(digits, current);
+    }
+  }
+  return byDigits;
+}
+
+function resolveLeadIdByPhone(
+  rawPhones: Array<string | null | undefined>,
+  leadPhoneIndex: Map<string, Set<string>>,
+): string | null {
+  const candidates = rawPhones.map((value) => normalizeDigits(value)).filter(Boolean);
+  if (candidates.length === 0) return null;
+
+  const exactMatches = new Set<string>();
+  for (const digits of candidates) {
+    const leadIds = leadPhoneIndex.get(digits);
+    if (!leadIds || leadIds.size !== 1) continue;
+    exactMatches.add(Array.from(leadIds)[0]);
+  }
+  if (exactMatches.size === 1) return Array.from(exactMatches)[0];
+
+  const fuzzyMatches = new Set<string>();
+  for (const digits of candidates) {
+    for (const [phoneDigits, leadIds] of leadPhoneIndex.entries()) {
+      if (!(phoneDigits.endsWith(digits) || digits.endsWith(phoneDigits))) continue;
+      for (const leadId of leadIds) fuzzyMatches.add(leadId);
+    }
+  }
+  if (fuzzyMatches.size === 1) return Array.from(fuzzyMatches)[0];
+
+  return null;
+}
+
+function buildLeadInteractionMetricsById(params: {
+  leads: Lead[];
+  calls: CallLog[];
+  wrapups: PostCallWrapup[];
+  referenceDate: Date;
+}): Record<string, LeadInteractionMetrics> {
+  const { leads, calls, wrapups, referenceDate } = params;
+  const metricsByLead: Record<string, LeadInteractionMetrics> = {};
+  const validLeadIds = new Set<string>();
+  const leadPhoneIndex = buildLeadPhoneIndex(leads);
+  const callFollowUpsByLead = new Map<string, FollowUpScheduleCandidate[]>();
+
+  for (const lead of leads) {
+    const leadId = normalizeLeadId(lead.id);
+    if (!leadId) continue;
+    validLeadIds.add(leadId);
+    metricsByLead[leadId] = { ...EMPTY_INTERACTION_METRICS };
+  }
+
+  for (const call of calls) {
+    const directLeadId = normalizeLeadId(call.leadId);
+    const resolvedLeadId =
+      (directLeadId && validLeadIds.has(directLeadId) ? directLeadId : null) ||
+      resolveLeadIdByPhone([call.telefone, call.called, call.caller], leadPhoneIndex);
+    if (!resolvedLeadId || !metricsByLead[resolvedLeadId]) continue;
+    metricsByLead[resolvedLeadId].totalCalls += 1;
+  }
+
+  for (const wrapup of wrapups) {
+    const directLeadId = normalizeLeadId(wrapup.leadId);
+    const resolvedLeadId =
+      (directLeadId && validLeadIds.has(directLeadId) ? directLeadId : null) ||
+      resolveLeadIdByPhone([wrapup.telefone], leadPhoneIndex);
+    if (!resolvedLeadId || !metricsByLead[resolvedLeadId]) continue;
+
+    const followUpDate = String(wrapup.followUpDate || "").trim();
+    const followUpTime = String(wrapup.followUpTime || "").trim();
+    const followUpDateTime = buildLocalDateTime(followUpDate, followUpTime);
+    if (!followUpDateTime) continue;
+
+    metricsByLead[resolvedLeadId].totalFollowUps += 1;
+
+    if (resolveFollowUpChannel(wrapup.nextAction) === "call") {
+      const current = callFollowUpsByLead.get(resolvedLeadId) || [];
+      current.push({
+        date: followUpDate,
+        dateTime: followUpDateTime,
+      });
+      callFollowUpsByLead.set(resolvedLeadId, current);
+    }
+  }
+
+  const referenceTimestamp = referenceDate.getTime();
+  for (const leadId of validLeadIds) {
+    const candidates = callFollowUpsByLead.get(leadId) || [];
+    if (candidates.length === 0) continue;
+
+    const futureCandidates = candidates
+      .filter((candidate) => candidate.dateTime.getTime() >= referenceTimestamp)
+      .sort((a, b) => a.dateTime.getTime() - b.dateTime.getTime());
+
+    if (futureCandidates.length > 0) {
+      metricsByLead[leadId].hasScheduledCall = true;
+      metricsByLead[leadId].conversionDate = futureCandidates[0].date;
+      continue;
+    }
+
+    const latestCandidate = [...candidates].sort((a, b) => b.dateTime.getTime() - a.dateTime.getTime())[0];
+    metricsByLead[leadId].conversionDate = latestCandidate?.date || null;
+  }
+
+  return metricsByLead;
+}
+
 function extractDialCallId(payload: unknown): string | undefined {
   const tryReadId = (value: unknown): string | undefined => {
     if (!value || typeof value !== "object") return undefined;
@@ -183,6 +416,20 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
   const [phonePickerLead, setPhonePickerLead] = useState<Lead | null>(null);
   const [selectedDialPhone, setSelectedDialPhone] = useState("");
   const [expedienteReferenceDate, setExpedienteReferenceDate] = useState<Date>(() => new Date());
+  const [metricsReferenceDate, setMetricsReferenceDate] = useState<Date>(() => new Date());
+  const [callLogs, setCallLogs] = useState<CallLog[]>([]);
+  const [leadWrapups, setLeadWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
+
+  const leadInteractionMetricsById = useMemo(
+    () =>
+      buildLeadInteractionMetricsById({
+        leads,
+        calls: callLogs,
+        wrapups: leadWrapups,
+        referenceDate: metricsReferenceDate,
+      }),
+    [callLogs, leadWrapups, leads, metricsReferenceDate],
+  );
 
   const tableRows = useMemo(
     () =>
@@ -192,8 +439,9 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
         expediente: resolveLeadExpedienteStatusFromHorario(lead.horario_funcionamento, {
           referenceDate: expedienteReferenceDate,
         }),
+        metrics: leadInteractionMetricsById[lead.id] || EMPTY_INTERACTION_METRICS,
       })),
-    [leads, expedienteReferenceDate],
+    [expedienteReferenceDate, leadInteractionMetricsById, leads],
   );
 
   const setCallFeedback = (leadId: string, feedback: CallFeedback) => {
@@ -332,8 +580,51 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const loadCallLogs = async () => {
+      try {
+        const response = await fetch("/api/ligacoes", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = (await response.json()) as InternalCallsApiResponse;
+        if (!response.ok || !data.success || !Array.isArray(data.calls)) return;
+        if (cancelled) return;
+        setCallLogs(data.calls);
+      } catch {
+        // Ignore transient loading failures and keep the last successful snapshot
+      }
+    };
+
+    void loadCallLogs();
+    const intervalId = window.setInterval(() => {
+      void loadCallLogs();
+    }, 45000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    setLeadWrapups(getPostCallWrapups());
+    return subscribePostCallFlow(() => {
+      setLeadWrapups(getPostCallWrapups());
+    });
+  }, []);
+
+  useEffect(() => {
     const intervalId = window.setInterval(() => {
       setExpedienteReferenceDate(new Date());
+    }, 60 * 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setMetricsReferenceDate(new Date());
     }, 60 * 1000);
     return () => window.clearInterval(intervalId);
   }, []);
@@ -456,7 +747,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
         onMouseDown={handleMouseDown}
         className={`overflow-x-auto ${isDragging ? "cursor-grabbing select-none" : "cursor-grab"}`}
       >
-        <table ref={tableRef} className="w-full min-w-[2250px] text-left">
+        <table ref={tableRef} className="w-full min-w-[2750px] text-left">
           <thead className="border-b border-border bg-slate-900/60 text-[11px] uppercase tracking-[0.08em] text-muted">
             <tr>
               <th className="w-9 px-3 py-2.5 xl:px-3.5 2xl:py-2">
@@ -483,10 +774,14 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Cidade</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Estado</th>
               <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Origem</th>
+              <th className="w-[9rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Total de Ligacoes</th>
+              <th className="w-[10rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Total de Follow-ups</th>
+              <th className="w-[9rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Call Agendada</th>
+              <th className="w-[10rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Data de Conversao</th>
             </tr>
           </thead>
           <tbody>
-            {tableRows.map(({ lead, location, expediente }) => {
+            {tableRows.map(({ lead, location, expediente, metrics }) => {
               const phones = getLeadPhones(lead);
               return (
                 <tr
@@ -600,6 +895,22 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.state}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                   <TruncatedCellText value={lead.source} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{metrics.totalCalls}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{metrics.totalFollowUps}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  <span
+                    className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                      metrics.hasScheduledCall
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                        : "border-slate-600/80 bg-slate-700/40 text-slate-300"
+                    }`}
+                  >
+                    {metrics.hasScheduledCall ? "Sim" : "Nao"}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  {metrics.conversionDate ? formatDateBR(metrics.conversionDate) : "-"}
                 </td>
                 </tr>
               );
