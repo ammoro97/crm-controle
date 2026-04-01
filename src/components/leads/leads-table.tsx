@@ -13,6 +13,7 @@ type LeadsTableProps = {
   leads: Lead[];
   onSelectLead: (lead: Lead) => void;
   onSaveRow: (lead: Lead) => void;
+  onDeleteLeads: (ids: string[]) => void;
 };
 
 type DialApiResponse = {
@@ -94,7 +95,7 @@ function extractDialCallId(payload: unknown): string | undefined {
 const RESPONSAVEL_REQUIRED_MESSAGE =
   "Seu usuario ainda nao esta vinculado a um responsavel no CRM. Cadastre esse e-mail em Configuracoes > Responsaveis antes de realizar ligacoes.";
 
-export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) {
+export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: LeadsTableProps) {
   const { currentUser } = useAuth();
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const bottomScrollRef = useRef<HTMLDivElement | null>(null);
@@ -106,6 +107,7 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
   const suppressClickRef = useRef(false);
   const feedbackTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [rowDraft, setRowDraft] = useState<Lead | null>(null);
   const [scrollContentWidth, setScrollContentWidth] = useState(1850);
@@ -335,6 +337,32 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
     };
   }, []);
 
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [leads]);
+
+  const allSelected = tableRows.length > 0 && tableRows.every(({ lead }) => selectedIds.has(lead.id));
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(tableRows.map(({ lead }) => lead.id)));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
   const handleTopScroll = () => {
     if (!topScrollRef.current || !bottomScrollRef.current) return;
     if (syncingScrollRef.current === "bottom") {
@@ -403,6 +431,30 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
 
   return (
     <div className="panel overflow-hidden">
+      {selectedIds.size > 0 ? (
+        <div className="flex items-center gap-3 border-b border-rose-500/30 bg-rose-500/10 px-4 py-2.5">
+          <span className="text-[13px] text-rose-300">
+            {selectedIds.size} {selectedIds.size === 1 ? "lead selecionado" : "leads selecionados"}
+          </span>
+          <button
+            type="button"
+            className="rounded-md border border-rose-400/50 bg-rose-500/20 px-3 py-1 text-[12px] text-rose-200 transition hover:bg-rose-500/30"
+            onClick={() => {
+              onDeleteLeads(Array.from(selectedIds));
+              setSelectedIds(new Set());
+            }}
+          >
+            Apagar selecionados
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-border px-3 py-1 text-[12px] text-slate-400 transition hover:text-slate-200"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Cancelar
+          </button>
+        </div>
+      ) : null}
       <div
         ref={topScrollRef}
         onScroll={handleTopScroll}
@@ -420,6 +472,16 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
         <table ref={tableRef} className="w-full min-w-[1850px] text-left">
           <thead className="border-b border-border bg-slate-900/60 text-[11px] uppercase tracking-[0.08em] text-muted">
             <tr>
+              <th className="w-9 px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                  className="h-3.5 w-3.5 cursor-pointer accent-sky-500"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Selecionar todos"
+                />
+              </th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nome</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Empresa</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nicho</th>
@@ -446,6 +508,16 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
                   }}
                   className="cursor-pointer border-b border-border/70 text-[13px] text-slate-200 transition-all duration-150 hover:bg-sky-900/35 hover:shadow-[inset_0_0_0_1px_rgba(56,189,248,0.28)] xl:text-sm"
                 >
+                  <td className="w-9 px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(lead.id)}
+                      onChange={() => toggleSelect(lead.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="h-3.5 w-3.5 cursor-pointer accent-sky-500"
+                      aria-label={`Selecionar ${lead.name}`}
+                    />
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.name}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.company}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.niche || "-"}</td>
@@ -521,7 +593,7 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow }: LeadsTableProps) 
                 </tr>
                 {editingRowId === lead.id && rowDraft ? (
                   <tr key={`${lead.id}-editor`} className="border-b border-border/70 bg-slate-950/40">
-                    <td colSpan={14} className="px-3 py-3 xl:px-3.5">
+                    <td colSpan={15} className="px-3 py-3 xl:px-3.5">
                       <div className="rounded-lg border border-border bg-slate-900/60 p-3">
                         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                           <label className="text-[11px] uppercase tracking-[0.08em] text-muted">

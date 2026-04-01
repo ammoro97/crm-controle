@@ -631,6 +631,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     );
   };
 
+  const deleteLeadsById = (ids: string[]) => {
+    const toDelete = new Set(ids);
+    setLeads((prev) => prev.filter((lead) => !toDelete.has(lead.id)));
+  };
+
   const handleCreateLead = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draftLead) return;
@@ -1013,9 +1018,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       </section>
 
       {filter === "outbound" ? (
-        <OutboundLeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} />
+        <OutboundLeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onDeleteLeads={deleteLeadsById} />
       ) : (
-        <LeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onSaveRow={updateLeadById} />
+        <LeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onSaveRow={updateLeadById} onDeleteLeads={deleteLeadsById} />
       )}
 
       <Modal
