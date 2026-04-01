@@ -1,7 +1,90 @@
-import { Lead } from "@/types/crm";
+import { Lead, LeadContactQuality, LeadEmail, LeadPhone } from "@/types/crm";
 
 function clean(values: string[]): string[] {
-  return values.map((value) => value.trim()).filter(Boolean);
+  return values.map((value) => String(value || "").trim()).filter(Boolean);
+}
+
+function normalizeDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function normalizeQuality(value: unknown): LeadContactQuality | undefined {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "bom" || normalized === "ruim") return normalized;
+  return undefined;
+}
+
+function uniqueBy<T>(items: T[], keyBuilder: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const next: T[] = [];
+  for (const item of items) {
+    const key = keyBuilder(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    next.push(item);
+  }
+  return next;
+}
+
+function phoneUniqKey(value: string) {
+  const digits = normalizeDigits(value);
+  return digits || value.toLowerCase();
+}
+
+function emailUniqKey(value: string) {
+  return value.toLowerCase();
+}
+
+function normalizePhoneItems(items: LeadPhone[], fallbackQualityMap?: Map<string, LeadContactQuality | undefined>): LeadPhone[] {
+  const normalized = items
+    .map((item) => {
+      const value = String(item?.value || "").trim();
+      if (!value) return null;
+      const key = phoneUniqKey(value);
+      const quality = normalizeQuality(item?.quality) || fallbackQualityMap?.get(key);
+      return {
+        value,
+        ...(quality ? { quality } : {}),
+      } satisfies LeadPhone;
+    })
+    .filter((item): item is LeadPhone => item !== null);
+
+  return uniqueBy(normalized, (item) => phoneUniqKey(item.value));
+}
+
+function normalizeEmailItems(items: LeadEmail[], fallbackQualityMap?: Map<string, LeadContactQuality | undefined>): LeadEmail[] {
+  const normalized = items
+    .map((item) => {
+      const value = String(item?.value || "").trim();
+      if (!value) return null;
+      const key = emailUniqKey(value);
+      const quality = normalizeQuality(item?.quality) || fallbackQualityMap?.get(key);
+      return {
+        value,
+        ...(quality ? { quality } : {}),
+      } satisfies LeadEmail;
+    })
+    .filter((item): item is LeadEmail => item !== null);
+
+  return uniqueBy(normalized, (item) => emailUniqKey(item.value));
+}
+
+function buildPhoneQualityMap(lead: Lead) {
+  return new Map(
+    getLeadPhoneItems(lead).map((item) => [phoneUniqKey(item.value), normalizeQuality(item.quality)] satisfies [
+      string,
+      LeadContactQuality | undefined,
+    ]),
+  );
+}
+
+function buildEmailQualityMap(lead: Lead) {
+  return new Map(
+    getLeadEmailItems(lead).map((item) => [emailUniqKey(item.value), normalizeQuality(item.quality)] satisfies [
+      string,
+      LeadContactQuality | undefined,
+    ]),
+  );
 }
 
 export function getLeadNames(lead: Lead): string[] {
@@ -15,16 +98,38 @@ export function getLeadNames(lead: Lead): string[] {
   return clean([lead.name || ""]);
 }
 
-export function getLeadPhones(lead: Lead): string[] {
+export function getLeadPhoneItems(lead: Lead): LeadPhone[] {
+  if (Array.isArray(lead.phoneItems) && lead.phoneItems.length > 0) {
+    return normalizePhoneItems(lead.phoneItems);
+  }
+
   const fromArray = Array.isArray(lead.phones) ? clean(lead.phones) : [];
-  if (fromArray.length > 0) return fromArray;
-  return clean([lead.phone || ""]);
+  if (fromArray.length > 0) {
+    return fromArray.map((value) => ({ value }));
+  }
+
+  return clean([lead.phone || ""]).map((value) => ({ value }));
+}
+
+export function getLeadEmailItems(lead: Lead): LeadEmail[] {
+  if (Array.isArray(lead.emailItems) && lead.emailItems.length > 0) {
+    return normalizeEmailItems(lead.emailItems);
+  }
+
+  const fromArray = Array.isArray(lead.emails) ? clean(lead.emails) : [];
+  if (fromArray.length > 0) {
+    return fromArray.map((value) => ({ value }));
+  }
+
+  return clean([lead.email || ""]).map((value) => ({ value }));
+}
+
+export function getLeadPhones(lead: Lead): string[] {
+  return getLeadPhoneItems(lead).map((item) => item.value);
 }
 
 export function getLeadEmails(lead: Lead): string[] {
-  const fromArray = Array.isArray(lead.emails) ? clean(lead.emails) : [];
-  if (fromArray.length > 0) return fromArray;
-  return clean([lead.email || ""]);
+  return getLeadEmailItems(lead).map((item) => item.value);
 }
 
 export function updateLeadNames(lead: Lead, names: string[]): Lead {
@@ -42,22 +147,44 @@ export function updateLeadNames(lead: Lead, names: string[]): Lead {
   };
 }
 
-export function updateLeadPhones(lead: Lead, phones: string[]): Lead {
-  const normalized = clean(phones);
+export function updateLeadPhoneItems(lead: Lead, phoneItems: LeadPhone[]): Lead {
+  const normalized = normalizePhoneItems(phoneItems, buildPhoneQualityMap(lead));
+  const phones = normalized.map((item) => item.value);
   return {
     ...lead,
-    phones: normalized,
-    phone: normalized[0] || "",
+    phoneItems: normalized,
+    phones,
+    phone: phones[0] || "",
   };
 }
 
-export function updateLeadEmails(lead: Lead, emails: string[]): Lead {
-  const normalized = clean(emails);
+export function updateLeadEmailItems(lead: Lead, emailItems: LeadEmail[]): Lead {
+  const normalized = normalizeEmailItems(emailItems, buildEmailQualityMap(lead));
+  const emails = normalized.map((item) => item.value);
   return {
     ...lead,
-    emails: normalized,
-    email: normalized[0] || "",
+    emailItems: normalized,
+    emails,
+    email: emails[0] || "",
   };
+}
+
+export function updateLeadPhones(lead: Lead, phones: string[]): Lead {
+  const qualityMap = buildPhoneQualityMap(lead);
+  const normalized = clean(phones).map((value) => ({
+    value,
+    quality: qualityMap.get(phoneUniqKey(value)),
+  }));
+  return updateLeadPhoneItems(lead, normalized);
+}
+
+export function updateLeadEmails(lead: Lead, emails: string[]): Lead {
+  const qualityMap = buildEmailQualityMap(lead);
+  const normalized = clean(emails).map((value) => ({
+    value,
+    quality: qualityMap.get(emailUniqKey(value)),
+  }));
+  return updateLeadEmailItems(lead, normalized);
 }
 
 export function getLeadContacts(lead: Lead): Array<{ nome: string; cargo: string }> {

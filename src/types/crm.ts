@@ -9,6 +9,7 @@ export type LeadStatus =
 export type LeadChannel = "inbound" | "outbound";
 export type LeadUrgency = "baixa" | "media" | "alta";
 export type LeadTemperature = "frio" | "morno" | "quente";
+export type LeadContactQuality = "bom" | "ruim";
 export type InteractionType = "ligacao" | "whatsapp" | "reuniao" | "email";
 export type BusinessType = "estetica" | "odontologia";
 export type PainPoint =
@@ -51,6 +52,16 @@ export type LeadObservation = {
   owner: string;
   type: LeadObservationType;
   content: string;
+};
+
+export type LeadPhone = {
+  value: string;
+  quality?: LeadContactQuality;
+};
+
+export type LeadEmail = {
+  value: string;
+  quality?: LeadContactQuality;
 };
 
 export type InboundQualification = {
@@ -106,8 +117,10 @@ export type Lead = {
   company: string;
   phone: string;
   phones?: string[];
+  phoneItems?: LeadPhone[];
   email: string;
   emails?: string[];
+  emailItems?: LeadEmail[];
   status: LeadStatus;
   source: string;
   owner: string;

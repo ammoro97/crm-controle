@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Modal } from "@/components/ui/modal";
-import { getLeadPhones } from "@/lib/lead-contact-utils";
+import { getLeadPhoneItems, getLeadPhones } from "@/lib/lead-contact-utils";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
 import { createDialSession, generateCallSessionId, resolveBlockingStateBeforeNewDial } from "@/lib/post-call-flow";
 import { Lead } from "@/types/crm";
@@ -101,6 +101,18 @@ function extractDialCallId(payload: unknown): string | undefined {
     return undefined;
   };
   return walk(payload, 0);
+}
+
+function phoneQualityLabel(value?: string) {
+  if (value === "bom") return "Bom";
+  if (value === "ruim") return "Ruim";
+  return "Nao classificado";
+}
+
+function phoneQualityBadgeClass(value?: string) {
+  if (value === "bom") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+  if (value === "ruim") return "border-rose-500/40 bg-rose-500/10 text-rose-300";
+  return "border-slate-600/80 bg-slate-700/40 text-slate-300";
 }
 
 const RESPONSAVEL_REQUIRED_MESSAGE =
@@ -545,6 +557,10 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
       >
         {phonePickerLead ? (
           <div className="space-y-3">
+            {(() => {
+              const phoneItems = getLeadPhoneItems(phonePickerLead);
+              return (
+                <>
             <p className="text-sm text-slate-200">
               Escolha o numero para ligar para <span className="font-semibold">{phonePickerLead.name}</span>.
             </p>
@@ -555,13 +571,23 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
                 value={selectedDialPhone}
                 onChange={(e) => setSelectedDialPhone(e.target.value)}
               >
-                {getLeadPhones(phonePickerLead).map((phone) => (
-                  <option key={phone} value={phone}>
-                    {phone}
+                {phoneItems.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.value} - {phoneQualityLabel(item.quality)}
                   </option>
                 ))}
               </select>
             </label>
+            <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-border bg-slate-950/50 p-2">
+              {phoneItems.map((item) => (
+                <div key={`phone-quality-${item.value}`} className="flex items-center justify-between gap-2 text-xs text-slate-200">
+                  <span className="font-mono">{item.value}</span>
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] ${phoneQualityBadgeClass(item.quality)}`}>
+                    {phoneQualityLabel(item.quality)}
+                  </span>
+                </div>
+              ))}
+            </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -588,6 +614,9 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
                 Iniciar ligacao
               </button>
             </div>
+                </>
+              );
+            })()}
           </div>
         ) : null}
       </Modal>

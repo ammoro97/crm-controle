@@ -12,6 +12,14 @@ import {
   subscribeLeadsSnapshot,
   subscribeMeetingsSnapshot,
 } from "@/lib/crm-data-store";
+import {
+  getLeadEmailItems,
+  getLeadEmails,
+  getLeadPhoneItems,
+  getLeadPhones,
+  updateLeadEmailItems,
+  updateLeadPhoneItems,
+} from "@/lib/lead-contact-utils";
 import { useResponsaveisRecords } from "@/lib/responsaveis-store";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
 import { getFinalizacaoClassification } from "@/lib/finalizacao-classification";
@@ -32,7 +40,8 @@ import {
   setWrapupSessionState,
   subscribePostCallFlow,
 } from "@/lib/post-call-flow";
-import { CallAnalysisStatus, CallLog, Lead, LeadObservation, Meeting } from "@/types/crm";
+import { EmailDispatchRequestBody, EmailDispatchResponse, CallFinalization } from "@/types/call-finalization";
+import { CallAnalysisStatus, CallLog, Lead, LeadContactQuality, LeadEmail, LeadObservation, LeadPhone, Meeting } from "@/types/crm";
 
 type Api4ComCallItem = {
   id?: string | number;
@@ -151,6 +160,15 @@ type PostCallFormState = {
   nextAction: string;
   followUpDate: string;
   followUpTime: string;
+  phoneItems: LeadPhone[];
+  emailItems: LeadEmail[];
+  newPhoneValue: string;
+  newPhoneQuality: LeadContactQuality;
+  newEmailValue: string;
+  newEmailQuality: LeadContactQuality;
+  sendEmail: boolean;
+  emailTarget: string;
+  emailMessage: string;
 };
 
 type CurrentCallEvidence = {
@@ -159,6 +177,12 @@ type CurrentCallEvidence = {
   endedAt?: string | null;
   durationSeconds?: number;
   status?: string;
+};
+
+type WrapupEmailDispatchOutcome = {
+  attempted: boolean;
+  success: boolean;
+  message?: string;
 };
 
 type WrapupsIndexes = {
@@ -430,6 +454,71 @@ function nowDateAndTime() {
   };
 }
 
+function normalizeLeadContactQuality(value: unknown): LeadContactQuality | undefined {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "bom" || normalized === "ruim") return normalized;
+  return undefined;
+}
+
+function normalizeLeadPhoneItemsForDraft(items: unknown): LeadPhone[] {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set<string>();
+  const normalized: LeadPhone[] = [];
+  for (const item of items) {
+    const value = String((item as LeadPhone | undefined)?.value || "").trim();
+    if (!value) continue;
+    const key = normalizeDigits(value) || value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const quality = normalizeLeadContactQuality((item as LeadPhone | undefined)?.quality);
+    normalized.push({
+      value,
+      ...(quality ? { quality } : {}),
+    });
+  }
+  return normalized;
+}
+
+function normalizeLeadEmailItemsForDraft(items: unknown): LeadEmail[] {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set<string>();
+  const normalized: LeadEmail[] = [];
+  for (const item of items) {
+    const value = String((item as LeadEmail | undefined)?.value || "").trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const quality = normalizeLeadContactQuality((item as LeadEmail | undefined)?.quality);
+    normalized.push({
+      value,
+      ...(quality ? { quality } : {}),
+    });
+  }
+  return normalized;
+}
+
+function findLeadIndexForSession(leads: Lead[], session: ActiveCallSession): number {
+  const sessionPhone = normalizeDigits(session.telefone);
+  return leads.findIndex((lead) => {
+    if (session.leadId && lead.id === session.leadId) return true;
+    const phones = getLeadPhones(lead).map((phone) => normalizeDigits(phone));
+    return phones.some((phone) => Boolean(phone && sessionPhone && (phone.endsWith(sessionPhone) || sessionPhone.endsWith(phone))));
+  });
+}
+
+function buildInitialPhoneItemsForSession(session: ActiveCallSession, lead?: Lead | null): LeadPhone[] {
+  const fromLead = lead ? getLeadPhoneItems(lead) : [];
+  if (fromLead.length > 0) return fromLead;
+  const fallbackPhone = String(session.telefone || "").trim();
+  return fallbackPhone ? [{ value: fallbackPhone }] : [];
+}
+
+function buildInitialEmailItemsForSession(lead?: Lead | null): LeadEmail[] {
+  if (!lead) return [];
+  return getLeadEmailItems(lead);
+}
+
 function createDefaultPostCallForm(): PostCallFormState {
   return {
     reason: "",
@@ -438,6 +527,15 @@ function createDefaultPostCallForm(): PostCallFormState {
     nextAction: "",
     followUpDate: "",
     followUpTime: "",
+    phoneItems: [],
+    emailItems: [],
+    newPhoneValue: "",
+    newPhoneQuality: "bom",
+    newEmailValue: "",
+    newEmailQuality: "bom",
+    sendEmail: false,
+    emailTarget: "",
+    emailMessage: "",
   };
 }
 
@@ -592,6 +690,15 @@ function readWrapupDraft(sessionId: string): PostCallFormState | null {
       nextAction: value.nextAction || "",
       followUpDate: value.followUpDate || "",
       followUpTime: value.followUpTime || "",
+      phoneItems: normalizeLeadPhoneItemsForDraft(value.phoneItems),
+      emailItems: normalizeLeadEmailItemsForDraft(value.emailItems),
+      newPhoneValue: String(value.newPhoneValue || "").trim(),
+      newPhoneQuality: normalizeLeadContactQuality(value.newPhoneQuality) || "bom",
+      newEmailValue: String(value.newEmailValue || "").trim(),
+      newEmailQuality: normalizeLeadContactQuality(value.newEmailQuality) || "bom",
+      sendEmail: Boolean(value.sendEmail),
+      emailTarget: String(value.emailTarget || "").trim(),
+      emailMessage: String(value.emailMessage || ""),
     };
   } catch {
     return null;
@@ -1112,6 +1219,18 @@ function statusBadgeClass(status?: string) {
   return "border-rose-500/40 bg-rose-500/10 text-rose-300";
 }
 
+function contactQualityLabel(quality?: LeadContactQuality) {
+  if (quality === "bom") return "Bom";
+  if (quality === "ruim") return "Ruim";
+  return "Nao classificado";
+}
+
+function contactQualityBadgeClass(quality?: LeadContactQuality) {
+  if (quality === "bom") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+  if (quality === "ruim") return "border-rose-500/40 bg-rose-500/10 text-rose-300";
+  return "border-slate-600/80 bg-slate-700/40 text-slate-300";
+}
+
 export default function LigacoesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1142,6 +1261,7 @@ export default function LigacoesPage() {
   const [wrapupSaving, setWrapupSaving] = useState(false);
   const [wrapupError, setWrapupError] = useState<string | null>(null);
   const [wrapupMessage, setWrapupMessage] = useState<string | null>(null);
+  const [wrapupMessageType, setWrapupMessageType] = useState<"success" | "error">("success");
   const [postCallForm, setPostCallForm] = useState<PostCallFormState>(createDefaultPostCallForm());
 
   const checkingCallEndRef = useRef(false);
@@ -1160,6 +1280,22 @@ export default function LigacoesPage() {
       : [];
   const secondaryFieldLabel = "Subfinalização";
   const showFollowUpFields = showNextActionField && nextActionComFollowUp.has(postCallForm.nextAction);
+  const wrapupLead = useMemo(() => {
+    if (!activeSession) return null;
+    const leadIndex = findLeadIndexForSession(leadsSnapshot, activeSession);
+    if (leadIndex === -1) return null;
+    return leadsSnapshot[leadIndex];
+  }, [activeSession, leadsSnapshot]);
+  const wrapupLeadPrimaryEmail = useMemo(() => {
+    if (postCallForm.emailTarget) return postCallForm.emailTarget;
+    const fallback = wrapupLead ? getLeadEmails(wrapupLead) : [];
+    return fallback[0] || "";
+  }, [postCallForm.emailTarget, wrapupLead]);
+  const availableWrapupEmailTargets = useMemo(
+    () => postCallForm.emailItems.map((item) => String(item.value || "").trim()).filter(Boolean),
+    [postCallForm.emailItems],
+  );
+  const hasEmailTargets = availableWrapupEmailTargets.length > 0;
   const responsavelById = useMemo(() => {
     const map: ResponsavelByIdIndex = new Map();
     for (const item of responsaveisRecords) {
@@ -1635,7 +1771,18 @@ export default function LigacoesPage() {
     if (isNewSession) {
       currentWrapupSessionRef.current = activeSession.sessionId;
       const draft = readWrapupDraft(activeSession.sessionId);
-      setPostCallForm(draft || createDefaultPostCallForm());
+      const leadIndex = findLeadIndexForSession(leadsSnapshot, activeSession);
+      const relatedLead = leadIndex >= 0 ? leadsSnapshot[leadIndex] : null;
+      const defaultPhoneItems = buildInitialPhoneItemsForSession(activeSession, relatedLead);
+      const defaultEmailItems = buildInitialEmailItemsForSession(relatedLead);
+      const nextForm: PostCallFormState = {
+        ...createDefaultPostCallForm(),
+        ...(draft || {}),
+        phoneItems: draft?.phoneItems?.length ? draft.phoneItems : defaultPhoneItems,
+        emailItems: draft?.emailItems?.length ? draft.emailItems : defaultEmailItems,
+        emailTarget: draft?.emailTarget || defaultEmailItems[0]?.value || "",
+      };
+      setPostCallForm(nextForm);
       restoredFromQueryRef.current = false;
       console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP_SESSION_CREATED`, {
         sessionId: activeSession.sessionId,
@@ -1685,7 +1832,7 @@ export default function LigacoesPage() {
       leadId: activeSession.leadId || null,
       status: activeSession.status,
     });
-  }, [activeSession, shouldRestoreWrapupByQuery, wrapupOpen]);
+  }, [activeSession, leadsSnapshot, shouldRestoreWrapupByQuery, wrapupOpen]);
 
   useEffect(() => {
     if (!activeSession || activeSession.status === "wrapped") return;
@@ -1716,6 +1863,32 @@ export default function LigacoesPage() {
       };
     });
   }, [showFollowUpFields]);
+
+  useEffect(() => {
+    setPostCallForm((prev) => {
+      const currentTargets = prev.emailItems.map((item) => String(item.value || "").trim()).filter(Boolean);
+      const firstTarget = currentTargets[0] || "";
+      if (!prev.sendEmail) {
+        if (!prev.emailTarget) return prev;
+        return {
+          ...prev,
+          emailTarget: "",
+        };
+      }
+      if (!currentTargets.length) {
+        if (!prev.emailTarget) return prev;
+        return {
+          ...prev,
+          emailTarget: "",
+        };
+      }
+      if (prev.emailTarget && currentTargets.includes(prev.emailTarget)) return prev;
+      return {
+        ...prev,
+        emailTarget: firstTarget,
+      };
+    });
+  }, [postCallForm.sendEmail, postCallForm.emailItems]);
 
   const finalizacaoOptions = baseFinalizacaoOptions;
   const atendenteOptions = useMemo(() => {
@@ -2239,6 +2412,140 @@ export default function LigacoesPage() {
     handleMinimizeWrapup();
   };
 
+  const upsertWrapupPhoneItem = (value: string, quality: LeadContactQuality) => {
+    const cleaned = String(value || "").trim();
+    if (!cleaned) return;
+    const cleanedKey = normalizeDigits(cleaned) || cleaned.toLowerCase();
+    setPostCallForm((prev) => {
+      const existingIndex = prev.phoneItems.findIndex((item) => {
+        const itemValue = String(item.value || "").trim();
+        const itemKey = normalizeDigits(itemValue) || itemValue.toLowerCase();
+        return itemKey === cleanedKey;
+      });
+      if (existingIndex >= 0) {
+        const nextItems = [...prev.phoneItems];
+        nextItems[existingIndex] = {
+          value: cleaned,
+          quality,
+        };
+        return {
+          ...prev,
+          phoneItems: nextItems,
+          newPhoneValue: "",
+        };
+      }
+      return {
+        ...prev,
+        phoneItems: [...prev.phoneItems, { value: cleaned, quality }],
+        newPhoneValue: "",
+      };
+    });
+  };
+
+  const setWrapupPhoneQualityAt = (index: number, quality: LeadContactQuality) => {
+    setPostCallForm((prev) => {
+      if (!prev.phoneItems[index]) return prev;
+      const nextItems = [...prev.phoneItems];
+      nextItems[index] = {
+        value: nextItems[index].value,
+        quality,
+      };
+      return {
+        ...prev,
+        phoneItems: nextItems,
+      };
+    });
+  };
+
+  const upsertWrapupEmailItem = (value: string, quality: LeadContactQuality) => {
+    const cleaned = String(value || "").trim();
+    if (!cleaned) return;
+    const cleanedKey = cleaned.toLowerCase();
+    setPostCallForm((prev) => {
+      const existingIndex = prev.emailItems.findIndex((item) => String(item.value || "").trim().toLowerCase() === cleanedKey);
+      if (existingIndex >= 0) {
+        const nextItems = [...prev.emailItems];
+        nextItems[existingIndex] = {
+          value: cleaned,
+          quality,
+        };
+        return {
+          ...prev,
+          emailItems: nextItems,
+          newEmailValue: "",
+        };
+      }
+      return {
+        ...prev,
+        emailItems: [...prev.emailItems, { value: cleaned, quality }],
+        newEmailValue: "",
+      };
+    });
+  };
+
+  const setWrapupEmailQualityAt = (index: number, quality: LeadContactQuality) => {
+    setPostCallForm((prev) => {
+      if (!prev.emailItems[index]) return prev;
+      const nextItems = [...prev.emailItems];
+      nextItems[index] = {
+        value: nextItems[index].value,
+        quality,
+      };
+      return {
+        ...prev,
+        emailItems: nextItems,
+      };
+    });
+  };
+
+  const dispatchWrapupEmailWebhook = async (payload: EmailDispatchRequestBody): Promise<WrapupEmailDispatchOutcome> => {
+    try {
+      const response = await fetch("/api/integrations/webhook-out/email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      let data: EmailDispatchResponse = { success: false };
+      let rawText = "";
+      try {
+        rawText = await response.text();
+        data = rawText ? (JSON.parse(rawText) as EmailDispatchResponse) : { success: false };
+      } catch {
+        data = { success: false, detail: rawText || "Resposta invalida da API." };
+      }
+
+      if (!response.ok || !data.success) {
+        const details = [
+          data.message || data.error || "Falha ao disparar webhook de email.",
+          data.status ? `HTTP ${data.status}` : "",
+          data.detail || "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return {
+          attempted: true,
+          success: false,
+          message: details,
+        };
+      }
+
+      return {
+        attempted: true,
+        success: true,
+        message: data.message || "Webhook de email disparado com sucesso.",
+      };
+    } catch (error) {
+      return {
+        attempted: true,
+        success: false,
+        message: error instanceof Error ? error.message : "Erro de rede ao disparar webhook de email.",
+      };
+    }
+  };
+
   const summary = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     let todayCalls = 0;
@@ -2443,13 +2750,7 @@ export default function LigacoesPage() {
   ) => {
     const leads = getLeadsSnapshot();
     const now = nowDateAndTime();
-    const normalizedSessionPhone = normalizeDigits(session.telefone);
-
-    const leadIndex = leads.findIndex((lead) => {
-      if (session.leadId && lead.id === session.leadId) return true;
-      const leadPhone = normalizeDigits(lead.phone);
-      return Boolean(normalizedSessionPhone && leadPhone && (leadPhone.endsWith(normalizedSessionPhone) || normalizedSessionPhone.endsWith(leadPhone)));
-    });
+    const leadIndex = findLeadIndexForSession(leads, session);
 
     if (leadIndex === -1) {
       console.log("[POSTCALL_DEBUG] Nenhum lead encontrado para vincular finalizacao", {
@@ -2461,12 +2762,14 @@ export default function LigacoesPage() {
     }
 
     const lead = leads[leadIndex];
+    const leadWithUpdatedContacts = updateLeadEmailItems(updateLeadPhoneItems(lead, formState.phoneItems), formState.emailItems);
     const observationId = `OBS-CALL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const freeTextObservationId = `OBS-CALL-TEXT-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const resultLabel = normalizeFinalizacaoLabel(formState.result) || "Finalização registrada";
     const durationText = formatDurationHuman(callEvidence?.durationSeconds);
     const callDate = formatDate(callEvidence?.startedAt || now.date);
     const callTime = formatTime(callEvidence?.startedAt || `${now.date}T${now.time}:00`);
+    const selectedEmail = formState.emailTarget || leadWithUpdatedContacts.email || "-";
     const followUpDateText = formState.followUpDate ? formatDate(formState.followUpDate) : "-";
     const followUpTimeText = formState.followUpTime || "-";
     const followUpText =
@@ -2480,6 +2783,8 @@ export default function LigacoesPage() {
       `Proxima acao: ${formState.nextAction.trim() || "-"}`,
       `Follow-up: ${followUpText}`,
       `Duração: ${durationText}`,
+      `E-mail do lead: ${selectedEmail}`,
+      `Envio de e-mail no wrap-up: ${formState.sendEmail ? "Sim" : "Nao"}`,
       `Data/Hora da ligacao: ${callDate} ${callTime !== "-" ? `- ${callTime}` : ""}`.trim(),
     ];
 
@@ -2509,9 +2814,9 @@ export default function LigacoesPage() {
     const historyEventDescription = `Ligação realizada com o lead. Finalização: ${resultLabel}.`;
 
     const nextLead: Lead = {
-      ...lead,
+      ...leadWithUpdatedContacts,
       history: [
-        ...lead.history,
+        ...leadWithUpdatedContacts.history,
         {
           id: `H-CALL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           date: now.date,
@@ -2524,12 +2829,12 @@ export default function LigacoesPage() {
         },
       ],
       observationLog: freeTextObservation
-        ? [...lead.observationLog, structuredObservation, freeTextObservation]
-        : [...lead.observationLog, structuredObservation],
+        ? [...leadWithUpdatedContacts.observationLog, structuredObservation, freeTextObservation]
+        : [...leadWithUpdatedContacts.observationLog, structuredObservation],
       lastInteraction: `${now.date} ${now.time}`,
-      nextAction: formState.nextAction.trim() || lead.nextAction,
-      nextActionDate: formState.followUpDate ? formState.followUpDate : lead.nextActionDate,
-      firstContactDate: lead.firstContactDate || now.date,
+      nextAction: formState.nextAction.trim() || leadWithUpdatedContacts.nextAction,
+      nextActionDate: formState.followUpDate ? formState.followUpDate : leadWithUpdatedContacts.nextActionDate,
+      firstContactDate: leadWithUpdatedContacts.firstContactDate || now.date,
     };
 
     const nextLeads = [...leads];
@@ -2550,8 +2855,8 @@ export default function LigacoesPage() {
     const lead =
       leads.find((item) => item.id === session.leadId) ||
       leads.find((item) => {
-        const leadPhone = normalizeDigits(item.phone);
-        return Boolean(sessionPhone && leadPhone && (leadPhone.endsWith(sessionPhone) || sessionPhone.endsWith(leadPhone)));
+        const leadPhones = getLeadPhones(item).map((phone) => normalizeDigits(phone));
+        return leadPhones.some((leadPhone) => Boolean(sessionPhone && leadPhone && (leadPhone.endsWith(sessionPhone) || sessionPhone.endsWith(leadPhone))));
       }) ||
       null;
 
@@ -2571,7 +2876,7 @@ export default function LigacoesPage() {
       "Origem: Ligação",
       `Finalização: ${normalizeFinalizacaoLabel(formState.result)}`,
       `Proxima acao: ${formState.nextAction || "-"}`,
-      `Telefone: ${lead?.phone || session.telefone}`,
+      `Telefone: ${(lead ? getLeadPhones(lead)[0] : "") || session.telefone}`,
       sessionMarker,
     ];
     if (formState.observations.trim()) {
@@ -2651,10 +2956,27 @@ export default function LigacoesPage() {
       setWrapupError("Preencha data e horario do follow-up para continuar.");
       return;
     }
+    if (!postCallForm.phoneItems.length) {
+      setWrapupError("Adicione ao menos um telefone para salvar a finalizacao.");
+      return;
+    }
+    if (postCallForm.sendEmail && !postCallForm.emailItems.length) {
+      setWrapupError("Adicione ao menos um e-mail para habilitar envio pela finalizacao.");
+      return;
+    }
+    if (postCallForm.sendEmail && !postCallForm.emailTarget) {
+      setWrapupError("Selecione o e-mail de destino para envio.");
+      return;
+    }
+    if (postCallForm.sendEmail && !postCallForm.emailMessage.trim()) {
+      setWrapupError("Digite a mensagem do e-mail para concluir o envio.");
+      return;
+    }
 
     setWrapupSaving(true);
     setWrapupError(null);
     setWrapupMessage(null);
+    setWrapupMessageType("success");
 
     try {
       const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);
@@ -2693,7 +3015,15 @@ export default function LigacoesPage() {
           })()
         : undefined;
 
-      savePostCallWrapup({
+      const normalizedPhoneItems = normalizeLeadPhoneItemsForDraft(postCallForm.phoneItems);
+      const normalizedEmailItems = normalizeLeadEmailItemsForDraft(postCallForm.emailItems);
+      const safePostCallForm: PostCallFormState = {
+        ...postCallForm,
+        phoneItems: normalizedPhoneItems,
+        emailItems: normalizedEmailItems,
+      };
+
+      const savedWrapup = savePostCallWrapup({
         sessionId: activeSession.sessionId,
         externalCallId: activeSession.externalCallId,
         leadId: activeSession.leadId,
@@ -2703,15 +3033,15 @@ export default function LigacoesPage() {
         userId: activeSession.userId,
         responsavelId: ownerId,
         atendenteNome: ownerName,
-        result: postCallForm.result,
-        connected: getFinalizacaoClassification(postCallForm.result)?.conectado,
-        finalizacaoTipo: getFinalizacaoClassification(postCallForm.result)?.tipo,
-        finalizacaoResultado: getFinalizacaoClassification(postCallForm.result)?.resultado,
-        reason: postCallForm.reason || undefined,
-        observations: postCallForm.observations.trim(),
-        nextAction: postCallForm.nextAction.trim(),
-        followUpDate: postCallForm.followUpDate || undefined,
-        followUpTime: postCallForm.followUpTime || undefined,
+        result: safePostCallForm.result,
+        connected: getFinalizacaoClassification(safePostCallForm.result)?.conectado,
+        finalizacaoTipo: getFinalizacaoClassification(safePostCallForm.result)?.tipo,
+        finalizacaoResultado: getFinalizacaoClassification(safePostCallForm.result)?.resultado,
+        reason: safePostCallForm.reason || undefined,
+        observations: safePostCallForm.observations.trim(),
+        nextAction: safePostCallForm.nextAction.trim(),
+        followUpDate: safePostCallForm.followUpDate || undefined,
+        followUpTime: safePostCallForm.followUpTime || undefined,
         callId: activeSession.matchedCallId,
         conciliationStatus: activeSession.matchedCallId ? "conciliated" : "pending_conciliation",
       });
@@ -2720,8 +3050,57 @@ export default function LigacoesPage() {
         externalCallId: activeSession.externalCallId || null,
         callId: activeSession.matchedCallId || null,
       });
-      applyWrapupToLead(activeSession, postCallForm, ownerName, currentCallEvidence);
-      createFollowUpMeetingIfNeeded(activeSession, postCallForm, ownerName);
+      applyWrapupToLead(activeSession, safePostCallForm, ownerName, currentCallEvidence);
+      createFollowUpMeetingIfNeeded(activeSession, safePostCallForm, ownerName);
+
+      let emailDispatchOutcome: WrapupEmailDispatchOutcome = {
+        attempted: false,
+        success: false,
+      };
+      if (safePostCallForm.sendEmail) {
+        const refreshedLeads = getLeadsSnapshot();
+        const refreshedLeadIndex = findLeadIndexForSession(refreshedLeads, activeSession);
+        const refreshedLead = refreshedLeadIndex >= 0 ? refreshedLeads[refreshedLeadIndex] : null;
+        const finalizationPayload: CallFinalization = {
+          wrapupId: savedWrapup.id,
+          sessionId: activeSession.sessionId,
+          callId: activeSession.matchedCallId || null,
+          externalCallId: activeSession.externalCallId || null,
+          leadId: refreshedLead?.id || activeSession.leadId || null,
+          result: safePostCallForm.result,
+          reason: safePostCallForm.reason || null,
+          observations: safePostCallForm.observations.trim() || null,
+          nextAction: safePostCallForm.nextAction.trim() || null,
+          followUpDate: safePostCallForm.followUpDate || null,
+          followUpTime: safePostCallForm.followUpTime || null,
+          savedAt: savedWrapup.updatedAt,
+          userId: activeSession.userId || null,
+          responsavelId: ownerId,
+          atendenteNome: ownerName,
+        };
+        const emailDispatchBody: EmailDispatchRequestBody = {
+          finalization: finalizationPayload,
+          lead: {
+            id: refreshedLead?.id || activeSession.leadId || null,
+            name: refreshedLead?.name || activeSession.nome || null,
+            company: refreshedLead?.company || activeSession.empresa || null,
+            phone: refreshedLead?.phone || activeSession.telefone || null,
+            email: refreshedLead?.email || safePostCallForm.emailTarget || null,
+            phones: refreshedLead ? getLeadPhoneItems(refreshedLead) : safePostCallForm.phoneItems,
+            emails: refreshedLead ? getLeadEmailItems(refreshedLead) : safePostCallForm.emailItems,
+          },
+          email: {
+            to: safePostCallForm.emailTarget,
+            content: safePostCallForm.emailMessage.trim(),
+          },
+          metadata: {
+            source: "ligacoes.wrapup",
+            callEvidence: currentCallEvidence || null,
+            triggeredByEmail: currentUser?.email || null,
+          },
+        };
+        emailDispatchOutcome = await dispatchWrapupEmailWebhook(emailDispatchBody);
+      }
 
       markCallSessionWrapped(activeSession.sessionId);
       clearActiveCallSession({
@@ -2738,12 +3117,24 @@ export default function LigacoesPage() {
         externalCallId: activeSession.externalCallId || null,
         callId: activeSession.matchedCallId || null,
         leadId: activeSession.leadId || null,
-        result: postCallForm.result,
-        nextAction: postCallForm.nextAction || null,
+        result: safePostCallForm.result,
+        nextAction: safePostCallForm.nextAction || null,
+        emailDispatchAttempted: emailDispatchOutcome.attempted,
+        emailDispatchSuccess: emailDispatchOutcome.success,
+        emailDispatchMessage: emailDispatchOutcome.message || null,
       });
       setPostCallForm(createDefaultPostCallForm());
       setWrapupOpen(false);
-      setWrapupMessage("Finalização da ligação registrada com sucesso.");
+      if (!emailDispatchOutcome.attempted) {
+        setWrapupMessageType("success");
+        setWrapupMessage("Finalização da ligação registrada com sucesso.");
+      } else if (emailDispatchOutcome.success) {
+        setWrapupMessageType("success");
+        setWrapupMessage("Finalização registrada e webhook de e-mail disparado com sucesso.");
+      } else {
+        setWrapupMessageType("error");
+        setWrapupMessage(`Finalização registrada, mas o webhook de e-mail falhou: ${emailDispatchOutcome.message || "erro desconhecido."}`);
+      }
       await runWrapupReconciliation();
       await loadCallsWithRetry("after-wrapup-save", 2);
     } catch {
@@ -2803,7 +3194,11 @@ export default function LigacoesPage() {
             </button>
           </div>
         </div>
-        {wrapupMessage ? <p className="mt-2 text-xs text-emerald-300">{wrapupMessage}</p> : null}
+        {wrapupMessage ? (
+          <p className={`mt-2 text-xs ${wrapupMessageType === "success" ? "text-emerald-300" : "text-amber-300"}`}>
+            {wrapupMessage}
+          </p>
+        ) : null}
       </div>
 
       {activeSession && activeSession.status !== "wrapped" && !wrapupOpen ? (
@@ -3349,6 +3744,10 @@ export default function LigacoesPage() {
               <input className="field mt-1" value={activeSession?.nome || "-"} readOnly />
             </label>
             <label className="text-sm md:col-span-2">
+              E-mail
+              <input className="field mt-1" value={wrapupLeadPrimaryEmail || "-"} readOnly />
+            </label>
+            <label className="text-sm md:col-span-2">
               Finalização
               <select
                 className="field mt-1"
@@ -3390,14 +3789,6 @@ export default function LigacoesPage() {
                 </select>
               </label>
             ) : null}
-            <label className="text-sm md:col-span-2">
-              Observações
-              <textarea
-                className="field mt-1 min-h-[110px]"
-                value={postCallForm.observations}
-                onChange={(event) => setPostCallForm((prev) => ({ ...prev, observations: event.target.value }))}
-              />
-            </label>
             {showNextActionField ? (
               <label className="text-sm md:col-span-2">
                 {secondaryFieldLabel}
@@ -3437,6 +3828,220 @@ export default function LigacoesPage() {
                 </label>
               </>
             ) : null}
+            <label className="text-sm md:col-span-2">
+              Observações
+              <textarea
+                className="field mt-1 min-h-[110px]"
+                value={postCallForm.observations}
+                onChange={(event) => setPostCallForm((prev) => ({ ...prev, observations: event.target.value }))}
+              />
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-300">Telefones do lead</p>
+              <span className="text-[11px] text-slate-400">{postCallForm.phoneItems.length} cadastrados</span>
+            </div>
+            <div className="mt-2 max-h-36 space-y-2 overflow-y-auto pr-1">
+              {postCallForm.phoneItems.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-700 px-2.5 py-2 text-xs text-slate-400">
+                  Nenhum telefone cadastrado.
+                </p>
+              ) : (
+                postCallForm.phoneItems.map((item, index) => (
+                  <div
+                    key={`${item.value}-${index}`}
+                    className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-2.5 py-2"
+                  >
+                    <span className="font-mono text-xs text-slate-100">{item.value}</span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${contactQualityBadgeClass(item.quality)}`}
+                    >
+                      {contactQualityLabel(item.quality)}
+                    </span>
+                    <div className="ml-auto inline-flex overflow-hidden rounded-md border border-slate-700">
+                      <button
+                        type="button"
+                        className={`px-2 py-1 text-[11px] transition ${
+                          item.quality === "bom" ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-900 text-slate-300 hover:bg-slate-800"
+                        }`}
+                        onClick={() => setWrapupPhoneQualityAt(index, "bom")}
+                      >
+                        Bom
+                      </button>
+                      <button
+                        type="button"
+                        className={`border-l border-slate-700 px-2 py-1 text-[11px] transition ${
+                          item.quality === "ruim" ? "bg-rose-500/20 text-rose-200" : "bg-slate-900 text-slate-300 hover:bg-slate-800"
+                        }`}
+                        onClick={() => setWrapupPhoneQualityAt(index, "ruim")}
+                      >
+                        Ruim
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_auto]">
+              <input
+                className="field h-9"
+                placeholder="Novo telefone"
+                value={postCallForm.newPhoneValue}
+                onChange={(event) => setPostCallForm((prev) => ({ ...prev, newPhoneValue: event.target.value }))}
+              />
+              <select
+                className="field h-9 min-w-[110px]"
+                value={postCallForm.newPhoneQuality}
+                onChange={(event) =>
+                  setPostCallForm((prev) => ({
+                    ...prev,
+                    newPhoneQuality: (event.target.value as LeadContactQuality) || "bom",
+                  }))
+                }
+              >
+                <option value="bom">Bom</option>
+                <option value="ruim">Ruim</option>
+              </select>
+              <button
+                type="button"
+                className="btn-ghost h-9 whitespace-nowrap px-3 py-1.5 text-xs"
+                onClick={() => upsertWrapupPhoneItem(postCallForm.newPhoneValue, postCallForm.newPhoneQuality)}
+              >
+                + Telefone
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-300">E-mails do lead</p>
+              <span className="text-[11px] text-slate-400">{postCallForm.emailItems.length} cadastrados</span>
+            </div>
+            <div className="mt-2 max-h-36 space-y-2 overflow-y-auto pr-1">
+              {postCallForm.emailItems.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-700 px-2.5 py-2 text-xs text-slate-400">
+                  Nenhum e-mail cadastrado.
+                </p>
+              ) : (
+                postCallForm.emailItems.map((item, index) => (
+                  <div
+                    key={`${item.value}-${index}`}
+                    className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-2.5 py-2"
+                  >
+                    <span className="text-xs text-slate-100">{item.value}</span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${contactQualityBadgeClass(item.quality)}`}
+                    >
+                      {contactQualityLabel(item.quality)}
+                    </span>
+                    <div className="ml-auto inline-flex overflow-hidden rounded-md border border-slate-700">
+                      <button
+                        type="button"
+                        className={`px-2 py-1 text-[11px] transition ${
+                          item.quality === "bom" ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-900 text-slate-300 hover:bg-slate-800"
+                        }`}
+                        onClick={() => setWrapupEmailQualityAt(index, "bom")}
+                      >
+                        Bom
+                      </button>
+                      <button
+                        type="button"
+                        className={`border-l border-slate-700 px-2 py-1 text-[11px] transition ${
+                          item.quality === "ruim" ? "bg-rose-500/20 text-rose-200" : "bg-slate-900 text-slate-300 hover:bg-slate-800"
+                        }`}
+                        onClick={() => setWrapupEmailQualityAt(index, "ruim")}
+                      >
+                        Ruim
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_auto]">
+              <input
+                className="field h-9"
+                placeholder="Novo e-mail"
+                value={postCallForm.newEmailValue}
+                onChange={(event) => setPostCallForm((prev) => ({ ...prev, newEmailValue: event.target.value }))}
+              />
+              <select
+                className="field h-9 min-w-[110px]"
+                value={postCallForm.newEmailQuality}
+                onChange={(event) =>
+                  setPostCallForm((prev) => ({
+                    ...prev,
+                    newEmailQuality: (event.target.value as LeadContactQuality) || "bom",
+                  }))
+                }
+              >
+                <option value="bom">Bom</option>
+                <option value="ruim">Ruim</option>
+              </select>
+              <button
+                type="button"
+                className="btn-ghost h-9 whitespace-nowrap px-3 py-1.5 text-xs"
+                onClick={() => upsertWrapupEmailItem(postCallForm.newEmailValue, postCallForm.newEmailQuality)}
+              >
+                + E-mail
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+            <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-sky-500"
+                checked={postCallForm.sendEmail}
+                onChange={(event) =>
+                  setPostCallForm((prev) => ({
+                    ...prev,
+                    sendEmail: event.target.checked,
+                    emailTarget: event.target.checked
+                      ? prev.emailTarget || prev.emailItems[0]?.value || ""
+                      : "",
+                  }))
+                }
+              />
+              Enviar e-mail nesta finalização
+            </label>
+            {postCallForm.sendEmail ? (
+              <div className="mt-3 grid gap-3">
+                <label className="text-sm">
+                  E-mail de destino
+                  <select
+                    className="field mt-1"
+                    value={postCallForm.emailTarget}
+                    onChange={(event) => setPostCallForm((prev) => ({ ...prev, emailTarget: event.target.value }))}
+                    disabled={!hasEmailTargets}
+                  >
+                    <option value="">{hasEmailTargets ? "Selecione..." : "Sem e-mails cadastrados"}</option>
+                    {availableWrapupEmailTargets.map((email) => (
+                      <option key={email} value={email}>
+                        {email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm">
+                  Mensagem do e-mail
+                  <textarea
+                    className="field mt-1 min-h-[120px]"
+                    value={postCallForm.emailMessage}
+                    onChange={(event) => setPostCallForm((prev) => ({ ...prev, emailMessage: event.target.value }))}
+                    placeholder="Escreva a mensagem que sera enviada pelo fluxo integrado."
+                  />
+                </label>
+                {wrapupSaving ? <p className="text-xs text-slate-400">Salvando finalização e disparando webhook de e-mail...</p> : null}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-slate-400">
+                Ative esta opcao para enviar mensagem de e-mail junto com a finalizacao.
+              </p>
+            )}
           </div>
 
           {activeSession && !activeSession.matchedCallId ? (
@@ -3452,7 +4057,7 @@ export default function LigacoesPage() {
               Minimizar
             </button>
             <button type="submit" className="btn-primary" disabled={wrapupSaving}>
-              {wrapupSaving ? "Salvando..." : "Salvar finalização"}
+              {wrapupSaving ? (postCallForm.sendEmail ? "Salvando e enviando e-mail..." : "Salvando...") : "Salvar finalização"}
             </button>
           </div>
         </form>
