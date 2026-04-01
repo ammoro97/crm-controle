@@ -3,6 +3,8 @@
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Modal } from "@/components/ui/modal";
+import { SchedulePicker } from "@/components/agenda/schedule-picker";
+import { AgendaBlocks, emptyAgendaBlocks } from "@/components/agenda/agenda-types";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
   getLeadsSnapshot,
@@ -14,7 +16,6 @@ import {
 } from "@/lib/crm-data-store";
 import {
   getLeadEmailItems,
-  getLeadEmails,
   getLeadPhoneItems,
   getLeadPhones,
   updateLeadEmailItems,
@@ -187,6 +188,11 @@ type WrapupEmailDispatchOutcome = {
   message?: string;
 };
 
+type FollowUpScheduleOutcome = {
+  success: boolean;
+  message?: string;
+};
+
 type WrapupsIndexes = {
   byCallId: Map<string, PostCallWrapup[]>;
   byExternalCallId: Map<string, PostCallWrapup[]>;
@@ -240,6 +246,7 @@ const secondaryOptionsByFinalizacao: Record<"Falou com cliente" | "Falou com sec
 const OFFICIAL_FINALIZACOES = new Set(baseFinalizacaoOptions.filter((value) => value !== "Todas"));
 const HIDDEN_CALL_IDS_STORAGE_KEY = "crm:ligacoes:hidden-call-ids";
 const WRAPUP_DRAFT_STORAGE_KEY = "crm:calls:wrapup-draft:v1";
+const AGENDA_BLOCKS_STORAGE_KEY = "crm.agenda.blocks.v1";
 const WEBHOOK_OUT_LOCAL_STORAGE_KEY = "crm:webhook-out-config:v1";
 const LIGACOES_DEBUG_PREFIX = "[LIGACOES_DEBUG]";
 
@@ -719,6 +726,23 @@ function readHiddenCallIds(): Set<string> {
 function writeHiddenCallIds(ids: Set<string>) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(HIDDEN_CALL_IDS_STORAGE_KEY, JSON.stringify(Array.from(ids)));
+}
+
+function readAgendaBlocksFromStorage(): AgendaBlocks {
+  if (typeof window === "undefined") return emptyAgendaBlocks;
+  try {
+    const raw = window.localStorage.getItem(AGENDA_BLOCKS_STORAGE_KEY);
+    if (!raw) return emptyAgendaBlocks;
+    const parsed = JSON.parse(raw) as AgendaBlocks;
+    return {
+      recurringWeekdayBlocks: parsed.recurringWeekdayBlocks || [],
+      specificDateBlocks: parsed.specificDateBlocks || [],
+      periodBlocks: parsed.periodBlocks || [],
+      specificTimeBlocks: parsed.specificTimeBlocks || [],
+    };
+  } catch {
+    return emptyAgendaBlocks;
+  }
 }
 
 function readWrapupDraft(sessionId: string): PostCallFormState | null {
@@ -1325,6 +1349,8 @@ export default function LigacoesPage() {
   const [wrapupMessage, setWrapupMessage] = useState<string | null>(null);
   const [wrapupMessageType, setWrapupMessageType] = useState<"success" | "error">("success");
   const [postCallForm, setPostCallForm] = useState<PostCallFormState>(createDefaultPostCallForm());
+  const [agendaBlocks, setAgendaBlocks] = useState<AgendaBlocks>(emptyAgendaBlocks);
+  const [wrapupResolvedOwnerName, setWrapupResolvedOwnerName] = useState("");
 
   const checkingCallEndRef = useRef(false);
   const initialLoadDoneRef = useRef(false);
@@ -1342,12 +1368,6 @@ export default function LigacoesPage() {
       : [];
   const secondaryFieldLabel = "Subfinalização";
   const showFollowUpFields = showNextActionField && nextActionComFollowUp.has(postCallForm.nextAction);
-  const wrapupLead = useMemo(() => {
-    if (!activeSession) return null;
-    const leadIndex = findLeadIndexForSession(leadsSnapshot, activeSession);
-    if (leadIndex === -1) return null;
-    return leadsSnapshot[leadIndex];
-  }, [activeSession, leadsSnapshot]);
   const wrapupLeadPrimaryEmail = postCallForm.primaryEmail;
   const availableWrapupEmailTargets = useMemo(
     () => postCallForm.emailItems.map((item) => String(item.value || "").trim()).filter(Boolean),
@@ -1601,6 +1621,43 @@ export default function LigacoesPage() {
     syncMeetings();
     return subscribeMeetingsSnapshot(syncMeetings);
   }, []);
+
+  useEffect(() => {
+    const syncBlocks = () => {
+      setAgendaBlocks(readAgendaBlocksFromStorage());
+    };
+    syncBlocks();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key && event.key !== AGENDA_BLOCKS_STORAGE_KEY) return;
+      syncBlocks();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!wrapupOpen) return;
+    setAgendaBlocks(readAgendaBlocksFromStorage());
+  }, [wrapupOpen]);
+
+  useEffect(() => {
+    let mounted = true;
+    const resolveOwner = async () => {
+      const resolved = await resolveResponsavelFromUserAsync(currentUser);
+      if (!mounted) return;
+      if (!resolved.linked || !resolved.responsavel) {
+        setWrapupResolvedOwnerName("");
+        return;
+      }
+      setWrapupResolvedOwnerName(resolved.responsavel.nome);
+    };
+    void resolveOwner();
+    return () => {
+      mounted = false;
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     console.log("[POSTCALL_DEBUG] /ligacoes carregada", {
@@ -2668,6 +2725,58 @@ export default function LigacoesPage() {
     }
   };
 
+  const reserveFollowUpSlot = async (params: {
+    date: string;
+    time: string;
+    ownerName: string;
+    sessionId: string;
+  }): Promise<FollowUpScheduleOutcome> => {
+    try {
+      const response = await fetch("/api/agenda/agendar", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "reserve",
+          date: params.date,
+          time: params.time,
+          owner: params.ownerName,
+          sessionId: params.sessionId,
+          blocks: agendaBlocks,
+          localMeetings: meetingsSnapshot.map((meeting) => ({
+            id: meeting.id,
+            date: meeting.date,
+            callTime: meeting.callTime,
+            owner: meeting.owner,
+            notes: meeting.notes || "",
+          })),
+        }),
+      });
+
+      const data = (await response.json()) as {
+        success?: boolean;
+        available?: boolean;
+        message?: string;
+      };
+      if (!response.ok || !data.success || !data.available) {
+        return {
+          success: false,
+          message: data.message || "Nao foi possivel validar disponibilidade para agendamento.",
+        };
+      }
+
+      return {
+        success: true,
+      };
+    } catch {
+      return {
+        success: false,
+        message: "Nao foi possivel validar disponibilidade para agendamento.",
+      };
+    }
+  };
+
   const summary = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     let todayCalls = 0;
@@ -2987,12 +3096,11 @@ export default function LigacoesPage() {
 
     const sessionMarker = `[POSTCALL:${session.sessionId}]`;
     const meetings = getMeetingsSnapshot();
-    const normalizedLeadName = normalizeMeetingPersonName(lead?.name || session.nome || "");
     const hasExistingMeeting = meetings.some((meeting) => {
       if ((meeting.notes || "").includes(sessionMarker)) return true;
       if (meeting.date !== formState.followUpDate || meeting.callTime !== formState.followUpTime) return false;
       if (normalizeMeetingPersonName(meeting.owner) !== normalizeMeetingPersonName(ownerName)) return false;
-      return normalizedLeadName && normalizeMeetingPersonName(meeting.personName) === normalizedLeadName;
+      return true;
     });
 
     if (hasExistingMeeting) return;
@@ -3153,6 +3261,19 @@ export default function LigacoesPage() {
         emailItems: normalizedEmailItems,
         emailTarget: postCallForm.sendEmail ? selectedEmailTarget : "",
       };
+
+      if (showFollowUpFields) {
+        const scheduleOutcome = await reserveFollowUpSlot({
+          date: safePostCallForm.followUpDate,
+          time: safePostCallForm.followUpTime,
+          ownerName,
+          sessionId: activeSession.sessionId,
+        });
+        if (!scheduleOutcome.success) {
+          setWrapupError(scheduleOutcome.message || "Nao foi possivel confirmar disponibilidade para agendamento.");
+          return;
+        }
+      }
 
       const savedWrapup = savePostCallWrapup({
         sessionId: activeSession.sessionId,
@@ -3970,26 +4091,30 @@ export default function LigacoesPage() {
                 </label>
               ) : null}
               {showFollowUpFields ? (
-                <>
-                  <label className="text-sm">
-                    Data de follow-up
-                    <input
-                      type="date"
-                      className="field mt-1"
-                      value={postCallForm.followUpDate}
-                      onChange={(event) => setPostCallForm((prev) => ({ ...prev, followUpDate: event.target.value }))}
+                <div className="md:col-span-2">
+                  <p className="text-sm text-slate-200">Agendamento de follow-up</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Selecione dia e horario disponiveis em slots de 30 minutos e confirme em Agendar.
+                  </p>
+                  <div className="mt-2">
+                    <SchedulePicker
+                      valueDate={postCallForm.followUpDate}
+                      valueTime={postCallForm.followUpTime}
+                      ownerName={wrapupResolvedOwnerName || String(currentUser?.email || "").trim() || "sem-responsavel"}
+                      sessionId={activeSession?.sessionId || undefined}
+                      meetings={meetingsSnapshot}
+                      blocks={agendaBlocks}
+                      disabled={wrapupSaving}
+                      onConfirm={(next) =>
+                        setPostCallForm((prev) => ({
+                          ...prev,
+                          followUpDate: next.date,
+                          followUpTime: next.time,
+                        }))
+                      }
                     />
-                  </label>
-                  <label className="text-sm">
-                    Horário de follow-up
-                    <input
-                      type="time"
-                      className="field mt-1"
-                      value={postCallForm.followUpTime}
-                      onChange={(event) => setPostCallForm((prev) => ({ ...prev, followUpTime: event.target.value }))}
-                    />
-                  </label>
-                </>
+                  </div>
+                </div>
               ) : null}
             </div>
           </section>
