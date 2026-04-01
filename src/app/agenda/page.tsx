@@ -442,6 +442,25 @@ export default function AgendaPage() {
     setPendingDeleteMeeting(null);
   };
 
+  const cancelMeeting = (meetingId: string) => {
+    const nowIso = new Date().toISOString();
+    setMeetings((prev) =>
+      normalizeMeetingsSnapshot(
+        prev.map((meeting) => {
+          if (meeting.id !== meetingId) return meeting;
+          const current = ensureAgendaEventDefaults(meeting);
+          return {
+            ...current,
+            status: "cancelado",
+            eventType: current.eventType || "cancelamento",
+            canceledAt: nowIso,
+            updatedAt: nowIso,
+          };
+        }),
+      ),
+    );
+  };
+
   const updateBlocks = (next: AgendaBlocks) => {
     setBlocks(next);
     if (typeof window !== "undefined") {
@@ -598,6 +617,7 @@ export default function AgendaPage() {
           <AgendaAllList
             meetings={visibleMeetings}
             onEditMeeting={openExisting}
+            onCancelMeeting={(meeting) => cancelMeeting(meeting.id)}
             onDeleteMeeting={(meeting) => setPendingDeleteMeeting(meeting)}
           />
         )}

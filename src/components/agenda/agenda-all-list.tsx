@@ -7,10 +7,11 @@ import { getMeetingReasonStyle } from "./reason-style";
 type AgendaAllListProps = {
   meetings: Meeting[];
   onEditMeeting: (meeting: Meeting) => void;
+  onCancelMeeting: (meeting: Meeting) => void;
   onDeleteMeeting: (meeting: Meeting) => void;
 };
 
-export function AgendaAllList({ meetings, onEditMeeting, onDeleteMeeting }: AgendaAllListProps) {
+export function AgendaAllList({ meetings, onEditMeeting, onCancelMeeting, onDeleteMeeting }: AgendaAllListProps) {
   const rows = useMemo(
     () => [...meetings].sort((a, b) => `${a.date} ${a.callTime}`.localeCompare(`${b.date} ${b.callTime}`)),
     [meetings],
@@ -49,6 +50,13 @@ export function AgendaAllList({ meetings, onEditMeeting, onDeleteMeeting }: Agen
                     onClick={() => onEditMeeting(meeting)}
                   >
                     Editar
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-600 transition hover:bg-amber-50"
+                    onClick={() => onCancelMeeting(meeting)}
+                  >
+                    Cancelar
                   </button>
                   <button
                     type="button"
