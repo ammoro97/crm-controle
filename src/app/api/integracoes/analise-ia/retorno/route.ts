@@ -743,7 +743,10 @@ export async function POST(request: Request) {
     }
 
     const stamp = nowDateTime();
-    const observation = await saveCallAnalysisObservation({
+
+    // Idempotência: se o callback chegar duas vezes (n8n retry), reutiliza observação existente
+    const existingObservation = await getCallAnalysisObservationByRequestId(requestId);
+    const observation = existingObservation ?? await saveCallAnalysisObservation({
       id: `OBS-IA-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       requestId,
       callId: requestRecord.callId,
@@ -756,6 +759,10 @@ export async function POST(request: Request) {
       createdAt: stamp.iso,
       updatedAt: stamp.iso,
     });
+
+    if (existingObservation) {
+      console.log("[ANALISE_IA][RETORNO] OBSERVATION_REUSED", { requestId, observationId: existingObservation.id });
+    }
 
     await updateCallAnalysisRequest(requestId, {
       status: "done",

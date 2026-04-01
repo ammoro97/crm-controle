@@ -459,18 +459,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
     const syncAiObservations = async () => {
       try {
-        const [response, internalCallsResponse] = await Promise.all([
-          fetch("/api/integracoes/analise-ia/observacoes", {
-            method: "GET",
-            cache: "no-store",
-          }),
-          fetch("/api/ligacoes", {
-            method: "GET",
-            cache: "no-store",
-          }),
-        ]);
+        const response = await fetch("/api/integracoes/analise-ia/observacoes", {
+          method: "GET",
+          cache: "no-store",
+        });
         const data = (await response.json()) as LeadAiObservationResponse;
-        const internalCallsData = (await internalCallsResponse.json()) as InternalCallsApiResponse;
         if (!response.ok || !data.success || !Array.isArray(data.observations)) return;
 
         const byLeadId = new Map<string, LeadObservation[]>();
@@ -482,18 +475,6 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           const current = byLeadId.get(leadId) || [];
           current.push(observation);
           byLeadId.set(leadId, current);
-        }
-
-        if (internalCallsResponse.ok && internalCallsData.success && Array.isArray(internalCallsData.calls)) {
-          for (const call of internalCallsData.calls) {
-            const leadId = String(call.leadId || "").trim();
-            if (!leadId) continue;
-            const observation = toLeadObservationFromCallLog(call);
-            if (!observation) continue;
-            const current = byLeadId.get(leadId) || [];
-            current.push(observation);
-            byLeadId.set(leadId, current);
-          }
         }
 
         if (cancelled || byLeadId.size === 0) return;

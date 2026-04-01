@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Lead, LeadObservationType } from "@/types/crm";
 import { LeadGeneralTab } from "./lead-detail/lead-general-tab";
 import { LeadIntelligenceTab } from "./lead-detail/lead-intelligence-tab";
@@ -32,6 +32,16 @@ type TimelineItem = {
   linkedObservationId?: string;
   sourceEventType: string;
 };
+
+function formatDateBR(value: string): string {
+  if (!value) return "-";
+  // Already DD/MM/YYYY
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) return value;
+  // YYYY-MM-DD → DD/MM/YYYY
+  const [year, month, day] = value.split("-");
+  if (year && month && day) return `${day}/${month}/${year}`;
+  return value;
+}
 
 const tabs: { id: DetailTab; label: string }[] = [
   { id: "resumo", label: "Resumo" },
@@ -249,7 +259,7 @@ function LeadObservationsTab({ draftLead, onDraftChange, onPersist, targetObserv
                 <div className="flex items-center justify-between gap-2">
                   <span className="rounded bg-slate-800 px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-slate-300">{item.type}</span>
                   <p className="text-xs text-muted">
-                    {item.date} - {item.time}
+                    {formatDateBR(item.date)} - {item.time}
                   </p>
                 </div>
                 <p className="mt-2 text-sm text-slate-100">{item.content}</p>
@@ -274,13 +284,27 @@ export function LeadDetailDrawer({
   const [isEditing, setIsEditing] = useState(false);
   const [draftLead, setDraftLead] = useState<Lead | null>(lead);
   const [targetObservationId, setTargetObservationId] = useState<string | null>(null);
+  const prevLeadIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setDraftLead(lead);
     setIsEditing(false);
     setActiveTab(initialTab || "resumo");
     setTargetObservationId(initialObservationId || null);
+    prevLeadIdRef.current = lead?.id ?? null;
   }, [initialObservationId, initialTab, lead?.id]);
+
+  // Quando syncAiObservations adiciona observações ao lead externo, reflete no draftLead
+  // sem resetar edições em andamento. Só sincroniza observationLog.
+  useEffect(() => {
+    if (!lead || !draftLead || lead.id !== prevLeadIdRef.current) return;
+    const externalIds = new Set(lead.observationLog.map((o) => o.id));
+    const localIds = new Set(draftLead.observationLog.map((o) => o.id));
+    const hasNew = lead.observationLog.some((o) => !localIds.has(o.id));
+    const hasRemoved = draftLead.observationLog.some((o) => !externalIds.has(o.id) && o.type !== "analise ia");
+    if (!hasNew && !hasRemoved) return;
+    setDraftLead((prev) => prev ? { ...prev, observationLog: lead.observationLog } : prev);
+  }, [lead?.observationLog]);
 
   if (!open || !lead || !draftLead) return null;
 
