@@ -28,36 +28,48 @@ function toStorageKey(filename: string): string {
 }
 
 export async function readDataFile<T>(filename: string, fallback: T): Promise<T> {
+  const key = toStorageKey(filename);
+
   // 1. Supabase (fonte de verdade persistente)
   try {
     const admin = getSupabaseAdmin();
-    if (admin) {
+    if (!admin) {
+      console.warn(`[STORAGE] read key=${key} supabase=SKIP (cliente nulo — SUPABASE_SERVICE_ROLE_KEY ausente?)`);
+    } else {
       const { data, error } = await admin
         .from(STORAGE_TABLE)
         .select("value")
-        .eq("key", toStorageKey(filename))
+        .eq("key", key)
         .maybeSingle();
 
-      if (!error && data?.value !== undefined && data.value !== null) {
+      if (error) {
+        console.error(`[STORAGE] read key=${key} supabase=ERROR`, error.message);
+      } else if (data?.value !== undefined && data.value !== null) {
+        console.log(`[STORAGE] read key=${key} source=supabase`);
         return data.value as T;
+      } else {
+        console.log(`[STORAGE] read key=${key} supabase=EMPTY (sem registro — tabela crm_storage existe?)`);
       }
     }
-  } catch {
-    // Supabase indisponivel — continua para fallbacks
+  } catch (err) {
+    console.error(`[STORAGE] read key=${key} supabase=EXCEPTION`, err instanceof Error ? err.message : err);
   }
 
   // 2. /tmp (instancia atual, local dev ou cache quente)
   try {
     const raw = await fs.readFile(runtimePath(filename), "utf8");
+    console.log(`[STORAGE] read key=${key} source=tmp`);
     return JSON.parse(raw) as T;
   } catch {}
 
   // 3. Bundle (somente leitura, valor inicial)
   try {
     const raw = await fs.readFile(bundlePath(filename), "utf8");
+    console.warn(`[STORAGE] read key=${key} source=BUNDLE (valor de fabrica — supabase e tmp indisponiveis)`);
     return JSON.parse(raw) as T;
   } catch {}
 
+  console.warn(`[STORAGE] read key=${key} source=FALLBACK_DEFAULT`);
   return fallback;
 }
 
