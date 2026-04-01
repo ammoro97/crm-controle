@@ -312,7 +312,12 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
     }
   };
 
-  const requestDial = (lead: Lead) => {
+  const requestDial = (lead: Lead, preferredPhone?: string) => {
+    if (preferredPhone) {
+      void callLead(lead, preferredPhone);
+      return;
+    }
+
     const phones = getLeadPhones(lead);
     if (phones.length === 0) {
       setCallFeedback(lead.id, { type: "error", message: "Lead sem telefone para discagem." });
@@ -498,7 +503,7 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
               <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nome</th>
               <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Empresa</th>
               <th className="w-[11rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nicho</th>
-              <th className="w-[13rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Telefone</th>
+              <th className="w-[19rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Telefone</th>
               <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Email</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Cidade</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Estado</th>
@@ -512,8 +517,11 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
             </tr>
           </thead>
           <tbody>
-            {tableRows.map(({ lead, location }) => (
-              <Fragment key={lead.id}>
+            {tableRows.map(({ lead, location }) => {
+              const phones = getLeadPhones(lead);
+
+              return (
+                <Fragment key={lead.id}>
                 <tr
                   onClick={() => {
                     if (suppressClickRef.current) return;
@@ -540,16 +548,48 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <TruncatedCellText value={lead.niche} fallback="-" widthClass="w-[11rem] max-w-[11rem]" />
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                    <TruncatedCellText
-                      value={(() => {
-                        const phones = getLeadPhones(lead);
-                        if (phones.length === 0) return "";
-                        if (phones.length === 1) return phones[0];
-                        return `${phones[0]} (+${phones.length - 1})`;
-                      })()}
-                      widthClass="w-[13rem] max-w-[13rem]"
-                    />
+                  <td className="px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <div className="w-[19rem] max-w-[19rem] space-y-1.5">
+                      {phones.length === 0 ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-slate-500">-</span>
+                          <button
+                            type="button"
+                            className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {callingLeadId === lead.id ? "Ligando..." : "📞 Ligar"}
+                          </button>
+                        </div>
+                      ) : (
+                        phones.map((phone, index) => (
+                          <div key={`${lead.id}-phone-${phone}-${index}`} className="flex flex-wrap items-center gap-2">
+                            <TruncatedCellText value={phone} widthClass="w-[11.5rem] max-w-[11.5rem]" />
+                            <button
+                              type="button"
+                              className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                              disabled={callingLeadId === lead.id}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                requestDial(lead, phone);
+                              }}
+                            >
+                              {callingLeadId === lead.id ? "Ligando..." : "📞 Ligar"}
+                            </button>
+                          </div>
+                        ))
+                      )}
+                      {callFeedbackByLead[lead.id] ? (
+                        <p
+                          className={`text-[11px] ${
+                            callFeedbackByLead[lead.id].type === "success" ? "text-emerald-300" : "text-rose-300"
+                          }`}
+                        >
+                          {callFeedbackByLead[lead.id].message}
+                        </p>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <TruncatedCellText value={lead.email} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
@@ -572,19 +612,8 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                   </td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{formatDateBR(lead.entryDate)}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{formatDateBR(lead.firstContactDate)}</td>
-                  <td className="w-[340px] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  <td className="w-[240px] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={callingLeadId === lead.id || getLeadPhones(lead).length === 0}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          requestDial(lead);
-                        }}
-                      >
-                        {callingLeadId === lead.id ? "Ligando..." : "📞 Ligar"}
-                      </button>
                       <button
                         type="button"
                         className="rounded-md border border-border px-2 py-1 text-[11px] text-slate-200 transition hover:bg-slate-800"
@@ -608,15 +637,6 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                         Editar linha
                       </button>
                     </div>
-                    {callFeedbackByLead[lead.id] ? (
-                      <p
-                        className={`mt-1.5 text-[11px] ${
-                          callFeedbackByLead[lead.id].type === "success" ? "text-emerald-300" : "text-rose-300"
-                        }`}
-                      >
-                        {callFeedbackByLead[lead.id].message}
-                      </p>
-                    ) : null}
                   </td>
                 </tr>
                 {editingRowId === lead.id && rowDraft ? (
@@ -708,8 +728,9 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                     </td>
                   </tr>
                 ) : null}
-              </Fragment>
-            ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
