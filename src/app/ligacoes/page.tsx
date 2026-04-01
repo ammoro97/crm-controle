@@ -466,7 +466,7 @@ function formatTime(value?: string | null) {
   const timeClean = timePartRaw.replace("Z", "").trim();
   if (timeClean.length < 5) return "-";
 
-  return timeClean.slice(0, 5);
+  return timeClean.length >= 8 ? timeClean.slice(0, 8) : timeClean.slice(0, 5);
 }
 
 function formatDuration(seconds?: number) {
@@ -1119,6 +1119,7 @@ export default function LigacoesPage() {
   const checkingCallEndRef = useRef(false);
   const initialLoadDoneRef = useRef(false);
   const isInitialLoadRunningRef = useRef(false);
+  const isLoadingCallsRef = useRef(false);
   const restoredFromQueryRef = useRef(false);
   const currentWrapupSessionRef = useRef<string | null>(null);
   const shouldRestoreWrapupByQuery =
@@ -1140,12 +1141,15 @@ export default function LigacoesPage() {
   }, [responsaveisRecords]);
 
   const loadCalls = async (signal?: AbortSignal, reason = "manual-refresh"): Promise<boolean> => {
+    if (isLoadingCallsRef.current) return false;
+    isLoadingCallsRef.current = true;
     console.log(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD START`, {
       reason,
       hasSignal: Boolean(signal),
       ts: new Date().toISOString(),
     });
-    setLoading(true);
+    const isInitialLoad = !initialLoadDoneRef.current;
+    if (isInitialLoad) setLoading(true);
     setError(null);
 
     try {
@@ -1272,7 +1276,8 @@ export default function LigacoesPage() {
       });
       return false;
     } finally {
-      setLoading(false);
+      if (isInitialLoad) setLoading(false);
+      isLoadingCallsRef.current = false;
     }
     return false;
   };
@@ -1284,6 +1289,7 @@ export default function LigacoesPage() {
       if (ok) return;
       if (attempt < attempts) {
         await sleep(400 * attempt);
+        isLoadingCallsRef.current = false;
       }
     }
   };
@@ -1418,9 +1424,10 @@ export default function LigacoesPage() {
     return () => window.clearInterval(intervalId);
   }, []);
 
+  const hasProcessingCalls = calls.some((call) => resolveAnalysisStatus(call) === "processing");
+
   useEffect(() => {
-    const hasProcessing = calls.some((call) => resolveAnalysisStatus(call) === "processing");
-    if (!hasProcessing) return;
+    if (!hasProcessingCalls) return;
 
     let disposed = false;
 
@@ -1546,7 +1553,7 @@ export default function LigacoesPage() {
       disposed = true;
       window.clearInterval(intervalId);
     };
-  }, [calls]);
+  }, [hasProcessingCalls]);
 
   useEffect(() => {
     let unmounted = false;
