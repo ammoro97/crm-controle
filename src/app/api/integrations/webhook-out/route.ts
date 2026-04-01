@@ -15,6 +15,8 @@ type SaveWebhookOutBody = {
 };
 
 export async function GET() {
+  console.log("[WEBHOOK_OUT][ENV_CHECK] SUPABASE_SERVICE_ROLE_KEY:", process.env.SUPABASE_SERVICE_ROLE_KEY ? "EXISTS" : "MISSING");
+  console.log("[WEBHOOK_OUT][ENV_CHECK] NEXT_PUBLIC_SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL ? "EXISTS" : "MISSING");
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
@@ -34,6 +36,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  console.log("[WEBHOOK_OUT][ENV_CHECK] SUPABASE_SERVICE_ROLE_KEY:", process.env.SUPABASE_SERVICE_ROLE_KEY ? "EXISTS" : "MISSING");
+  console.log("[WEBHOOK_OUT][ENV_CHECK] NEXT_PUBLIC_SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL ? "EXISTS" : "MISSING");
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
