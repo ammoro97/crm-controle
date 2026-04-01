@@ -4,10 +4,20 @@ import { ChangeEvent, DragEvent, FormEvent, useDeferredValue, useEffect, useMemo
 import { useRouter, useSearchParams } from "next/navigation";
 import { PageTopbar } from "@/components/layout/page-topbar";
 import { Modal } from "@/components/ui/modal";
-import { getLeadsSnapshot, setLeadsSnapshot } from "@/lib/crm-data-store";
+import {
+  getLeadsSnapshot,
+  getMeetingsSnapshot,
+  setLeadsSnapshot,
+  subscribeMeetingsSnapshot,
+} from "@/lib/crm-data-store";
 import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
-import { CallLog, Lead, LeadChannel, LeadHistoryEvent, LeadObservation, LeadStatus } from "@/types/crm";
+import {
+  isAgendaEventLinkedToLead,
+  normalizeAgendaEventStatus,
+  normalizeText as normalizeAgendaText,
+} from "@/lib/agenda-events";
+import { CallLog, Lead, LeadChannel, LeadHistoryEvent, LeadObservation, LeadStatus, Meeting } from "@/types/crm";
 import { LeadDetailDrawer } from "./lead-detail-drawer";
 import { LeadsTable } from "./leads-table";
 import { OutboundLeadsTable } from "./outbound-leads-table";
@@ -380,7 +390,188 @@ function buildRowIdentity(row: Pick<ImportedLeadRow, "email" | "phone">): string
   return "";
 }
 
+type LeadsDashboardMetrics = {
+  outboundTotal: number;
+  activationSamples: number;
+  conversionSamples: number;
+  avgActivationMs: number | null;
+  avgConversionMs: number | null;
+};
+
+const EMPTY_LEADS_DASHBOARD_METRICS: LeadsDashboardMetrics = {
+  outboundTotal: 0,
+  activationSamples: 0,
+  conversionSamples: 0,
+  avgActivationMs: null,
+  avgConversionMs: null,
+};
+
+const DASHBOARD_NUMBER_FORMATTER = new Intl.NumberFormat("pt-BR", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
+});
+
+function parseIsoDateTimeLocal(dateValue?: string | null, timeValue?: string | null): Date | null {
+  const rawDate = String(dateValue || "").trim();
+  const rawTime = String(timeValue || "").trim();
+  const dateMatch = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeMatch = rawTime.match(/^(\d{2}):(\d{2})$/);
+  if (!dateMatch || !timeMatch) return null;
+
+  const year = Number(dateMatch[1]);
+  const monthIndex = Number(dateMatch[2]) - 1;
+  const day = Number(dateMatch[3]);
+  const hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(monthIndex) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute)
+  ) {
+    return null;
+  }
+  if (monthIndex < 0 || monthIndex > 11) return null;
+  if (day < 1 || day > 31) return null;
+  if (hour < 0 || hour > 23) return null;
+  if (minute < 0 || minute > 59) return null;
+
+  const parsed = new Date(year, monthIndex, day, hour, minute, 0, 0);
+  if (Number.isNaN(parsed.getTime())) return null;
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== monthIndex ||
+    parsed.getDate() !== day ||
+    parsed.getHours() !== hour ||
+    parsed.getMinutes() !== minute
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function parseIsoDate(dateValue?: string | null): Date | null {
+  return parseIsoDateTimeLocal(dateValue, "00:00");
+}
+
+function parseLeadDateTime(value?: string | null): Date | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const normalized = raw.replace(" ", "T");
+  const parsed = new Date(normalized);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+
+  const dateTimeMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2}))?$/);
+  if (!dateTimeMatch) return null;
+  const [, yearRaw, monthRaw, dayRaw, hourRaw = "00", minuteRaw = "00"] = dateTimeMatch;
+  return parseIsoDateTimeLocal(`${yearRaw}-${monthRaw}-${dayRaw}`, `${hourRaw}:${minuteRaw}`);
+}
+
+function averageMilliseconds(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sum = values.reduce((acc, value) => acc + value, 0);
+  return sum / values.length;
+}
+
+function formatAverageDuration(value: number | null): string {
+  if (value == null) return "Sem dados";
+
+  const minutes = Math.max(1, Math.round(value / 60000));
+  if (minutes < 60) return `${minutes} min`;
+
+  const hours = value / 3600000;
+  if (hours < 48) return `${DASHBOARD_NUMBER_FORMATTER.format(hours)} h`;
+
+  const days = value / 86400000;
+  return `${DASHBOARD_NUMBER_FORMATTER.format(days)} dias`;
+}
+
+function isConversionHistoryEvent(event: LeadHistoryEvent): boolean {
+  const eventType = normalizeAgendaText(event.eventType);
+  const description = normalizeAgendaText(event.description);
+  const combined = `${eventType} ${description}`;
+  return (
+    combined.includes("conversao") ||
+    combined.includes("fechamento") ||
+    combined.includes("fechado") ||
+    combined.includes("assinatura")
+  );
+}
+
+function isEligibleConversionMeeting(meeting: Meeting): boolean {
+  const status = normalizeAgendaEventStatus(meeting);
+  if (status === "cancelado" || status === "apagado_logico" || status === "remarcado") return false;
+  return true;
+}
+
+function isConversionMeeting(meeting: Meeting): boolean {
+  const eventType = normalizeAgendaText(meeting.eventType);
+  const reason = normalizeAgendaText(meeting.reason);
+  return eventType === "call_conversao" || reason === "fechamento";
+}
+
+function resolveLeadConversionDate(lead: Lead, meetings: Meeting[]): Date | null {
+  const candidates: Date[] = [];
+
+  for (const meeting of meetings) {
+    if (!isAgendaEventLinkedToLead(meeting, lead)) continue;
+    if (!isEligibleConversionMeeting(meeting)) continue;
+    if (!isConversionMeeting(meeting)) continue;
+    const meetingDate = parseIsoDateTimeLocal(meeting.date, meeting.callTime);
+    if (meetingDate) candidates.push(meetingDate);
+  }
+
+  for (const event of lead.history || []) {
+    if (!isConversionHistoryEvent(event)) continue;
+    const eventDate = parseIsoDateTimeLocal(event.date, event.time || "00:00");
+    if (eventDate) candidates.push(eventDate);
+  }
+
+  if (lead.status === "Fechado") {
+    const statusFallbackDate = parseLeadDateTime(lead.lastInteraction);
+    if (statusFallbackDate) candidates.push(statusFallbackDate);
+  }
+
+  if (candidates.length === 0) return null;
+  return [...candidates].sort((a, b) => a.getTime() - b.getTime())[0] || null;
+}
+
+function calculateLeadsDashboardMetrics(leads: Lead[], meetings: Meeting[]): LeadsDashboardMetrics {
+  const outboundLeads = leads.filter((lead) => lead.channel === "outbound");
+  if (outboundLeads.length === 0) return EMPTY_LEADS_DASHBOARD_METRICS;
+
+  const activationDurations: number[] = [];
+  const conversionDurations: number[] = [];
+
+  for (const lead of outboundLeads) {
+    const entryDate = parseIsoDate(lead.entryDate);
+    const firstContactDate = parseIsoDate(lead.firstContactDate);
+
+    if (entryDate && firstContactDate && firstContactDate.getTime() >= entryDate.getTime()) {
+      activationDurations.push(firstContactDate.getTime() - entryDate.getTime());
+    }
+
+    if (!firstContactDate) continue;
+    const conversionDate = resolveLeadConversionDate(lead, meetings);
+    if (!conversionDate) continue;
+    if (conversionDate.getTime() < firstContactDate.getTime()) continue;
+    conversionDurations.push(conversionDate.getTime() - firstContactDate.getTime());
+  }
+
+  return {
+    outboundTotal: outboundLeads.length,
+    activationSamples: activationDurations.length,
+    conversionSamples: conversionDurations.length,
+    avgActivationMs: averageMilliseconds(activationDurations),
+    avgConversionMs: averageMilliseconds(conversionDurations),
+  };
+}
+
 export function LeadsView({ title, filter }: LeadsViewProps) {
+  const isDashboardMode = filter === "all";
   const router = useRouter();
   const searchParams = useSearchParams();
   const responsaveis = useResponsaveis();
@@ -388,6 +579,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const openedFromQueryRef = useRef<string | null>(null);
 
   const [leads, setLeads] = useState<Lead[]>(() => getLeadsSnapshot().map(normalizeLead));
+  const [meetings, setMeetings] = useState<Meeting[]>(() => getMeetingsSnapshot());
   const [draftLead, setDraftLead] = useState<Lead | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
@@ -511,6 +703,14 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isDashboardMode) return;
+    setMeetings(getMeetingsSnapshot());
+    return subscribeMeetingsSnapshot(() => {
+      setMeetings(getMeetingsSnapshot());
+    });
+  }, [isDashboardMode]);
+
   const visibleLeads = useMemo(() => {
     const base = filter === "all" ? leads : leads.filter((lead) => lead.channel === filter);
     const sorted = [...base].sort((a, b) => a.name.localeCompare(b.name));
@@ -531,9 +731,15 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     });
   }, [deferredSearchTerm, filter, leads]);
 
+  const dashboardMetrics = useMemo(() => {
+    if (!isDashboardMode) return EMPTY_LEADS_DASHBOARD_METRICS;
+    return calculateLeadsDashboardMetrics(leads, meetings);
+  }, [isDashboardMode, leads, meetings]);
+
   const detailLead = useMemo(() => leads.find((lead) => lead.id === detailLeadId) ?? null, [detailLeadId, leads]);
 
   useEffect(() => {
+    if (isDashboardMode) return;
     const leadId = String(searchParams.get("leadId") || "").trim();
     if (!leadId) return;
     const leadExists = leads.some((lead) => lead.id === leadId);
@@ -563,7 +769,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
     const pathname = typeof window !== "undefined" ? window.location.pathname : "/leads";
     router.replace(pathname, { scroll: false });
-  }, [leads, router, searchParams]);
+  }, [isDashboardMode, leads, router, searchParams]);
 
   const importPreviewRows = useMemo<ImportedPreviewRow[]>(() => {
     const existingKeys = new Set(leads.map((lead) => buildRowIdentity(lead)).filter(Boolean));
@@ -934,89 +1140,172 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         title={title}
         showSearch={false}
         actionsSlot={
-          <div ref={addMenuRef} className="relative">
+          isDashboardMode ? (
             <button
               type="button"
-              className="btn-primary flex h-10 items-center gap-1.5 px-4"
-              onClick={() => setAddMenuOpen((prev) => !prev)}
-              aria-haspopup="true"
-              aria-expanded={addMenuOpen}
-            >
-              Adicionar Lead
-              <svg viewBox="0 0 16 16" fill="currentColor" className={`h-3.5 w-3.5 transition-transform ${addMenuOpen ? "rotate-180" : ""}`}>
-                <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            {addMenuOpen ? (
-              <div className="absolute right-0 top-full z-30 mt-1.5 w-44 overflow-hidden rounded-xl border border-border bg-slate-900 shadow-xl">
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800"
-                  onClick={() => {
-                    setAddMenuOpen(false);
-                    setDraftLead(createEmptyLead(filter));
-                    setCreateOpen(true);
-                  }}
-                >
-                  <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 shrink-0 text-slate-400" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M8 3v10M3 8h10" strokeLinecap="round" />
-                  </svg>
-                  Manual
-                </button>
-                <div className="mx-3 h-px bg-border" />
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800"
-                  onClick={() => {
-                    setAddMenuOpen(false);
-                    setAutomationOpen(true);
-                  }}
-                >
-                  <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 shrink-0 text-slate-400" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M9 3L5 8h4l-2 5 6-7H9l2-3z" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Automatizado
-                </button>
-              </div>
-            ) : null}
-          </div>
-        }
-      />
-
-      <section className="panel mb-3 p-3 xl:p-3.5">
-        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-          <label className="w-full text-[11px] font-medium uppercase tracking-[0.08em] text-muted md:max-w-xl">
-            Busca global de leads
-            <input
-              className="field mt-1.5 h-9 px-2.5 py-1.5 text-xs xl:text-[13px]"
-              placeholder="Buscar por nome, empresa, telefone ou email"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-            />
-          </label>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="btn-ghost h-9 px-3 py-1.5 text-xs"
+              className="btn-ghost h-10 px-4 text-sm"
               onClick={() => {
                 if (typeof window !== "undefined") window.location.reload();
               }}
             >
               Atualizar pagina
             </button>
-            <button type="button" className="btn-ghost h-9 px-3 py-1.5 text-xs" onClick={() => setImportOpen(true)}>
-              Importar Leads
-            </button>
-          </div>
-        </div>
-      </section>
+          ) : (
+            <div ref={addMenuRef} className="relative">
+              <button
+                type="button"
+                className="btn-primary flex h-10 items-center gap-1.5 px-4"
+                onClick={() => setAddMenuOpen((prev) => !prev)}
+                aria-haspopup="true"
+                aria-expanded={addMenuOpen}
+              >
+                Adicionar Lead
+                <svg
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  className={`h-3.5 w-3.5 transition-transform ${addMenuOpen ? "rotate-180" : ""}`}
+                >
+                  <path
+                    d="M4 6l4 4 4-4"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              {addMenuOpen ? (
+                <div className="absolute right-0 top-full z-30 mt-1.5 w-44 overflow-hidden rounded-xl border border-border bg-slate-900 shadow-xl">
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800"
+                    onClick={() => {
+                      setAddMenuOpen(false);
+                      setDraftLead(createEmptyLead(filter));
+                      setCreateOpen(true);
+                    }}
+                  >
+                    <svg
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      className="h-4 w-4 shrink-0 text-slate-400"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    >
+                      <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+                    </svg>
+                    Manual
+                  </button>
+                  <div className="mx-3 h-px bg-border" />
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800"
+                    onClick={() => {
+                      setAddMenuOpen(false);
+                      setAutomationOpen(true);
+                    }}
+                  >
+                    <svg
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      className="h-4 w-4 shrink-0 text-slate-400"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    >
+                      <path d="M9 3L5 8h4l-2 5 6-7H9l2-3z" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Automatizado
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          )
+        }
+      />
 
-      {filter === "outbound" ? (
-        <OutboundLeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onDeleteLeads={deleteLeadsById} />
+      {isDashboardMode ? (
+        <section className="space-y-3">
+          <div className="panel p-4">
+            <p className="text-xs uppercase tracking-[0.08em] text-muted">Painel de acompanhamento - Outbound</p>
+            <p className="mt-1 text-sm text-slate-300">
+              Metrica consolidada da base outbound para tempo de acionamento e tempo de conversao.
+            </p>
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-2">
+            <article className="panel p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
+                Tempo medio de acionamento
+              </p>
+              <p className="mt-3 text-3xl font-semibold text-slate-100">
+                {formatAverageDuration(dashboardMetrics.avgActivationMs)}
+              </p>
+              <p className="mt-2 text-xs text-slate-400">Primeiro contato - data de cadastro</p>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Base valida: {dashboardMetrics.activationSamples}/{dashboardMetrics.outboundTotal} leads outbound
+              </p>
+            </article>
+
+            <article className="panel p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
+                Tempo medio de conversao
+              </p>
+              <p className="mt-3 text-3xl font-semibold text-slate-100">
+                {formatAverageDuration(dashboardMetrics.avgConversionMs)}
+              </p>
+              <p className="mt-2 text-xs text-slate-400">Data de conversao - data do contato</p>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Base valida: {dashboardMetrics.conversionSamples}/{dashboardMetrics.outboundTotal} leads outbound
+              </p>
+            </article>
+          </div>
+        </section>
       ) : (
-        <LeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onSaveRow={updateLeadById} onDeleteLeads={deleteLeadsById} />
+        <>
+          <section className="panel mb-3 p-3 xl:p-3.5">
+            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+              <label className="w-full text-[11px] font-medium uppercase tracking-[0.08em] text-muted md:max-w-xl">
+                Busca global de leads
+                <input
+                  className="field mt-1.5 h-9 px-2.5 py-1.5 text-xs xl:text-[13px]"
+                  placeholder="Buscar por nome, empresa, telefone ou email"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                />
+              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="btn-ghost h-9 px-3 py-1.5 text-xs"
+                  onClick={() => {
+                    if (typeof window !== "undefined") window.location.reload();
+                  }}
+                >
+                  Atualizar pagina
+                </button>
+                <button type="button" className="btn-ghost h-9 px-3 py-1.5 text-xs" onClick={() => setImportOpen(true)}>
+                  Importar Leads
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {filter === "outbound" ? (
+            <OutboundLeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onDeleteLeads={deleteLeadsById} />
+          ) : (
+            <LeadsTable
+              leads={visibleLeads}
+              onSelectLead={openLeadDetails}
+              onSaveRow={updateLeadById}
+              onDeleteLeads={deleteLeadsById}
+            />
+          )}
+        </>
       )}
 
+      {!isDashboardMode ? (
+        <>
       <Modal
         title={
           automationStep === "tipo"
@@ -1408,6 +1697,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           </div>
         </div>
       </Modal>
+        </>
+      ) : null}
     </section>
   );
 }
