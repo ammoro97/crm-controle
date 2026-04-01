@@ -4006,8 +4006,8 @@ export default function LigacoesPage() {
                   : "Todos os contatos classificados"}
               </span>
             </div>
-            <div className="mt-3 grid gap-3 xl:grid-cols-2">
-          <div className="rounded-lg border border-slate-800/90 bg-slate-900/40 p-3">
+            <div className="mt-3 flex flex-col gap-3">
+          <div className="w-full rounded-lg border border-slate-800/90 bg-slate-900/40 p-3">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-200">Telefones</p>
@@ -4096,7 +4096,7 @@ export default function LigacoesPage() {
             </div>
             <div className="mt-3 rounded-lg border border-slate-700/80 bg-slate-950/80 p-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200">Adicionar telefone</p>
-              <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_auto] md:items-end">
+              <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px_auto] lg:items-end">
                 <label className="text-[11px] text-slate-400">
                   Número do telefone
                   <input
@@ -4147,7 +4147,7 @@ export default function LigacoesPage() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-slate-800/90 bg-slate-900/40 p-3">
+          <div className="w-full rounded-lg border border-slate-800/90 bg-slate-900/40 p-3">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-200">E-mails</p>
@@ -4218,7 +4218,7 @@ export default function LigacoesPage() {
             </div>
             <div className="mt-3 rounded-lg border border-slate-700/80 bg-slate-950/80 p-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200">Adicionar e-mail</p>
-              <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_auto] md:items-end">
+              <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px_auto] lg:items-end">
                 <label className="text-[11px] text-slate-400">
                   Endereço de e-mail
                   <input
