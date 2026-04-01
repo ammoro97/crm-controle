@@ -56,6 +56,31 @@ function formatDateBR(value?: string | null): string {
   return `${day}/${month}/${year}`;
 }
 
+function formatLastInteraction(value?: string | null): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "-";
+
+  const normalized = raw.replace(" ", "T");
+  const parsed = new Date(normalized);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  const dateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}:\d{2}))?$/);
+  if (dateMatch) {
+    const [, year, month, day, time] = dateMatch;
+    return time ? `${day}/${month}/${year} ${time}` : `${day}/${month}/${year}`;
+  }
+
+  return raw;
+}
+
 function normalizePhoneValue(value?: string | null): string {
   return String(value || "").trim();
 }
@@ -431,7 +456,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
         onMouseDown={handleMouseDown}
         className={`overflow-x-auto ${isDragging ? "cursor-grabbing select-none" : "cursor-grab"}`}
       >
-        <table ref={tableRef} className="w-full min-w-[2000px] text-left">
+        <table ref={tableRef} className="w-full min-w-[2250px] text-left">
           <thead className="border-b border-border bg-slate-900/60 text-[11px] uppercase tracking-[0.08em] text-muted">
             <tr>
               <th className="w-9 px-3 py-2.5 xl:px-3.5 2xl:py-2">
@@ -450,11 +475,13 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
               <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Email</th>
               <th className="w-[16rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Site</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Expediente</th>
+              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Data Cadastro</th>
+              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">1o Contato</th>
+              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Ultimo Contato</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nota</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Avaliacoes</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Cidade</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Estado</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Data de Cadastro</th>
               <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Origem</th>
             </tr>
           </thead>
@@ -551,6 +578,19 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
                   </span>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  {formatDateBR(lead.entryDate)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  {formatDateBR(lead.firstContactDate || null)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  <TruncatedCellText
+                    value={formatLastInteraction(lead.lastInteraction)}
+                    fallback="-"
+                    widthClass="w-[11rem] max-w-[11rem]"
+                  />
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                   {formatNota(lead.nota)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
@@ -558,9 +598,6 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.city}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.state}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  {formatDateBR(lead.entryDate)}
-                </td>
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                   <TruncatedCellText value={lead.source} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
                 </td>
