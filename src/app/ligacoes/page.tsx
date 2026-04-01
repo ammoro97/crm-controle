@@ -1228,7 +1228,19 @@ function contactQualityLabel(quality?: LeadContactQuality) {
 function contactQualityBadgeClass(quality?: LeadContactQuality) {
   if (quality === "bom") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
   if (quality === "ruim") return "border-rose-500/40 bg-rose-500/10 text-rose-300";
-  return "border-slate-600/80 bg-slate-700/40 text-slate-300";
+  return "border-amber-500/40 bg-amber-500/10 text-amber-200";
+}
+
+function contactQualityControlClass(
+  current: LeadContactQuality | undefined,
+  option: LeadContactQuality | "nao_classificado",
+) {
+  const isSelected =
+    option === "nao_classificado" ? !current : current === option;
+  if (isSelected && option === "bom") return "bg-emerald-500/20 text-emerald-200";
+  if (isSelected && option === "ruim") return "bg-rose-500/20 text-rose-200";
+  if (isSelected && option === "nao_classificado") return "bg-slate-700/80 text-slate-100";
+  return "bg-slate-950/70 text-slate-400 hover:bg-slate-800/80";
 }
 
 export default function LigacoesPage() {
@@ -1293,6 +1305,18 @@ export default function LigacoesPage() {
   }, [postCallForm.emailTarget, wrapupLead]);
   const availableWrapupEmailTargets = useMemo(
     () => postCallForm.emailItems.map((item) => String(item.value || "").trim()).filter(Boolean),
+    [postCallForm.emailItems],
+  );
+  const activeSessionPhoneDigits = useMemo(
+    () => normalizeDigits(activeSession?.telefone || ""),
+    [activeSession?.telefone],
+  );
+  const unclassifiedPhoneCount = useMemo(
+    () => postCallForm.phoneItems.filter((item) => !item.quality).length,
+    [postCallForm.phoneItems],
+  );
+  const unclassifiedEmailCount = useMemo(
+    () => postCallForm.emailItems.filter((item) => !item.quality).length,
     [postCallForm.emailItems],
   );
   const hasEmailTargets = availableWrapupEmailTargets.length > 0;
@@ -2442,7 +2466,7 @@ export default function LigacoesPage() {
     });
   };
 
-  const setWrapupPhoneQualityAt = (index: number, quality: LeadContactQuality) => {
+  const setWrapupPhoneQualityAt = (index: number, quality?: LeadContactQuality) => {
     setPostCallForm((prev) => {
       if (!prev.phoneItems[index]) return prev;
       const nextItems = [...prev.phoneItems];
@@ -2483,7 +2507,7 @@ export default function LigacoesPage() {
     });
   };
 
-  const setWrapupEmailQualityAt = (index: number, quality: LeadContactQuality) => {
+  const setWrapupEmailQualityAt = (index: number, quality?: LeadContactQuality) => {
     setPostCallForm((prev) => {
       if (!prev.emailItems[index]) return prev;
       const nextItems = [...prev.emailItems];
@@ -3734,192 +3758,249 @@ export default function LigacoesPage() {
         onClose={handleWrapupModalClose}
       >
         <form className="space-y-4" onSubmit={handleSaveWrapup}>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="text-sm">
-              Telefone
-              <input className="field mt-1" value={activeSession?.telefone || "-"} readOnly />
-            </label>
-            <label className="text-sm">
-              Nome do lead
-              <input className="field mt-1" value={activeSession?.nome || "-"} readOnly />
-            </label>
-            <label className="text-sm md:col-span-2">
-              E-mail
-              <input className="field mt-1" value={wrapupLeadPrimaryEmail || "-"} readOnly />
-            </label>
-            <label className="text-sm md:col-span-2">
-              Finalização
-              <select
-                className="field mt-1"
-                value={postCallForm.result}
-                onChange={(event) => {
-                  const value = event.target.value as PostCallResultOption;
-                  const suggestedNextAction = getSuggestedNextActionByFinalizacao(value);
-                  setPostCallForm((prev) => ({
-                    ...prev,
-                    result: value,
-                    reason: value === "Cliente sem interesse" ? prev.reason : "",
-                    nextAction: finalizacaoComProximaAcao.has(value) ? suggestedNextAction : "",
-                  }));
-                }}
-              >
-                {postCallResultOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {showReasonField ? (
+          <section className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-sky-200">Dados da chamada</p>
+                <h3 className="mt-1 text-sm font-semibold text-slate-100">Contexto principal da finalizacao</h3>
+              </div>
+              <span className="rounded-full border border-sky-400/40 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-sky-200">
+                Ligacao atual
+              </span>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <label className="text-sm">
+                Telefone principal da chamada
+                <input className="field mt-1 font-mono" value={activeSession?.telefone || "-"} readOnly />
+              </label>
+              <label className="text-sm">
+                Nome do lead
+                <input className="field mt-1" value={activeSession?.nome || "-"} readOnly />
+              </label>
+              <label className="text-sm">
+                E-mail principal
+                <input className="field mt-1" value={wrapupLeadPrimaryEmail || "-"} readOnly />
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-300">Finalizacao</p>
+              <h3 className="mt-1 text-sm font-semibold text-slate-100">Defina o resultado da ligacao</h3>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="text-sm md:col-span-2">
-                Motivo
+                Finalização
                 <select
                   className="field mt-1"
-                  value={postCallForm.reason}
-                  onChange={(event) =>
+                  value={postCallForm.result}
+                  onChange={(event) => {
+                    const value = event.target.value as PostCallResultOption;
+                    const suggestedNextAction = getSuggestedNextActionByFinalizacao(value);
                     setPostCallForm((prev) => ({
                       ...prev,
-                      reason: event.target.value as "Ja possui CRM e nao tem interesse" | "Outros" | "",
-                    }))
-                  }
+                      result: value,
+                      reason: value === "Cliente sem interesse" ? prev.reason : "",
+                      nextAction: finalizacaoComProximaAcao.has(value) ? suggestedNextAction : "",
+                    }));
+                  }}
                 >
-                  <option value="">Selecione...</option>
-                  <option value="Ja possui CRM e nao tem interesse">Já possui CRM e não tem interesse</option>
-                  <option value="Outros">Outros</option>
-                </select>
-              </label>
-            ) : null}
-            {showNextActionField ? (
-              <label className="text-sm md:col-span-2">
-                {secondaryFieldLabel}
-                <select
-                  className="field mt-1"
-                  value={postCallForm.nextAction}
-                  onChange={(event) => setPostCallForm((prev) => ({ ...prev, nextAction: event.target.value }))}
-                >
-                  <option value="">Selecione...</option>
-                  {currentSecondaryOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
+                  {postCallResultOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
                 </select>
               </label>
-            ) : null}
-            {showFollowUpFields ? (
-              <>
-                <label className="text-sm">
-                  Data de follow-up
-                  <input
-                    type="date"
+              {showReasonField ? (
+                <label className="text-sm md:col-span-2">
+                  Motivo
+                  <select
                     className="field mt-1"
-                    value={postCallForm.followUpDate}
-                    onChange={(event) => setPostCallForm((prev) => ({ ...prev, followUpDate: event.target.value }))}
-                  />
+                    value={postCallForm.reason}
+                    onChange={(event) =>
+                      setPostCallForm((prev) => ({
+                        ...prev,
+                        reason: event.target.value as "Ja possui CRM e nao tem interesse" | "Outros" | "",
+                      }))
+                    }
+                  >
+                    <option value="">Selecione...</option>
+                    <option value="Ja possui CRM e nao tem interesse">Já possui CRM e não tem interesse</option>
+                    <option value="Outros">Outros</option>
+                  </select>
                 </label>
-                <label className="text-sm">
-                  Horário de follow-up
-                  <input
-                    type="time"
+              ) : null}
+              {showNextActionField ? (
+                <label className="text-sm md:col-span-2">
+                  {secondaryFieldLabel}
+                  <select
                     className="field mt-1"
-                    value={postCallForm.followUpTime}
-                    onChange={(event) => setPostCallForm((prev) => ({ ...prev, followUpTime: event.target.value }))}
-                  />
+                    value={postCallForm.nextAction}
+                    onChange={(event) => setPostCallForm((prev) => ({ ...prev, nextAction: event.target.value }))}
+                  >
+                    <option value="">Selecione...</option>
+                    {currentSecondaryOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
                 </label>
-              </>
-            ) : null}
-            <label className="text-sm md:col-span-2">
-              Observações
-              <textarea
-                className="field mt-1 min-h-[110px]"
-                value={postCallForm.observations}
-                onChange={(event) => setPostCallForm((prev) => ({ ...prev, observations: event.target.value }))}
-              />
-            </label>
-          </div>
-
-          <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-300">Telefones do lead</p>
-              <span className="text-[11px] text-slate-400">{postCallForm.phoneItems.length} cadastrados</span>
+              ) : null}
+              {showFollowUpFields ? (
+                <>
+                  <label className="text-sm">
+                    Data de follow-up
+                    <input
+                      type="date"
+                      className="field mt-1"
+                      value={postCallForm.followUpDate}
+                      onChange={(event) => setPostCallForm((prev) => ({ ...prev, followUpDate: event.target.value }))}
+                    />
+                  </label>
+                  <label className="text-sm">
+                    Horário de follow-up
+                    <input
+                      type="time"
+                      className="field mt-1"
+                      value={postCallForm.followUpTime}
+                      onChange={(event) => setPostCallForm((prev) => ({ ...prev, followUpTime: event.target.value }))}
+                    />
+                  </label>
+                </>
+              ) : null}
             </div>
-            <div className="mt-2 max-h-36 space-y-2 overflow-y-auto pr-1">
+          </section>
+
+          <section className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-300">Contatos do lead</p>
+                <h3 className="mt-1 text-sm font-semibold text-slate-100">Gerencie telefones e e-mails antes de salvar</h3>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                {unclassifiedPhoneCount + unclassifiedEmailCount > 0
+                  ? `${unclassifiedPhoneCount + unclassifiedEmailCount} contato(s) sem classificacao`
+                  : "Todos os contatos classificados"}
+              </span>
+            </div>
+            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+          <div className="rounded-lg border border-slate-800/90 bg-slate-900/40 p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-200">Telefones</p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Classifique cada numero para apoiar a decisao de nova tentativa.
+                </p>
+              </div>
+              <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-300">
+                {postCallForm.phoneItems.length}
+              </span>
+            </div>
+            <div className="mt-2 max-h-44 space-y-2 overflow-y-auto pr-1">
               {postCallForm.phoneItems.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-slate-700 px-2.5 py-2 text-xs text-slate-400">
                   Nenhum telefone cadastrado.
                 </p>
               ) : (
-                postCallForm.phoneItems.map((item, index) => (
-                  <div
-                    key={`${item.value}-${index}`}
-                    className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-2.5 py-2"
-                  >
-                    <span className="font-mono text-xs text-slate-100">{item.value}</span>
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${contactQualityBadgeClass(item.quality)}`}
+                postCallForm.phoneItems.map((item, index) => {
+                  const isPrimaryPhone =
+                    Boolean(activeSessionPhoneDigits) && normalizeDigits(item.value) === activeSessionPhoneDigits;
+                  return (
+                    <div
+                      key={`${item.value}-${index}`}
+                      className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/80 px-2.5 py-2"
                     >
-                      {contactQualityLabel(item.quality)}
-                    </span>
-                    <div className="ml-auto inline-flex overflow-hidden rounded-md border border-slate-700">
-                      <button
-                        type="button"
-                        className={`px-2 py-1 text-[11px] transition ${
-                          item.quality === "bom" ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-900 text-slate-300 hover:bg-slate-800"
-                        }`}
-                        onClick={() => setWrapupPhoneQualityAt(index, "bom")}
+                      <span className="font-mono text-xs text-slate-100">{item.value}</span>
+                      {isPrimaryPhone ? (
+                        <span className="rounded-full border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-sky-200">
+                          Principal
+                        </span>
+                      ) : null}
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${contactQualityBadgeClass(item.quality)}`}
                       >
-                        Bom
-                      </button>
-                      <button
-                        type="button"
-                        className={`border-l border-slate-700 px-2 py-1 text-[11px] transition ${
-                          item.quality === "ruim" ? "bg-rose-500/20 text-rose-200" : "bg-slate-900 text-slate-300 hover:bg-slate-800"
-                        }`}
-                        onClick={() => setWrapupPhoneQualityAt(index, "ruim")}
-                      >
-                        Ruim
-                      </button>
+                        {contactQualityLabel(item.quality)}
+                      </span>
+                      <div className="ml-auto inline-flex overflow-hidden rounded-md border border-slate-700">
+                        <button
+                          type="button"
+                          className={`px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "bom")}`}
+                          onClick={() => setWrapupPhoneQualityAt(index, "bom")}
+                          aria-label={`Marcar telefone ${item.value} como bom`}
+                        >
+                          Bom
+                        </button>
+                        <button
+                          type="button"
+                          className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "ruim")}`}
+                          onClick={() => setWrapupPhoneQualityAt(index, "ruim")}
+                          aria-label={`Marcar telefone ${item.value} como ruim`}
+                        >
+                          Ruim
+                        </button>
+                        <button
+                          type="button"
+                          className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "nao_classificado")}`}
+                          onClick={() => setWrapupPhoneQualityAt(index, undefined)}
+                          aria-label={`Marcar telefone ${item.value} como nao classificado`}
+                        >
+                          N/C
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
-            <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_auto]">
-              <input
-                className="field h-9"
-                placeholder="Novo telefone"
-                value={postCallForm.newPhoneValue}
-                onChange={(event) => setPostCallForm((prev) => ({ ...prev, newPhoneValue: event.target.value }))}
-              />
-              <select
-                className="field h-9 min-w-[110px]"
-                value={postCallForm.newPhoneQuality}
-                onChange={(event) =>
-                  setPostCallForm((prev) => ({
-                    ...prev,
-                    newPhoneQuality: (event.target.value as LeadContactQuality) || "bom",
-                  }))
-                }
-              >
-                <option value="bom">Bom</option>
-                <option value="ruim">Ruim</option>
-              </select>
-              <button
-                type="button"
-                className="btn-ghost h-9 whitespace-nowrap px-3 py-1.5 text-xs"
-                onClick={() => upsertWrapupPhoneItem(postCallForm.newPhoneValue, postCallForm.newPhoneQuality)}
-              >
-                + Telefone
-              </button>
+            <div className="mt-3 rounded-lg border border-dashed border-slate-700/80 bg-slate-950/70 p-2.5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-300">Adicionar telefone</p>
+              <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto_auto]">
+                <input
+                  className="field h-9"
+                  placeholder="Novo telefone"
+                  value={postCallForm.newPhoneValue}
+                  onChange={(event) => setPostCallForm((prev) => ({ ...prev, newPhoneValue: event.target.value }))}
+                />
+                <select
+                  className="field h-9 min-w-[120px]"
+                  value={postCallForm.newPhoneQuality}
+                  onChange={(event) =>
+                    setPostCallForm((prev) => ({
+                      ...prev,
+                      newPhoneQuality: (event.target.value as LeadContactQuality) || "bom",
+                    }))
+                  }
+                >
+                  <option value="bom">Bom</option>
+                  <option value="ruim">Ruim</option>
+                </select>
+                <button
+                  type="button"
+                  className="btn-ghost h-9 whitespace-nowrap px-3 py-1.5 text-xs"
+                  onClick={() => upsertWrapupPhoneItem(postCallForm.newPhoneValue, postCallForm.newPhoneQuality)}
+                >
+                  + Telefone
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-300">E-mails do lead</p>
-              <span className="text-[11px] text-slate-400">{postCallForm.emailItems.length} cadastrados</span>
+          <div className="rounded-lg border border-slate-800/90 bg-slate-900/40 p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-200">E-mails</p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Deixe a qualidade clara para orientar o envio opcional nesta finalizacao.
+                </p>
+              </div>
+              <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-300">
+                {postCallForm.emailItems.length}
+              </span>
             </div>
-            <div className="mt-2 max-h-36 space-y-2 overflow-y-auto pr-1">
+            <div className="mt-2 max-h-44 space-y-2 overflow-y-auto pr-1">
               {postCallForm.emailItems.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-slate-700 px-2.5 py-2 text-xs text-slate-400">
                   Nenhum e-mail cadastrado.
@@ -3928,7 +4009,7 @@ export default function LigacoesPage() {
                 postCallForm.emailItems.map((item, index) => (
                   <div
                     key={`${item.value}-${index}`}
-                    className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-2.5 py-2"
+                    className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/80 px-2.5 py-2"
                   >
                     <span className="text-xs text-slate-100">{item.value}</span>
                     <span
@@ -3939,62 +4020,73 @@ export default function LigacoesPage() {
                     <div className="ml-auto inline-flex overflow-hidden rounded-md border border-slate-700">
                       <button
                         type="button"
-                        className={`px-2 py-1 text-[11px] transition ${
-                          item.quality === "bom" ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-900 text-slate-300 hover:bg-slate-800"
-                        }`}
+                        className={`px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "bom")}`}
                         onClick={() => setWrapupEmailQualityAt(index, "bom")}
+                        aria-label={`Marcar e-mail ${item.value} como bom`}
                       >
                         Bom
                       </button>
                       <button
                         type="button"
-                        className={`border-l border-slate-700 px-2 py-1 text-[11px] transition ${
-                          item.quality === "ruim" ? "bg-rose-500/20 text-rose-200" : "bg-slate-900 text-slate-300 hover:bg-slate-800"
-                        }`}
+                        className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "ruim")}`}
                         onClick={() => setWrapupEmailQualityAt(index, "ruim")}
+                        aria-label={`Marcar e-mail ${item.value} como ruim`}
                       >
                         Ruim
+                      </button>
+                      <button
+                        type="button"
+                        className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "nao_classificado")}`}
+                        onClick={() => setWrapupEmailQualityAt(index, undefined)}
+                        aria-label={`Marcar e-mail ${item.value} como nao classificado`}
+                      >
+                        N/C
                       </button>
                     </div>
                   </div>
                 ))
               )}
             </div>
-            <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_auto]">
-              <input
-                className="field h-9"
-                placeholder="Novo e-mail"
-                value={postCallForm.newEmailValue}
-                onChange={(event) => setPostCallForm((prev) => ({ ...prev, newEmailValue: event.target.value }))}
-              />
-              <select
-                className="field h-9 min-w-[110px]"
-                value={postCallForm.newEmailQuality}
-                onChange={(event) =>
-                  setPostCallForm((prev) => ({
-                    ...prev,
-                    newEmailQuality: (event.target.value as LeadContactQuality) || "bom",
-                  }))
-                }
-              >
-                <option value="bom">Bom</option>
-                <option value="ruim">Ruim</option>
-              </select>
-              <button
-                type="button"
-                className="btn-ghost h-9 whitespace-nowrap px-3 py-1.5 text-xs"
-                onClick={() => upsertWrapupEmailItem(postCallForm.newEmailValue, postCallForm.newEmailQuality)}
-              >
-                + E-mail
-              </button>
+            <div className="mt-3 rounded-lg border border-dashed border-slate-700/80 bg-slate-950/70 p-2.5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-300">Adicionar e-mail</p>
+              <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto_auto]">
+                <input
+                  className="field h-9"
+                  placeholder="Novo e-mail"
+                  value={postCallForm.newEmailValue}
+                  onChange={(event) => setPostCallForm((prev) => ({ ...prev, newEmailValue: event.target.value }))}
+                />
+                <select
+                  className="field h-9 min-w-[120px]"
+                  value={postCallForm.newEmailQuality}
+                  onChange={(event) =>
+                    setPostCallForm((prev) => ({
+                      ...prev,
+                      newEmailQuality: (event.target.value as LeadContactQuality) || "bom",
+                    }))
+                  }
+                >
+                  <option value="bom">Bom</option>
+                  <option value="ruim">Ruim</option>
+                </select>
+                <button
+                  type="button"
+                  className="btn-ghost h-9 whitespace-nowrap px-3 py-1.5 text-xs"
+                  onClick={() => upsertWrapupEmailItem(postCallForm.newEmailValue, postCallForm.newEmailQuality)}
+                >
+                  + E-mail
+                </button>
+              </div>
             </div>
           </div>
+            </div>
+          </section>
 
-          <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
-            <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+          <section className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-700/70 bg-slate-900/60 p-3 text-sm text-slate-200">
               <input
                 type="checkbox"
-                className="h-4 w-4 accent-sky-500"
+                className="mt-0.5 h-4 w-4 accent-sky-500"
                 checked={postCallForm.sendEmail}
                 onChange={(event) =>
                   setPostCallForm((prev) => ({
@@ -4006,10 +4098,30 @@ export default function LigacoesPage() {
                   }))
                 }
               />
-              Enviar e-mail nesta finalização
+              <span className="flex-1">
+                <span className="block font-medium text-slate-100">Enviar e-mail nesta finalizacao</span>
+                <span className="mt-1 block text-xs text-slate-400">
+                  Ative para concluir a ligação e disparar o webhook de e-mail no mesmo fluxo.
+                </span>
+              </span>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${
+                  postCallForm.sendEmail
+                    ? "border-sky-500/40 bg-sky-500/10 text-sky-200"
+                    : "border-slate-600/70 bg-slate-800/70 text-slate-400"
+                }`}
+              >
+                {postCallForm.sendEmail ? "Ativo" : "Opcional"}
+              </span>
             </label>
-            {postCallForm.sendEmail ? (
-              <div className="mt-3 grid gap-3">
+
+            <div
+              className={`mt-3 overflow-hidden transition-all duration-200 ${
+                postCallForm.sendEmail ? "max-h-[460px] opacity-100" : "max-h-0 opacity-0"
+              }`}
+              aria-hidden={!postCallForm.sendEmail}
+            >
+              <div className="grid gap-3 rounded-lg border border-slate-700/70 bg-slate-900/50 p-3">
                 <label className="text-sm">
                   E-mail de destino
                   <select
@@ -4035,30 +4147,45 @@ export default function LigacoesPage() {
                     placeholder="Escreva a mensagem que sera enviada pelo fluxo integrado."
                   />
                 </label>
-                {wrapupSaving ? <p className="text-xs text-slate-400">Salvando finalização e disparando webhook de e-mail...</p> : null}
+                {wrapupSaving ? (
+                  <p className="text-xs text-slate-400">Salvando finalização e disparando webhook de e-mail...</p>
+                ) : null}
               </div>
-            ) : (
-              <p className="mt-2 text-xs text-slate-400">
-                Ative esta opcao para enviar mensagem de e-mail junto com a finalizacao.
-              </p>
-            )}
-          </div>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-800/80 bg-slate-950/35 p-4">
+            <label className="text-sm">
+              Observações
+              <textarea
+                className="field mt-1 min-h-[96px]"
+                value={postCallForm.observations}
+                onChange={(event) => setPostCallForm((prev) => ({ ...prev, observations: event.target.value }))}
+                placeholder="Registre contexto adicional desta finalizacao (opcional)."
+              />
+            </label>
+          </section>
 
           {activeSession && !activeSession.matchedCallId ? (
-            <p className="text-xs text-amber-300">
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
               Esta finalização será salva como pendente de conciliação até a chamada oficial ser identificada.
             </p>
           ) : null}
 
-          {wrapupError ? <p className="text-xs text-rose-300">{wrapupError}</p> : null}
+          {wrapupError ? (
+            <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{wrapupError}</p>
+          ) : null}
 
-          <div className="flex items-center gap-2">
-            <button type="button" className="btn-ghost" onClick={handleWrapupModalClose} disabled={wrapupSaving}>
-              Minimizar
-            </button>
-            <button type="submit" className="btn-primary" disabled={wrapupSaving}>
-              {wrapupSaving ? (postCallForm.sendEmail ? "Salvando e enviando e-mail..." : "Salvando...") : "Salvar finalização"}
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/70 pt-3">
+            <p className="text-xs text-slate-400">Revise os dados acima e salve a finalização para concluir esta ligação.</p>
+            <div className="flex items-center gap-2">
+              <button type="button" className="btn-ghost" onClick={handleWrapupModalClose} disabled={wrapupSaving}>
+                Minimizar
+              </button>
+              <button type="submit" className="btn-primary" disabled={wrapupSaving}>
+                {wrapupSaving ? (postCallForm.sendEmail ? "Salvando e enviando e-mail..." : "Salvando...") : "Salvar finalização"}
+              </button>
+            </div>
           </div>
         </form>
       </Modal>
