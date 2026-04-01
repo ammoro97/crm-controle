@@ -199,6 +199,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const n8nData = (await n8nResponse.json()) as N8nRetornoBody | N8nLeadItem[];
+    console.log("[SOLICITAR] n8n_response_raw", JSON.stringify(n8nData).slice(0, 500));
+
     const rawLeads: N8nLeadItem[] = Array.isArray(n8nData)
       ? (n8nData as N8nLeadItem[])
       : Array.isArray((n8nData as N8nRetornoBody).leads)
@@ -210,6 +212,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     const leads: Lead[] = rawLeads
       .map((raw) => buildOutboundLead(raw, body.tipoAutomacao))
       .filter((lead): lead is Lead => lead !== null);
+
+    console.log("[SOLICITAR] leads_extraidos", { count: leads.length, pending: leads.length === 0, empresas: leads.map(l => l.company) });
 
     // Se n8n respondeu com leads sincronamente, retorna direto.
     // Se retornou vazio (respond immediately / async), sinaliza pending
