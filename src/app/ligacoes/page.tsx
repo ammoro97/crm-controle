@@ -49,6 +49,9 @@ type Api4ComCallItem = {
   ended_at?: string;
   endedAt?: string;
   duration?: string | number;
+  billsec?: string | number;
+  bill_duration?: string | number;
+  duration_seconds?: string | number;
   hangup_cause?: string;
   hangupCause?: string;
   record_url?: string;
@@ -649,7 +652,20 @@ function mapApiCallToRow(
 ): MappedCall {
   const startedAt = parseDateMaybe(item.started_at ?? item.startedAt);
   const endedAt = parseDateMaybe(item.ended_at ?? item.endedAt);
-  const durationSeconds = parseDuration(item.duration);
+  const durationRaw = item.duration ?? item.billsec ?? item.bill_duration ?? item.duration_seconds;
+  const durationSeconds = parseDuration(durationRaw);
+  if (index === 0) {
+    console.log(`${LIGACOES_DEBUG_PREFIX} API4COM_ITEM_SAMPLE`, {
+      duration: item.duration,
+      billsec: item.billsec,
+      bill_duration: item.bill_duration,
+      duration_seconds: item.duration_seconds,
+      durationRaw,
+      durationSeconds,
+      hangup_cause: item.hangup_cause,
+      hangupCause: item.hangupCause,
+    });
+  }
   const rawStatus = String(item.hangup_cause ?? item.hangupCause ?? "").trim();
   const status = rawStatus ? humanizeHangupCause(rawStatus) : durationSeconds > 0 ? "Atendida" : "Não atendida";
   const rawCallId = String(item.call_id ?? item.callid ?? item.uniqueid ?? "").trim();
