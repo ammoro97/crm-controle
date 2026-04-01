@@ -12,11 +12,8 @@ import {
 } from "@/lib/crm-data-store";
 import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
-import {
-  isAgendaEventLinkedToLead,
-  normalizeAgendaEventStatus,
-  normalizeText as normalizeAgendaText,
-} from "@/lib/agenda-events";
+import { getPostCallWrapups, subscribePostCallFlow, type PostCallWrapup } from "@/lib/post-call-flow";
+import { buildOutboundDashboardMetrics } from "@/lib/leads-outbound-dashboard";
 import { CallLog, Lead, LeadChannel, LeadHistoryEvent, LeadObservation, LeadStatus, Meeting } from "@/types/crm";
 import { LeadDetailDrawer } from "./lead-detail-drawer";
 import { LeadsTable } from "./leads-table";
@@ -390,186 +387,6 @@ function buildRowIdentity(row: Pick<ImportedLeadRow, "email" | "phone">): string
   return "";
 }
 
-type LeadsDashboardMetrics = {
-  outboundTotal: number;
-  activationSamples: number;
-  conversionSamples: number;
-  avgActivationMs: number | null;
-  avgConversionMs: number | null;
-};
-
-const EMPTY_LEADS_DASHBOARD_METRICS: LeadsDashboardMetrics = {
-  outboundTotal: 0,
-  activationSamples: 0,
-  conversionSamples: 0,
-  avgActivationMs: null,
-  avgConversionMs: null,
-};
-
-const DASHBOARD_NUMBER_FORMATTER = new Intl.NumberFormat("pt-BR", {
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 1,
-});
-
-function parseIsoDateTimeLocal(dateValue?: string | null, timeValue?: string | null): Date | null {
-  const rawDate = String(dateValue || "").trim();
-  const rawTime = String(timeValue || "").trim();
-  const dateMatch = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const timeMatch = rawTime.match(/^(\d{2}):(\d{2})$/);
-  if (!dateMatch || !timeMatch) return null;
-
-  const year = Number(dateMatch[1]);
-  const monthIndex = Number(dateMatch[2]) - 1;
-  const day = Number(dateMatch[3]);
-  const hour = Number(timeMatch[1]);
-  const minute = Number(timeMatch[2]);
-
-  if (
-    !Number.isFinite(year) ||
-    !Number.isFinite(monthIndex) ||
-    !Number.isFinite(day) ||
-    !Number.isFinite(hour) ||
-    !Number.isFinite(minute)
-  ) {
-    return null;
-  }
-  if (monthIndex < 0 || monthIndex > 11) return null;
-  if (day < 1 || day > 31) return null;
-  if (hour < 0 || hour > 23) return null;
-  if (minute < 0 || minute > 59) return null;
-
-  const parsed = new Date(year, monthIndex, day, hour, minute, 0, 0);
-  if (Number.isNaN(parsed.getTime())) return null;
-  if (
-    parsed.getFullYear() !== year ||
-    parsed.getMonth() !== monthIndex ||
-    parsed.getDate() !== day ||
-    parsed.getHours() !== hour ||
-    parsed.getMinutes() !== minute
-  ) {
-    return null;
-  }
-
-  return parsed;
-}
-
-function parseIsoDate(dateValue?: string | null): Date | null {
-  return parseIsoDateTimeLocal(dateValue, "00:00");
-}
-
-function parseLeadDateTime(value?: string | null): Date | null {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
-  const normalized = raw.replace(" ", "T");
-  const parsed = new Date(normalized);
-  if (!Number.isNaN(parsed.getTime())) return parsed;
-
-  const dateTimeMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2}))?$/);
-  if (!dateTimeMatch) return null;
-  const [, yearRaw, monthRaw, dayRaw, hourRaw = "00", minuteRaw = "00"] = dateTimeMatch;
-  return parseIsoDateTimeLocal(`${yearRaw}-${monthRaw}-${dayRaw}`, `${hourRaw}:${minuteRaw}`);
-}
-
-function averageMilliseconds(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sum = values.reduce((acc, value) => acc + value, 0);
-  return sum / values.length;
-}
-
-function formatAverageDuration(value: number | null): string {
-  if (value == null) return "Sem dados";
-
-  const minutes = Math.max(1, Math.round(value / 60000));
-  if (minutes < 60) return `${minutes} min`;
-
-  const hours = value / 3600000;
-  if (hours < 48) return `${DASHBOARD_NUMBER_FORMATTER.format(hours)} h`;
-
-  const days = value / 86400000;
-  return `${DASHBOARD_NUMBER_FORMATTER.format(days)} dias`;
-}
-
-function isConversionHistoryEvent(event: LeadHistoryEvent): boolean {
-  const eventType = normalizeAgendaText(event.eventType);
-  const description = normalizeAgendaText(event.description);
-  const combined = `${eventType} ${description}`;
-  return (
-    combined.includes("conversao") ||
-    combined.includes("fechamento") ||
-    combined.includes("fechado") ||
-    combined.includes("assinatura")
-  );
-}
-
-function isEligibleConversionMeeting(meeting: Meeting): boolean {
-  const status = normalizeAgendaEventStatus(meeting);
-  if (status === "cancelado" || status === "apagado_logico" || status === "remarcado") return false;
-  return true;
-}
-
-function isConversionMeeting(meeting: Meeting): boolean {
-  const eventType = normalizeAgendaText(meeting.eventType);
-  const reason = normalizeAgendaText(meeting.reason);
-  return eventType === "call_conversao" || reason === "fechamento";
-}
-
-function resolveLeadConversionDate(lead: Lead, meetings: Meeting[]): Date | null {
-  const candidates: Date[] = [];
-
-  for (const meeting of meetings) {
-    if (!isAgendaEventLinkedToLead(meeting, lead)) continue;
-    if (!isEligibleConversionMeeting(meeting)) continue;
-    if (!isConversionMeeting(meeting)) continue;
-    const meetingDate = parseIsoDateTimeLocal(meeting.date, meeting.callTime);
-    if (meetingDate) candidates.push(meetingDate);
-  }
-
-  for (const event of lead.history || []) {
-    if (!isConversionHistoryEvent(event)) continue;
-    const eventDate = parseIsoDateTimeLocal(event.date, event.time || "00:00");
-    if (eventDate) candidates.push(eventDate);
-  }
-
-  if (lead.status === "Fechado") {
-    const statusFallbackDate = parseLeadDateTime(lead.lastInteraction);
-    if (statusFallbackDate) candidates.push(statusFallbackDate);
-  }
-
-  if (candidates.length === 0) return null;
-  return [...candidates].sort((a, b) => a.getTime() - b.getTime())[0] || null;
-}
-
-function calculateLeadsDashboardMetrics(leads: Lead[], meetings: Meeting[]): LeadsDashboardMetrics {
-  const outboundLeads = leads.filter((lead) => lead.channel === "outbound");
-  if (outboundLeads.length === 0) return EMPTY_LEADS_DASHBOARD_METRICS;
-
-  const activationDurations: number[] = [];
-  const conversionDurations: number[] = [];
-
-  for (const lead of outboundLeads) {
-    const entryDate = parseIsoDate(lead.entryDate);
-    const firstContactDate = parseIsoDate(lead.firstContactDate);
-
-    if (entryDate && firstContactDate && firstContactDate.getTime() >= entryDate.getTime()) {
-      activationDurations.push(firstContactDate.getTime() - entryDate.getTime());
-    }
-
-    if (!firstContactDate) continue;
-    const conversionDate = resolveLeadConversionDate(lead, meetings);
-    if (!conversionDate) continue;
-    if (conversionDate.getTime() < firstContactDate.getTime()) continue;
-    conversionDurations.push(conversionDate.getTime() - firstContactDate.getTime());
-  }
-
-  return {
-    outboundTotal: outboundLeads.length,
-    activationSamples: activationDurations.length,
-    conversionSamples: conversionDurations.length,
-    avgActivationMs: averageMilliseconds(activationDurations),
-    avgConversionMs: averageMilliseconds(conversionDurations),
-  };
-}
-
 export function LeadsView({ title, filter }: LeadsViewProps) {
   const isDashboardMode = filter === "all";
   const router = useRouter();
@@ -580,6 +397,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   const [leads, setLeads] = useState<Lead[]>(() => getLeadsSnapshot().map(normalizeLead));
   const [meetings, setMeetings] = useState<Meeting[]>(() => getMeetingsSnapshot());
+  const [dashboardCallLogs, setDashboardCallLogs] = useState<CallLog[]>([]);
+  const [dashboardWrapups, setDashboardWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
+  const [dashboardReferenceDate, setDashboardReferenceDate] = useState<Date>(() => new Date());
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [draftLead, setDraftLead] = useState<Lead | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
@@ -711,6 +533,68 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     });
   }, [isDashboardMode]);
 
+  useEffect(() => {
+    if (!isDashboardMode) return;
+
+    let cancelled = false;
+    const loadCallLogs = async (showLoading: boolean) => {
+      if (showLoading) setDashboardLoading(true);
+      try {
+        const response = await fetch("/api/ligacoes", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const data = (await response.json()) as { success?: boolean; calls?: CallLog[]; message?: string };
+        if (cancelled) return;
+        if (!response.ok || !data.success || !Array.isArray(data.calls)) {
+          if (showLoading) {
+            setDashboardError(data.message || "Nao foi possivel carregar as ligacoes para o painel.");
+          }
+          return;
+        }
+        setDashboardCallLogs(data.calls);
+        setDashboardError(null);
+      } catch {
+        if (!cancelled && showLoading) {
+          setDashboardError("Nao foi possivel carregar as ligacoes para o painel.");
+        }
+      } finally {
+        if (!cancelled && showLoading) {
+          setDashboardLoading(false);
+        }
+      }
+    };
+
+    void loadCallLogs(true);
+    const intervalId = window.setInterval(() => {
+      void loadCallLogs(false);
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [isDashboardMode]);
+
+  useEffect(() => {
+    if (!isDashboardMode) return;
+    setDashboardWrapups(getPostCallWrapups());
+    return subscribePostCallFlow(() => {
+      setDashboardWrapups(getPostCallWrapups());
+    });
+  }, [isDashboardMode]);
+
+  useEffect(() => {
+    if (!isDashboardMode) return;
+    setDashboardReferenceDate(new Date());
+    const intervalId = window.setInterval(() => {
+      setDashboardReferenceDate(new Date());
+    }, 60000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isDashboardMode]);
+
   const visibleLeads = useMemo(() => {
     const base = filter === "all" ? leads : leads.filter((lead) => lead.channel === filter);
     const sorted = [...base].sort((a, b) => a.name.localeCompare(b.name));
@@ -732,9 +616,44 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   }, [deferredSearchTerm, filter, leads]);
 
   const dashboardMetrics = useMemo(() => {
-    if (!isDashboardMode) return EMPTY_LEADS_DASHBOARD_METRICS;
-    return calculateLeadsDashboardMetrics(leads, meetings);
-  }, [isDashboardMode, leads, meetings]);
+    return buildOutboundDashboardMetrics({
+      leads,
+      meetings,
+      callLogs: dashboardCallLogs,
+      wrapups: dashboardWrapups,
+      referenceDate: dashboardReferenceDate,
+    });
+  }, [dashboardCallLogs, dashboardReferenceDate, dashboardWrapups, leads, meetings]);
+
+  const dashboardConversionRateLabel = useMemo(() => {
+    return `${dashboardMetrics.taxaConversao.toFixed(1).replace(".", ",")}%`;
+  }, [dashboardMetrics.taxaConversao]);
+
+  const dashboardFunnelSteps = useMemo(
+    () => [
+      { label: "Leads Prospectados", value: dashboardMetrics.funnel.leadsProspectados, color: "bg-sky-500/60" },
+      { label: "Ligacoes Atendidas", value: dashboardMetrics.funnel.ligacoesAtendidas, color: "bg-indigo-500/60" },
+      { label: "Contato com Decisor", value: dashboardMetrics.funnel.contatosComDecisor, color: "bg-amber-500/60" },
+      { label: "Calls Agendadas", value: dashboardMetrics.funnel.callsAgendadas, color: "bg-emerald-500/60" },
+    ],
+    [dashboardMetrics.funnel.callsAgendadas, dashboardMetrics.funnel.contatosComDecisor, dashboardMetrics.funnel.leadsProspectados, dashboardMetrics.funnel.ligacoesAtendidas],
+  );
+
+  const dashboardFunnelMaxValue = useMemo(() => {
+    return Math.max(1, ...dashboardFunnelSteps.map((step) => step.value));
+  }, [dashboardFunnelSteps]);
+
+  const dashboardActivities = useMemo(
+    () => [
+      { label: "Emails Enviados", value: dashboardMetrics.totalEmailsEnviados, color: "bg-cyan-500/65" },
+      { label: "Ligacoes Feitas", value: dashboardMetrics.totalLigacoesFeitas, color: "bg-violet-500/65" },
+    ],
+    [dashboardMetrics.totalEmailsEnviados, dashboardMetrics.totalLigacoesFeitas],
+  );
+
+  const dashboardActivitiesMaxValue = useMemo(() => {
+    return Math.max(1, ...dashboardActivities.map((activity) => activity.value));
+  }, [dashboardActivities]);
 
   const detailLead = useMemo(() => leads.find((lead) => lead.id === detailLeadId) ?? null, [detailLeadId, leads]);
 
@@ -1227,36 +1146,111 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       {isDashboardMode ? (
         <section className="space-y-3">
           <div className="panel p-4">
-            <p className="text-xs uppercase tracking-[0.08em] text-muted">Painel de acompanhamento - Outbound</p>
-            <p className="mt-1 text-sm text-slate-300">
-              Metrica consolidada da base outbound para tempo de acionamento e tempo de conversao.
-            </p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.08em] text-muted">Painel de acompanhamento - Outbound</p>
+                <p className="mt-1 text-sm text-slate-300">
+                  Visao consolidada da operacao outbound com funil, atividades e indicadores de conversao.
+                </p>
+              </div>
+              <p className="rounded-md border border-border bg-slate-900/60 px-2 py-1 text-[11px] text-slate-400">
+                Atualizado em {dashboardReferenceDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+              </p>
+            </div>
+            {dashboardLoading ? (
+              <p className="mt-2 text-xs text-slate-400">Carregando metricas do painel...</p>
+            ) : dashboardError ? (
+              <p className="mt-2 rounded-md border border-amber-400/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-200">
+                {dashboardError}
+              </p>
+            ) : null}
           </div>
 
-          <div className="grid gap-3 xl:grid-cols-2">
+          <div className="grid gap-3 lg:grid-cols-3">
             <article className="panel p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
-                Tempo medio de acionamento
-              </p>
-              <p className="mt-3 text-3xl font-semibold text-slate-100">
-                {formatAverageDuration(dashboardMetrics.avgActivationMs)}
-              </p>
-              <p className="mt-2 text-xs text-slate-400">Primeiro contato - data de cadastro</p>
-              <p className="mt-1 text-[11px] text-slate-500">
-                Base valida: {dashboardMetrics.activationSamples}/{dashboardMetrics.outboundTotal} leads outbound
-              </p>
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Total de Leads Prospectados</p>
+              <p className="mt-2 text-3xl font-semibold text-slate-100">{dashboardMetrics.totalLeadsProspectados}</p>
+              <p className="mt-1 text-xs text-slate-400">Base outbound considerada no painel</p>
             </article>
 
             <article className="panel p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
-                Tempo medio de conversao
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Calls Agendadas</p>
+              <p className="mt-2 text-3xl font-semibold text-slate-100">{dashboardMetrics.totalCallsAgendadas}</p>
+              <p className="mt-1 text-xs text-slate-400">Leads com call futura agendada</p>
+            </article>
+
+            <article className="panel p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Taxa de Conversao</p>
+              <p className="mt-2 text-3xl font-semibold text-emerald-300">{dashboardConversionRateLabel}</p>
+              <p className="mt-1 text-xs text-slate-400">
+                Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})
               </p>
-              <p className="mt-3 text-3xl font-semibold text-slate-100">
-                {formatAverageDuration(dashboardMetrics.avgConversionMs)}
-              </p>
-              <p className="mt-2 text-xs text-slate-400">Data de conversao - data do contato</p>
-              <p className="mt-1 text-[11px] text-slate-500">
-                Base valida: {dashboardMetrics.conversionSamples}/{dashboardMetrics.outboundTotal} leads outbound
+            </article>
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-[1.4fr_1fr]">
+            <article className="panel p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Funil de Vendas Outbound</p>
+                <p className="text-[11px] text-slate-500">Etapas consolidadas da operacao</p>
+              </div>
+              <div className="space-y-2.5">
+                {dashboardFunnelSteps.map((step) => {
+                  const width = step.value <= 0
+                    ? 8
+                    : Math.max(14, Math.min(100, Math.round((step.value / dashboardFunnelMaxValue) * 100)));
+                  return (
+                    <div key={step.label} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
+                        <span>{step.label}</span>
+                        <span className="font-semibold text-slate-100">{step.value}</span>
+                      </div>
+                      <div className="h-2.5 overflow-hidden rounded-full bg-slate-800/90">
+                        <div className={`h-full rounded-full ${step.color}`} style={{ width: `${width}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </article>
+
+            <article className="panel p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Atividades (BDR)</p>
+                <p className="text-[11px] text-slate-500">Email + ligacoes</p>
+              </div>
+              <div className="space-y-3">
+                {dashboardActivities.map((activity) => {
+                  const width = activity.value <= 0
+                    ? 8
+                    : Math.max(14, Math.min(100, Math.round((activity.value / dashboardActivitiesMaxValue) * 100)));
+                  return (
+                    <div key={activity.label} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
+                        <span>{activity.label}</span>
+                        <span className="font-semibold text-slate-100">{activity.value}</span>
+                      </div>
+                      <div className="h-2.5 overflow-hidden rounded-full bg-slate-800/90">
+                        <div className={`h-full rounded-full ${activity.color}`} style={{ width: `${width}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </article>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            <article className="panel p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Follow-ups Pendentes</p>
+              <p className="mt-2 text-3xl font-semibold text-slate-100">{dashboardMetrics.totalFollowupsPendentes}</p>
+              <p className="mt-1 text-xs text-slate-400">Follow-ups futuros com status ativo</p>
+            </article>
+            <article className="panel p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Taxa de Conversao (Indicador)</p>
+              <p className="mt-2 text-3xl font-semibold text-emerald-300">{dashboardConversionRateLabel}</p>
+              <p className="mt-1 text-xs text-slate-400">
+                {dashboardMetrics.totalCallsAgendadas} calls agendadas para {dashboardMetrics.totalContatosDecisor} contatos com decisor
               </p>
             </article>
           </div>
