@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/require-auth";
 import { getWebhookOutConfig, isWebhookOutConfigured } from "@/lib/webhook-out-config-store";
 import { CALL_ANALYSIS_SECRET_HEADER } from "@/types/call-analysis";
-import { Lead } from "@/types/crm";
-
 const CRM_EVENT_OUTBOUND = "outbound" as const;
 
 export type SolicitacaoApiPayload = {
@@ -26,105 +24,13 @@ export type SolicitacaoCnpjPayload = {
 
 export type SolicitacaoPayload = SolicitacaoApiPayload | SolicitacaoCnpjPayload;
 
-type N8nLeadItem = {
-  name?: string;
-  nome?: string;
-  company?: string;
-  empresa?: string;
-  phone?: string;
-  telefone?: string;
-  email?: string;
-  city?: string;
-  cidade?: string;
-  niche?: string;
-  nicho?: string;
-  [key: string]: unknown;
-};
-
-type N8nRetornoBody = {
-  leads?: N8nLeadItem[];
-  data?: N8nLeadItem[];
-  [key: string]: unknown;
-};
-
 export type SolicitacaoResponse = {
   success: boolean;
-  leads?: Lead[];
+  leads?: never[];
   count?: number;
   pending?: boolean;
   message?: string;
 };
-
-function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lead | null {
-  const name = String(raw.name || raw.nome || "").trim();
-  const company = String(raw.company || raw.empresa || "").trim();
-  if (!name && !company) return null;
-
-  const now = new Date();
-  const dateStr = now.toISOString().slice(0, 10);
-  const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  const sourceLabel = tipoAutomacao === "api" ? "Automacao por API" : "Automacao por CNPJ";
-  const id = `L-AUTO-${now.getTime()}-${Math.random().toString(36).slice(2, 7)}`;
-
-  return {
-    id,
-    name: name || company,
-    names: name ? [name] : [],
-    company,
-    phone: String(raw.phone || raw.telefone || "").trim(),
-    phones: [],
-    email: String(raw.email || "").trim(),
-    emails: [],
-    status: "Novo",
-    source: sourceLabel,
-    owner: "",
-    notes: "",
-    channel: "outbound",
-    city: String(raw.city || raw.cidade || "").trim(),
-    niche: String(raw.niche || raw.nicho || "").trim(),
-    entryDate: dateStr,
-    firstContactDate: "",
-    lastInteraction: "",
-    nextAction: "",
-    nextActionDate: "",
-    lossReason: "",
-    temperature: "frio",
-    history: [
-      {
-        id: `H-AUTO-${now.getTime()}-${Math.random().toString(36).slice(2, 7)}`,
-        date: dateStr,
-        time: timeStr,
-        eventType: "LEAD_CRIADO",
-        description: `Lead criado via ${sourceLabel}. Canal: outbound.`,
-        owner: "Automacao",
-      },
-    ],
-    internalNotes: [],
-    observationLog: [],
-    outboundQualification: {
-      decisionContacts: [{ name: "", phone: "", email: "" }],
-      whoAnswered: "",
-      attemptCount: "1",
-      businessType: "estetica",
-      specialty: "",
-      monthlyRevenueRange: "Ate R$ 50k/mensal",
-      averageLeadsPerMonth: "",
-      employeeCountRange: "1-5",
-      unitCount: "1",
-      painPoints: [],
-      mainProblem: "",
-      usesCrm: "nao",
-      crmName: "",
-      usesDigitalSchedule: "nao",
-      usesSpreadsheet: "nao",
-      usesNothing: "sim",
-      decisionMakerIdentified: "nao",
-      buyingMoment: "pesquisando",
-      icpFit: "medio",
-      teamSize: "",
-    },
-  };
-}
 
 export async function POST(request: Request): Promise<NextResponse> {
   const auth = await requireAuth();
@@ -198,31 +104,20 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const n8nData = (await n8nResponse.json()) as N8nRetornoBody | N8nLeadItem[];
-    console.log("[SOLICITAR] n8n_response_raw", JSON.stringify(n8nData).slice(0, 500));
+    // Descartar resposta sincrona do n8n — ela pode conter dados da execucao
+    // anterior (cache/pin do n8n), causando duplicatas. Todos os leads devem
+    // chegar pelo caminho assincrono: n8n → /retorno → Supabase → /pendentes.
+    try {
+      await n8nResponse.text(); // consome o body para evitar connection leak
+    } catch {
+      // ignora
+    }
 
-    const rawLeads: N8nLeadItem[] = Array.isArray(n8nData)
-      ? (n8nData as N8nLeadItem[])
-      : Array.isArray((n8nData as N8nRetornoBody).leads)
-        ? ((n8nData as N8nRetornoBody).leads as N8nLeadItem[])
-        : Array.isArray((n8nData as N8nRetornoBody).data)
-          ? ((n8nData as N8nRetornoBody).data as N8nLeadItem[])
-          : [];
-
-    const leads: Lead[] = rawLeads
-      .map((raw) => buildOutboundLead(raw, body.tipoAutomacao))
-      .filter((lead): lead is Lead => lead !== null);
-
-    console.log("[SOLICITAR] leads_extraidos", { count: leads.length, pending: leads.length === 0, empresas: leads.map(l => l.company) });
-
-    // Se n8n respondeu com leads sincronamente, retorna direto.
-    // Se retornou vazio (respond immediately / async), sinaliza pending
-    // para o frontend aguardar o callback via /retorno + /pendentes.
     return NextResponse.json<SolicitacaoResponse>({
       success: true,
-      leads,
-      count: leads.length,
-      pending: leads.length === 0,
+      leads: [],
+      count: 0,
+      pending: true,
     });
   } catch (error) {
     console.error(
