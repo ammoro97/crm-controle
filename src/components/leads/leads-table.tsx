@@ -8,6 +8,7 @@ import { useResponsaveis } from "@/lib/responsaveis-store";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
 import { createDialSession, generateCallSessionId, resolveBlockingStateBeforeNewDial } from "@/lib/post-call-flow";
 import { Lead } from "@/types/crm";
+import { TruncatedCellText } from "./table-cell-truncate";
 
 type LeadsTableProps = {
   leads: Lead[];
@@ -482,17 +483,17 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                   aria-label="Selecionar todos"
                 />
               </th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nome</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Empresa</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nicho</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Telefone</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Email</th>
+              <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nome</th>
+              <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Empresa</th>
+              <th className="w-[11rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nicho</th>
+              <th className="w-[13rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Telefone</th>
+              <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Email</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Cidade</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Estado</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Status</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Canal</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Origem</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Responsavel</th>
+              <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Origem</th>
+              <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Responsavel</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Entrada no CRM</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Primeiro contato</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Acao</th>
@@ -518,18 +519,29 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                       aria-label={`Selecionar ${lead.name}`}
                     />
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.name}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.company}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.niche || "-"}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                    {(() => {
-                      const phones = getLeadPhones(lead);
-                      if (phones.length === 0) return "-";
-                      if (phones.length === 1) return phones[0];
-                      return `${phones[0]} (+${phones.length - 1})`;
-                    })()}
+                    <TruncatedCellText value={lead.name} widthClass="w-[12rem] max-w-[12rem]" />
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.email}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText value={lead.company} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText value={lead.niche} fallback="-" widthClass="w-[11rem] max-w-[11rem]" />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText
+                      value={(() => {
+                        const phones = getLeadPhones(lead);
+                        if (phones.length === 0) return "";
+                        if (phones.length === 1) return phones[0];
+                        return `${phones[0]} (+${phones.length - 1})`;
+                      })()}
+                      widthClass="w-[13rem] max-w-[13rem]"
+                    />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText value={lead.email} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.city}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.state}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.status}</td>
@@ -540,8 +552,12 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                       {lead.channel}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.source}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.owner}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText value={lead.source} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText value={lead.owner} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{formatDateBR(lead.entryDate)}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{formatDateBR(lead.firstContactDate)}</td>
                   <td className="w-[340px] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
