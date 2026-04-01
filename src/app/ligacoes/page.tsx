@@ -3864,7 +3864,7 @@ export default function LigacoesPage() {
         open={wrapupOpen}
         onClose={handleWrapupModalClose}
       >
-        <form className="space-y-4" onSubmit={handleSaveWrapup}>
+        <form className="space-y-4" onSubmit={handleSaveWrapup} autoComplete="off">
           <section className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -4031,92 +4031,117 @@ export default function LigacoesPage() {
                   return (
                     <div
                       key={`${item.value}-${index}`}
-                      className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/80 px-2.5 py-2"
+                      className="rounded-lg border border-slate-800 bg-slate-900/80 px-2.5 py-2"
                     >
-                      <span className="font-mono text-xs text-slate-100">{item.value}</span>
-                      {isPrimaryPhone ? (
-                        <span className="rounded-full border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-sky-200">
-                          Principal
-                        </span>
-                      ) : null}
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${contactQualityBadgeClass(item.quality)}`}
-                      >
-                        {contactQualityLabel(item.quality)}
-                      </span>
-                      <div className="ml-auto inline-flex overflow-hidden rounded-md border border-slate-700">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs text-slate-100">{item.value}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            {isPrimaryPhone ? (
+                              <span className="rounded-full border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-sky-200">
+                                Principal
+                              </span>
+                            ) : null}
+                            <span className="text-[11px] text-slate-400">Status atual:</span>
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${contactQualityBadgeClass(item.quality)}`}
+                            >
+                              {contactQualityLabel(item.quality)}
+                            </span>
+                          </div>
+                        </div>
                         <button
                           type="button"
-                          className={`px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "bom")}`}
-                          onClick={() => setWrapupPhoneQualityAt(index, "bom")}
-                          aria-label={`Marcar telefone ${item.value} como bom`}
+                          className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[11px] font-medium text-rose-200 transition hover:bg-rose-500/20"
+                          onClick={() => removeWrapupPhoneAt(index)}
+                          aria-label={`Excluir telefone ${item.value}`}
+                          title="Excluir telefone"
                         >
-                          Bom
-                        </button>
-                        <button
-                          type="button"
-                          className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "ruim")}`}
-                          onClick={() => setWrapupPhoneQualityAt(index, "ruim")}
-                          aria-label={`Marcar telefone ${item.value} como ruim`}
-                        >
-                          Ruim
-                        </button>
-                        <button
-                          type="button"
-                          className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "nao_classificado")}`}
-                          onClick={() => setWrapupPhoneQualityAt(index, undefined)}
-                          aria-label={`Marcar telefone ${item.value} como nao classificado`}
-                        >
-                          N/C
+                          Excluir
                         </button>
                       </div>
-                      <button
-                        type="button"
-                        className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[11px] font-medium text-rose-200 transition hover:bg-rose-500/20"
-                        onClick={() => removeWrapupPhoneAt(index)}
-                        aria-label={`Excluir telefone ${item.value}`}
-                        title="Excluir telefone"
-                      >
-                        Excluir
-                      </button>
+                      <div className="mt-2">
+                        <p className="text-[10px] uppercase tracking-[0.08em] text-slate-500">Alterar status</p>
+                        <div className="mt-1 inline-flex overflow-hidden rounded-md border border-slate-700">
+                          <button
+                            type="button"
+                            className={`px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "bom")}`}
+                            onClick={() => setWrapupPhoneQualityAt(index, "bom")}
+                            aria-label={`Marcar telefone ${item.value} como bom`}
+                          >
+                            Bom
+                          </button>
+                          <button
+                            type="button"
+                            className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "ruim")}`}
+                            onClick={() => setWrapupPhoneQualityAt(index, "ruim")}
+                            aria-label={`Marcar telefone ${item.value} como ruim`}
+                          >
+                            Ruim
+                          </button>
+                          <button
+                            type="button"
+                            className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "nao_classificado")}`}
+                            onClick={() => setWrapupPhoneQualityAt(index, undefined)}
+                            aria-label={`Marcar telefone ${item.value} como nao classificado`}
+                          >
+                            N/C
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   );
                 })
               )}
             </div>
-            <div className="mt-3 rounded-lg border border-dashed border-slate-700/80 bg-slate-950/70 p-2.5">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-300">Adicionar telefone</p>
-              <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto_auto]">
-                <input
-                  ref={wrapupPhoneInputRef}
-                  type="tel"
-                  inputMode="tel"
-                  className="field h-9"
-                  placeholder="Novo telefone"
-                  value={postCallForm.newPhoneValue}
-                  onChange={(event) => setPostCallForm((prev) => ({ ...prev, newPhoneValue: event.target.value }))}
-                  autoComplete="off"
-                />
-                <select
-                  className="field h-9 min-w-[120px]"
-                  value={postCallForm.newPhoneQuality}
-                  onChange={(event) =>
-                    setPostCallForm((prev) => ({
-                      ...prev,
-                      newPhoneQuality: normalizeContactQualitySelection(event.target.value),
-                    }))
-                  }
-                >
-                  <option value="bom">Bom</option>
-                  <option value="ruim">Ruim</option>
-                  <option value="nao_classificado">N/C</option>
-                </select>
+            <div className="mt-3 rounded-lg border border-slate-700/80 bg-slate-950/80 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200">Adicionar telefone</p>
+              <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_auto] md:items-end">
+                <label className="text-[11px] text-slate-400">
+                  Número do telefone
+                  <input
+                    ref={wrapupPhoneInputRef}
+                    type="tel"
+                    inputMode="tel"
+                    name="wrapup_new_phone"
+                    className="field mt-1 h-10 border-slate-600 bg-slate-950/90 placeholder:text-slate-500 focus:border-sky-500/60 focus:ring-2 focus:ring-sky-500/20"
+                    placeholder="Ex.: (11) 99999-9999"
+                    value={postCallForm.newPhoneValue}
+                    onChange={(event) => setPostCallForm((prev) => ({ ...prev, newPhoneValue: event.target.value }))}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      upsertWrapupPhoneItem(postCallForm.newPhoneValue, toLeadContactQuality(postCallForm.newPhoneQuality));
+                    }}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    spellCheck={false}
+                  />
+                </label>
+                <label className="text-[11px] text-slate-400">
+                  Classificação inicial
+                  <select
+                    className="field mt-1 h-10 min-w-[120px] border-slate-600 bg-slate-950/90"
+                    value={postCallForm.newPhoneQuality}
+                    onChange={(event) =>
+                      setPostCallForm((prev) => ({
+                        ...prev,
+                        newPhoneQuality: normalizeContactQualitySelection(event.target.value),
+                      }))
+                    }
+                  >
+                    <option value="bom">Bom</option>
+                    <option value="ruim">Ruim</option>
+                    <option value="nao_classificado">N/C</option>
+                  </select>
+                </label>
                 <button
                   type="button"
-                  className="btn-ghost h-9 whitespace-nowrap px-3 py-1.5 text-xs"
+                  className="btn-ghost h-10 whitespace-nowrap px-3 py-1.5 text-xs"
                   onClick={() => upsertWrapupPhoneItem(postCallForm.newPhoneValue, toLeadContactQuality(postCallForm.newPhoneQuality))}
                 >
-                  + Telefone
+                  + Adicionar
                 </button>
               </div>
             </div>
@@ -4143,76 +4168,103 @@ export default function LigacoesPage() {
                 postCallForm.emailItems.map((item, index) => (
                   <div
                     key={`${item.value}-${index}`}
-                    className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/80 px-2.5 py-2"
+                    className="rounded-lg border border-slate-800 bg-slate-900/80 px-2.5 py-2"
                   >
-                    <span className="text-xs text-slate-100">{item.value}</span>
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${contactQualityBadgeClass(item.quality)}`}
-                    >
-                      {contactQualityLabel(item.quality)}
-                    </span>
-                    <div className="ml-auto inline-flex overflow-hidden rounded-md border border-slate-700">
-                      <button
-                        type="button"
-                        className={`px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "bom")}`}
-                        onClick={() => setWrapupEmailQualityAt(index, "bom")}
-                        aria-label={`Marcar e-mail ${item.value} como bom`}
-                      >
-                        Bom
-                      </button>
-                      <button
-                        type="button"
-                        className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "ruim")}`}
-                        onClick={() => setWrapupEmailQualityAt(index, "ruim")}
-                        aria-label={`Marcar e-mail ${item.value} como ruim`}
-                      >
-                        Ruim
-                      </button>
-                      <button
-                        type="button"
-                        className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "nao_classificado")}`}
-                        onClick={() => setWrapupEmailQualityAt(index, undefined)}
-                        aria-label={`Marcar e-mail ${item.value} como nao classificado`}
-                      >
-                        N/C
-                      </button>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs text-slate-100" title={item.value}>
+                        {item.value}
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <span className="text-[11px] text-slate-400">Status atual:</span>
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${contactQualityBadgeClass(item.quality)}`}
+                        >
+                          {contactQualityLabel(item.quality)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-2">
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-slate-500">Alterar status</p>
+                      <div className="mt-1 inline-flex overflow-hidden rounded-md border border-slate-700">
+                        <button
+                          type="button"
+                          className={`px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "bom")}`}
+                          onClick={() => setWrapupEmailQualityAt(index, "bom")}
+                          aria-label={`Marcar e-mail ${item.value} como bom`}
+                        >
+                          Bom
+                        </button>
+                        <button
+                          type="button"
+                          className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "ruim")}`}
+                          onClick={() => setWrapupEmailQualityAt(index, "ruim")}
+                          aria-label={`Marcar e-mail ${item.value} como ruim`}
+                        >
+                          Ruim
+                        </button>
+                        <button
+                          type="button"
+                          className={`border-l border-slate-700 px-2.5 py-1 text-[11px] transition ${contactQualityControlClass(item.quality, "nao_classificado")}`}
+                          onClick={() => setWrapupEmailQualityAt(index, undefined)}
+                          aria-label={`Marcar e-mail ${item.value} como nao classificado`}
+                        >
+                          N/C
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))
               )}
             </div>
-            <div className="mt-3 rounded-lg border border-dashed border-slate-700/80 bg-slate-950/70 p-2.5">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-300">Adicionar e-mail</p>
-              <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto_auto]">
-                <input
-                  ref={wrapupEmailInputRef}
-                  type="email"
-                  className="field h-9"
-                  placeholder="Novo e-mail"
-                  value={postCallForm.newEmailValue}
-                  onChange={(event) => setPostCallForm((prev) => ({ ...prev, newEmailValue: event.target.value }))}
-                  autoComplete="off"
-                />
-                <select
-                  className="field h-9 min-w-[120px]"
-                  value={postCallForm.newEmailQuality}
-                  onChange={(event) =>
-                    setPostCallForm((prev) => ({
-                      ...prev,
-                      newEmailQuality: normalizeContactQualitySelection(event.target.value),
-                    }))
-                  }
-                >
-                  <option value="bom">Bom</option>
-                  <option value="ruim">Ruim</option>
-                  <option value="nao_classificado">N/C</option>
-                </select>
+            <div className="mt-3 rounded-lg border border-slate-700/80 bg-slate-950/80 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200">Adicionar e-mail</p>
+              <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_auto] md:items-end">
+                <label className="text-[11px] text-slate-400">
+                  Endereço de e-mail
+                  <input
+                    ref={wrapupEmailInputRef}
+                    type="email"
+                    name="wrapup_new_email"
+                    className="field mt-1 h-10 border-slate-600 bg-slate-950/90 placeholder:text-slate-500 focus:border-sky-500/60 focus:ring-2 focus:ring-sky-500/20"
+                    placeholder="Ex.: contato@empresa.com"
+                    value={postCallForm.newEmailValue}
+                    onChange={(event) => setPostCallForm((prev) => ({ ...prev, newEmailValue: event.target.value }))}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      upsertWrapupEmailItem(postCallForm.newEmailValue, toLeadContactQuality(postCallForm.newEmailQuality));
+                    }}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    spellCheck={false}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                  />
+                </label>
+                <label className="text-[11px] text-slate-400">
+                  Classificação inicial
+                  <select
+                    className="field mt-1 h-10 min-w-[120px] border-slate-600 bg-slate-950/90"
+                    value={postCallForm.newEmailQuality}
+                    onChange={(event) =>
+                      setPostCallForm((prev) => ({
+                        ...prev,
+                        newEmailQuality: normalizeContactQualitySelection(event.target.value),
+                      }))
+                    }
+                  >
+                    <option value="bom">Bom</option>
+                    <option value="ruim">Ruim</option>
+                    <option value="nao_classificado">N/C</option>
+                  </select>
+                </label>
                 <button
                   type="button"
-                  className="btn-ghost h-9 whitespace-nowrap px-3 py-1.5 text-xs"
+                  className="btn-ghost h-10 whitespace-nowrap px-3 py-1.5 text-xs"
                   onClick={() => upsertWrapupEmailItem(postCallForm.newEmailValue, toLeadContactQuality(postCallForm.newEmailQuality))}
                 >
-                  + E-mail
+                  + Adicionar
                 </button>
               </div>
             </div>
