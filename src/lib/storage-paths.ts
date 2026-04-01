@@ -88,9 +88,23 @@ export async function writeDataFile<T>(filename: string, value: T): Promise<void
         },
         { onConflict: "key" },
       );
-      if (!error) supabaseOk = true;
+      if (!error) {
+        supabaseOk = true;
+      } else {
+        console.error(
+          `[STORAGE] write key=${toStorageKey(filename)} supabase=ERROR`,
+          error.message,
+          `| code=${error.code} | details=${error.details} | hint=${error.hint}`,
+        );
+      }
+    } else {
+      console.warn(`[STORAGE] write key=${toStorageKey(filename)} supabase=SKIP (client nulo)`);
     }
-  } catch {
+  } catch (err) {
+    console.error(
+      `[STORAGE] write key=${toStorageKey(filename)} supabase=EXCEPTION`,
+      err instanceof Error ? err.message : err,
+    );
     // Supabase indisponivel — continua para /tmp
   }
 
