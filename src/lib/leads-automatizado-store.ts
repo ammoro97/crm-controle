@@ -21,8 +21,8 @@ export async function savePendingAutomatedLeads(entry: PendingAutomatedLeadEntry
 
 export async function consumePendingAutomatedLeads(): Promise<PendingAutomatedLeadEntry[]> {
   const current = await getPendingAutomatedLeads();
-  if (current.length > 0) {
-    await writeDataFile(PENDING_FILE, []);
-  }
+  // Sempre zera mesmo se vazio para garantir que /tmp e Supabase ficam sincronizados
+  await writeDataFile(PENDING_FILE, []);
+  console.log(`[LEADS_AUTO] consume: retornando ${current.length} entradas, arquivo zerado`);
   return current;
 }

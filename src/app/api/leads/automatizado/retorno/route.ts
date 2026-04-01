@@ -234,9 +234,22 @@ export async function POST(request: Request): Promise<NextResponse> {
           : [];
     }
 
+    console.log("[RETORNO] payload_bruto", {
+      requestId,
+      tipoAutomacao,
+      rawCount: rawLeads.length,
+      primeiraEmpresa: rawLeads[0]?.nome ?? rawLeads[0]?.empresa ?? "(vazio)",
+    });
+
     const leads: Lead[] = rawLeads
       .map((item) => buildOutboundLead(item, tipoAutomacao))
       .filter((lead): lead is Lead => lead !== null);
+
+    console.log("[RETORNO] leads_normalizados", {
+      count: leads.length,
+      ids: leads.map((l) => l.id),
+      empresas: leads.map((l) => l.company),
+    });
 
     if (leads.length === 0) {
       return NextResponse.json(
@@ -251,6 +264,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       leads,
       savedAt: new Date().toISOString(),
     });
+
+    console.log("[RETORNO] salvo_pendente", { requestId, count: leads.length });
 
     return NextResponse.json({ success: true, count: leads.length });
   } catch (error) {

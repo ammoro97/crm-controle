@@ -62,11 +62,13 @@ export async function readDataFile<T>(filename: string, fallback: T): Promise<T>
 }
 
 export async function writeDataFile<T>(filename: string, value: T): Promise<void> {
+  let supabaseOk = false;
+
   // 1. Supabase (persistente)
   try {
     const admin = getSupabaseAdmin();
     if (admin) {
-      await admin.from(STORAGE_TABLE).upsert(
+      const { error } = await admin.from(STORAGE_TABLE).upsert(
         {
           key: toStorageKey(filename),
           value,
@@ -74,14 +76,24 @@ export async function writeDataFile<T>(filename: string, value: T): Promise<void
         },
         { onConflict: "key" },
       );
+      if (!error) supabaseOk = true;
     }
   } catch {
     // Supabase indisponivel — continua para /tmp
   }
 
   // 2. /tmp (fallback local/dev)
+  // Quando Supabase esta disponivel, sincroniza /tmp com o mesmo valor para
+  // evitar que instancias serverless retornem dado stale no fallback.
   try {
     await ensureRuntimeDir();
     await fs.writeFile(runtimePath(filename), JSON.stringify(value, null, 2), "utf8");
-  } catch {}
+    if (supabaseOk) {
+      console.log(`[STORAGE] write ok — supabase=true tmp=synced key=${toStorageKey(filename)}`);
+    }
+  } catch {
+    if (!supabaseOk) {
+      console.error(`[STORAGE] write failed — supabase=false tmp=failed key=${toStorageKey(filename)}`);
+    }
+  }
 }
