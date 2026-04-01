@@ -715,7 +715,14 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       const returnedLeads = data.leads ?? [];
       if (returnedLeads.length > 0) {
         // n8n respondeu sincronamente com leads
-        setLeads((prev) => [...prev, ...returnedLeads.map(normalizeLead)]);
+        setLeads((prev) => {
+          const existingIds = new Set(prev.map((l) => l.id));
+          const existingPhones = new Set(prev.filter((l) => l.phone).map((l) => l.phone));
+          const incoming = returnedLeads
+            .map(normalizeLead)
+            .filter((l) => !existingIds.has(l.id) && (!l.phone || !existingPhones.has(l.phone)));
+          return incoming.length > 0 ? [...prev, ...incoming] : prev;
+        });
         setAutomationLeadsCount(returnedLeads.length);
         setAutomationStep("sucesso");
       } else if (data.pending) {
@@ -860,7 +867,10 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         if (response.ok && data.success && data.leads && data.leads.length > 0) {
           setLeads((prev) => {
             const existingIds = new Set(prev.map((l) => l.id));
-            const incoming = data.leads!.map(normalizeLead).filter((l) => !existingIds.has(l.id));
+            const existingPhones = new Set(prev.filter((l) => l.phone).map((l) => l.phone));
+            const incoming = data.leads!
+              .map(normalizeLead)
+              .filter((l) => !existingIds.has(l.id) && (!l.phone || !existingPhones.has(l.phone)));
             return incoming.length > 0 ? [...prev, ...incoming] : prev;
           });
           setAutomationLeadsCount(data.leads.length);
@@ -910,7 +920,10 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           if (response.ok && data.success && data.leads && data.leads.length > 0) {
             setLeads((prev) => {
               const existingIds = new Set(prev.map((l) => l.id));
-              const incoming = data.leads!.map(normalizeLead).filter((l) => !existingIds.has(l.id));
+              const existingPhones = new Set(prev.filter((l) => l.phone).map((l) => l.phone));
+              const incoming = data.leads!
+                .map(normalizeLead)
+                .filter((l) => !existingIds.has(l.id) && (!l.phone || !existingPhones.has(l.phone)));
               return incoming.length > 0 ? [...prev, ...incoming] : prev;
             });
           }
