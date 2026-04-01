@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Modal } from "@/components/ui/modal";
 import { getLeadPhoneItems, getLeadPhones } from "@/lib/lead-contact-utils";
+import { resolveLeadExpedienteStatusFromHorario } from "@/lib/lead-expediente";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
 import { createDialSession, generateCallSessionId, resolveBlockingStateBeforeNewDial } from "@/lib/post-call-flow";
 import { Lead } from "@/types/crm";
@@ -33,14 +34,6 @@ const expedienteStyle: Record<"Aberto" | "Fechado" | "Indefinido", string> = {
   Fechado: "bg-rose-500/20 text-rose-300 border-rose-400/40",
   Indefinido: "bg-slate-500/20 text-slate-400 border-slate-400/40",
 };
-
-function resolveExpediente(lead: Lead): "Aberto" | "Fechado" | "Indefinido" {
-  const val = lead.expediente;
-  if (!val) return "Indefinido";
-  if (val === "Aberto") return "Aberto";
-  if (val === "Fechado") return "Fechado";
-  return "Indefinido";
-}
 
 function parseCityState(city: string): { city: string; state: string } {
   if (!city.trim()) return { city: "-", state: "-" };
@@ -164,15 +157,18 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
   const [responsavelMissingModalOpen, setResponsavelMissingModalOpen] = useState(false);
   const [phonePickerLead, setPhonePickerLead] = useState<Lead | null>(null);
   const [selectedDialPhone, setSelectedDialPhone] = useState("");
+  const [expedienteReferenceDate, setExpedienteReferenceDate] = useState<Date>(() => new Date());
 
   const tableRows = useMemo(
     () =>
       leads.map((lead) => ({
         lead,
         location: parseCityState(lead.city),
-        expediente: resolveExpediente(lead),
+        expediente: resolveLeadExpedienteStatusFromHorario(lead.horario_funcionamento, {
+          referenceDate: expedienteReferenceDate,
+        }),
       })),
-    [leads],
+    [leads, expedienteReferenceDate],
   );
 
   const setCallFeedback = (leadId: string, feedback: CallFeedback) => {
@@ -308,6 +304,13 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
       Object.values(feedbackTimeoutsRef.current).forEach((id) => clearTimeout(id));
       feedbackTimeoutsRef.current = {};
     };
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setExpedienteReferenceDate(new Date());
+    }, 60 * 1000);
+    return () => window.clearInterval(intervalId);
   }, []);
 
   useEffect(() => {

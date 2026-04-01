@@ -992,9 +992,20 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               onChange={(event) => setSearchTerm(event.target.value)}
             />
           </label>
-          <button type="button" className="btn-ghost h-9 px-3 py-1.5 text-xs" onClick={() => setImportOpen(true)}>
-            Importar Leads
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-ghost h-9 px-3 py-1.5 text-xs"
+              onClick={() => {
+                if (typeof window !== "undefined") window.location.reload();
+              }}
+            >
+              Atualizar pagina
+            </button>
+            <button type="button" className="btn-ghost h-9 px-3 py-1.5 text-xs" onClick={() => setImportOpen(true)}>
+              Importar Leads
+            </button>
+          </div>
         </div>
       </section>
 
