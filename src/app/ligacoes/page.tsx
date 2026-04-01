@@ -654,18 +654,6 @@ function mapApiCallToRow(
   const endedAt = parseDateMaybe(item.ended_at ?? item.endedAt);
   const durationRaw = item.duration ?? item.billsec ?? item.bill_duration ?? item.duration_seconds;
   const durationSeconds = parseDuration(durationRaw);
-  if (index === 0) {
-    console.log(`${LIGACOES_DEBUG_PREFIX} API4COM_ITEM_SAMPLE`, {
-      duration: item.duration,
-      billsec: item.billsec,
-      bill_duration: item.bill_duration,
-      duration_seconds: item.duration_seconds,
-      durationRaw,
-      durationSeconds,
-      hangup_cause: item.hangup_cause,
-      hangupCause: item.hangupCause,
-    });
-  }
   const rawStatus = String(item.hangup_cause ?? item.hangupCause ?? "").trim();
   const status = rawStatus ? humanizeHangupCause(rawStatus) : durationSeconds > 0 ? "Atendida" : "Não atendida";
   const rawCallId = String(item.call_id ?? item.callid ?? item.uniqueid ?? "").trim();
@@ -813,7 +801,7 @@ function mapApiCallToRow(
     telefone: resolvedTelefone,
     startedAt: resolvedStartedAt,
     endedAt: internal?.endedAt || endedAt,
-    durationSeconds: Number(internal?.durationSeconds ?? durationSeconds),
+    durationSeconds: Number(internal?.durationSeconds || durationSeconds),
     status: resolvedStatus,
     finalizacao,
     subfinalizacao,
