@@ -15,6 +15,11 @@ import {
   subscribeMeetingsSnapshot,
 } from "@/lib/crm-data-store";
 import {
+  inferAgendaChannelFromType,
+  inferAgendaEventTypeFromNextAction,
+  isMeetingActiveForScheduling,
+} from "@/lib/agenda-events";
+import {
   getLeadEmailItems,
   getLeadPhoneItems,
   getLeadPhones,
@@ -2744,13 +2749,15 @@ export default function LigacoesPage() {
           owner: params.ownerName,
           sessionId: params.sessionId,
           blocks: agendaBlocks,
-          localMeetings: meetingsSnapshot.map((meeting) => ({
-            id: meeting.id,
-            date: meeting.date,
-            callTime: meeting.callTime,
-            owner: meeting.owner,
-            notes: meeting.notes || "",
-          })),
+          localMeetings: meetingsSnapshot
+            .filter((meeting) => isMeetingActiveForScheduling(meeting))
+            .map((meeting) => ({
+              id: meeting.id,
+              date: meeting.date,
+              callTime: meeting.callTime,
+              owner: meeting.owner,
+              notes: meeting.notes || "",
+            })),
         }),
       });
 
@@ -3095,9 +3102,14 @@ export default function LigacoesPage() {
       null;
 
     const sessionMarker = `[POSTCALL:${session.sessionId}]`;
+    const leadIdMarker = lead?.id ? `[LEAD:${lead.id}]` : "";
     const meetings = getMeetingsSnapshot();
     const hasExistingMeeting = meetings.some((meeting) => {
+      if (!isMeetingActiveForScheduling(meeting)) return false;
       if ((meeting.notes || "").includes(sessionMarker)) return true;
+      if (lead?.id && String(meeting.leadId || "").trim() === lead.id) {
+        if (meeting.date === formState.followUpDate && meeting.callTime === formState.followUpTime) return true;
+      }
       if (meeting.date !== formState.followUpDate || meeting.callTime !== formState.followUpTime) return false;
       if (normalizeMeetingPersonName(meeting.owner) !== normalizeMeetingPersonName(ownerName)) return false;
       return true;
@@ -3115,15 +3127,34 @@ export default function LigacoesPage() {
     if (formState.observations.trim()) {
       notes.push(`Observacoes: ${formState.observations.trim()}`);
     }
+    if (leadIdMarker) {
+      notes.push(leadIdMarker);
+    }
+
+    const eventType = inferAgendaEventTypeFromNextAction(formState.nextAction);
+    const channel = inferAgendaChannelFromType(eventType);
+    const nowIso = new Date().toISOString();
 
     const meeting: Meeting = {
       id: `MEET-CALL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      leadId: lead?.id || session.leadId || null,
       personName: lead?.name || session.nome || "Lead sem nome",
       date: formState.followUpDate,
       callTime: formState.followUpTime,
       reason: "follow-up",
       owner: ownerName,
       notes: notes.join("\n"),
+      status: "ativo",
+      eventType,
+      channel,
+      parentEventId: null,
+      rescheduledFromEventId: null,
+      rescheduledToEventId: null,
+      deletedAt: null,
+      canceledAt: null,
+      completedAt: null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
 
     setMeetingsSnapshot([...meetings, meeting]);

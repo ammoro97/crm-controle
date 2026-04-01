@@ -392,7 +392,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [detailInitialTab, setDetailInitialTab] = useState<"resumo" | "historico" | "qualificacao" | "observacoes">(
+  const [detailInitialTab, setDetailInitialTab] = useState<"resumo" | "historico" | "qualificacao" | "observacoes" | "agenda">(
     "resumo",
   );
   const [detailInitialObservationId, setDetailInitialObservationId] = useState<string | null>(null);
@@ -547,6 +547,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           ? "historico"
           : requestedTab === "qualificacao"
             ? "qualificacao"
+            : requestedTab === "agenda"
+              ? "agenda"
             : "resumo";
     const observationId =
       String(searchParams.get("highlightObservation") || searchParams.get("observationId") || "").trim() || null;

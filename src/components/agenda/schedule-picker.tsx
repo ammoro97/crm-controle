@@ -19,6 +19,7 @@ import {
   buildAvailableSlotsForDate,
   isValidIsoDate,
 } from "@/lib/agenda-scheduling";
+import { isMeetingActiveForScheduling } from "@/lib/agenda-events";
 import { Meeting } from "@/types/crm";
 
 type AvailabilityApiResponse = {
@@ -61,13 +62,15 @@ function buildMonthGrid(anchor: Date) {
 }
 
 function normalizeMeetings(meetings: Meeting[]): ScheduleMeetingLike[] {
-  return meetings.map((meeting) => ({
-    id: meeting.id,
-    date: String(meeting.date || "").trim(),
-    callTime: String(meeting.callTime || "").trim(),
-    owner: String(meeting.owner || "").trim(),
-    notes: String(meeting.notes || "").trim(),
-  }));
+  return meetings
+    .filter((meeting) => isMeetingActiveForScheduling(meeting))
+    .map((meeting) => ({
+      id: meeting.id,
+      date: String(meeting.date || "").trim(),
+      callTime: String(meeting.callTime || "").trim(),
+      owner: String(meeting.owner || "").trim(),
+      notes: String(meeting.notes || "").trim(),
+    }));
 }
 
 function formatDateLabel(dateIso: string) {

@@ -2,6 +2,7 @@
 
 import { FormEvent } from "react";
 import { Modal } from "@/components/ui/modal";
+import { inferAgendaChannelFromType, inferAgendaEventTypeFromReason } from "@/lib/agenda-events";
 import { CallReason, Meeting } from "@/types/crm";
 
 type AppointmentModalProps = {
@@ -63,7 +64,16 @@ export function AppointmentModal({
             <select
               className="field mt-1"
               value={meeting.reason}
-              onChange={(e) => onChange({ ...meeting, reason: e.target.value as CallReason })}
+              onChange={(e) => {
+                const reason = e.target.value as CallReason;
+                const eventType = inferAgendaEventTypeFromReason(reason);
+                onChange({
+                  ...meeting,
+                  reason,
+                  eventType,
+                  channel: inferAgendaChannelFromType(eventType),
+                });
+              }}
             >
               {reasonOptions.map((reason) => (
                 <option key={reason} value={reason}>

@@ -150,15 +150,44 @@ export type Lead = {
 
 export type CallReason = "apresentacao" | "acompanhamento" | "fechamento" | "follow-up";
 
-export type Meeting = {
+export type AgendaEventStatus = "ativo" | "concluido" | "remarcado" | "cancelado" | "apagado_logico";
+
+export type AgendaEventType =
+  | "follow_up_whatsapp"
+  | "follow_up_email"
+  | "follow_up_ligacao"
+  | "call_agendada"
+  | "call_conversao"
+  | "reagendamento"
+  | "cancelamento"
+  | "exclusao_logica"
+  | "outro";
+
+export type AgendaEventChannel = "whatsapp" | "email" | "ligacao" | "video" | "outro";
+
+export type LeadAgendaEvent = {
   id: string;
+  leadId?: string | null;
   personName: string;
   date: string;
   callTime: string;
   reason: CallReason;
   owner: string;
   notes?: string;
+  status?: AgendaEventStatus;
+  eventType?: AgendaEventType;
+  channel?: AgendaEventChannel;
+  parentEventId?: string | null;
+  rescheduledFromEventId?: string | null;
+  rescheduledToEventId?: string | null;
+  deletedAt?: string | null;
+  canceledAt?: string | null;
+  completedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
+
+export type Meeting = LeadAgendaEvent;
 
 export type CallStatus = "Atendida" | "Nao atendida" | "Ocupado" | "Cancelada";
 export type CallAnalysisStatus = "idle" | "processing" | "done" | "error";

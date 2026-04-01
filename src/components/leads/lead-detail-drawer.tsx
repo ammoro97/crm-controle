@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Lead, LeadObservationType } from "@/types/crm";
 import { LeadGeneralTab } from "./lead-detail/lead-general-tab";
 import { LeadIntelligenceTab } from "./lead-detail/lead-intelligence-tab";
+import { LeadAgendaTab } from "./lead-detail/lead-agenda-tab";
 import {
   ChannelBadge,
   normalizeEventTypeLabel,
@@ -20,7 +21,7 @@ type LeadDetailDrawerProps = {
   initialObservationId?: string | null;
 };
 
-type DetailTab = "resumo" | "historico" | "qualificacao" | "observacoes";
+type DetailTab = "resumo" | "historico" | "qualificacao" | "observacoes" | "agenda";
 
 type TimelineItem = {
   id: string;
@@ -48,6 +49,7 @@ const tabs: { id: DetailTab; label: string }[] = [
   { id: "historico", label: "Historico" },
   { id: "qualificacao", label: "Qualificacao" },
   { id: "observacoes", label: "Observacoes" },
+  { id: "agenda", label: "Agenda" },
 ];
 
 function LeadHistoryTab({
@@ -339,6 +341,8 @@ export function LeadDetailDrawer({
         onDraftChange={setDraftLead}
         onPersist={persistDraft}
       />
+    ) : activeTab === "agenda" ? (
+      <LeadAgendaTab lead={lead} />
     ) : (
       <LeadObservationsTab
         draftLead={draftLead}

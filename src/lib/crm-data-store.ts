@@ -1,6 +1,7 @@
 "use client";
 
 import { initialLeads, initialMeetings } from "@/lib/mock-data";
+import { normalizeMeetingsSnapshot } from "@/lib/agenda-events";
 import { Lead, Meeting } from "@/types/crm";
 
 export const LEADS_STORAGE_KEY = "crm.leads.v1";
@@ -14,7 +15,7 @@ function cloneLeads(leads: Lead[]): Lead[] {
 }
 
 function cloneMeetings(meetings: Meeting[]): Meeting[] {
-  return meetings.map((meeting) => ({ ...meeting }));
+  return normalizeMeetingsSnapshot(meetings).map((meeting) => ({ ...meeting }));
 }
 
 export function getLeadsSnapshot(): Lead[] {

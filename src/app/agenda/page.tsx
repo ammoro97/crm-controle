@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
 import { AgendaBlocksModal } from "@/components/agenda/agenda-blocks-modal";
 import { AgendaCalendar } from "@/components/agenda/agenda-calendar";
@@ -14,6 +15,7 @@ import { AgendaBlocks, AgendaDisplayMode, AgendaPeriodMode, emptyAgendaBlocks } 
 import {
   clampDateToPresent,
   filterFutureMeetings,
+  fromIsoDate,
   formatPeriodLabel,
   getCurrentReferenceDate,
   BlockingInfo,
@@ -26,20 +28,42 @@ import {
 } from "@/components/agenda/agenda-utils";
 import { PageTopbar } from "@/components/layout/page-topbar";
 import { Modal } from "@/components/ui/modal";
+import {
+  ensureAgendaEventDefaults,
+  getAgendaEventDisplayStatus,
+  inferAgendaChannelFromType,
+  inferAgendaEventTypeFromReason,
+  isMeetingActiveForScheduling,
+  normalizeMeetingsSnapshot,
+} from "@/lib/agenda-events";
 import { getMeetingsSnapshot, setMeetingsSnapshot } from "@/lib/crm-data-store";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
-import { Meeting } from "@/types/crm";
+import { AgendaEventStatus, Meeting } from "@/types/crm";
 
 function createEmptyMeeting(date = "", owner = ""): Meeting {
+  const now = new Date().toISOString();
+  const eventType = inferAgendaEventTypeFromReason("apresentacao");
   return {
     id: `M-${Date.now()}`,
+    leadId: null,
     personName: "",
     date,
     callTime: "09:00",
     reason: "apresentacao",
     owner,
     notes: "",
+    status: "ativo",
+    eventType,
+    channel: inferAgendaChannelFromType(eventType),
+    parentEventId: null,
+    rescheduledFromEventId: null,
+    rescheduledToEventId: null,
+    deletedAt: null,
+    canceledAt: null,
+    completedAt: null,
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
@@ -61,11 +85,13 @@ function formatIsoDateBr(iso: string) {
 
 function getMeetingSearchableText(meeting: Meeting) {
   const formattedDate = formatIsoDateBr(meeting.date);
+  const displayStatus = getAgendaEventDisplayStatus(meeting);
   return normalizeSearchText(
     [
       meeting.personName,
       meeting.owner,
       meeting.reason,
+      displayStatus,
       meeting.notes || "",
       meeting.date,
       formattedDate,
@@ -74,12 +100,21 @@ function getMeetingSearchableText(meeting: Meeting) {
   );
 }
 
+function normalizeDateTimeIdentity(meeting: Meeting) {
+  return `${String(meeting.date || "").trim()}|${String(meeting.callTime || "").trim()}`;
+}
+
+function isTimelineRelevantStatus(status: AgendaEventStatus) {
+  return status === "remarcado" || status === "cancelado" || status === "apagado_logico";
+}
+
 export default function AgendaPage() {
+  const searchParams = useSearchParams();
   const { currentUser } = useAuth();
   const [displayMode, setDisplayMode] = useState<AgendaDisplayMode>("calendario");
   const [periodMode, setPeriodMode] = useState<AgendaPeriodMode>("mes");
   const [selectedDate, setSelectedDate] = useState<Date>(startOfDay(getCurrentReferenceDate()));
-  const [meetings, setMeetings] = useState<Meeting[]>(() => getMeetingsSnapshot());
+  const [meetings, setMeetings] = useState<Meeting[]>(() => normalizeMeetingsSnapshot(getMeetingsSnapshot()));
   const [selected, setSelected] = useState<Meeting | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("Todos");
@@ -119,6 +154,7 @@ export default function AgendaPage() {
   const normalizedQuery = normalizeSearchText(deferredSearchTerm);
   const hasActiveSearch = normalizeSearchText(searchTerm).length > 0;
   const [nowRef, setNowRef] = useState<Date>(() => getCurrentReferenceDate());
+  const openedEventFromQueryRef = useRef<string>("");
   const today = startOfDay(nowRef);
 
   useEffect(() => {
@@ -142,6 +178,21 @@ export default function AgendaPage() {
     };
   }, [currentUser]);
 
+  useEffect(() => {
+    const eventId = String(searchParams.get("eventId") || "").trim();
+    if (!eventId) return;
+    if (openedEventFromQueryRef.current === eventId) return;
+
+    const targetEvent = meetings.find((meeting) => meeting.id === eventId);
+    if (!targetEvent) return;
+
+    openedEventFromQueryRef.current = eventId;
+    setSelectedDate(fromIsoDate(targetEvent.date));
+    setSelected(ensureAgendaEventDefaults(targetEvent));
+    setIsNew(false);
+    setOpen(true);
+  }, [meetings, searchParams]);
+
   const monthOptions = useMemo(() => {
     const selectedYear = selectedDate.getFullYear();
     const startMonth = selectedYear === today.getFullYear() ? today.getMonth() : 0;
@@ -157,7 +208,12 @@ export default function AgendaPage() {
     });
   }, [selectedDate, today]);
 
-  const futureMeetings = useMemo(() => filterFutureMeetings(meetings, nowRef), [meetings, nowRef]);
+  const activeMeetings = useMemo(
+    () => meetings.filter((meeting) => isMeetingActiveForScheduling(meeting)),
+    [meetings],
+  );
+
+  const futureMeetings = useMemo(() => filterFutureMeetings(activeMeetings, nowRef), [activeMeetings, nowRef]);
 
   const ownerFilteredMeetings = useMemo(() => {
     if (effectiveOwnerFilter === "Todos") return futureMeetings;
@@ -278,7 +334,7 @@ export default function AgendaPage() {
   };
 
   const openExisting = (meeting: Meeting) => {
-    setSelected(meeting);
+    setSelected(ensureAgendaEventDefaults(meeting));
     setIsNew(false);
     setOpen(true);
   };
@@ -308,14 +364,57 @@ export default function AgendaPage() {
       return;
     }
 
-    const normalizedSelected = {
+    const nowIso = new Date().toISOString();
+    const eventType = selected.eventType || inferAgendaEventTypeFromReason(selected.reason);
+    const normalizedSelected = ensureAgendaEventDefaults({
       ...selected,
       owner: resolvedOwnerName,
-    };
+      status: selected.status || "ativo",
+      eventType,
+      channel: selected.channel || inferAgendaChannelFromType(eventType),
+      updatedAt: nowIso,
+      createdAt: selected.createdAt || nowIso,
+    });
 
     setMeetings((prev) => {
-      if (isNew) return [...prev, normalizedSelected];
-      return prev.map((meeting) => (meeting.id === selected.id ? normalizedSelected : meeting));
+      const currentIndex = prev.findIndex((meeting) => meeting.id === selected.id);
+      if (isNew || currentIndex < 0) return normalizeMeetingsSnapshot([...prev, normalizedSelected]);
+
+      const current = ensureAgendaEventDefaults(prev[currentIndex]);
+      const hasScheduleChanged = normalizeDateTimeIdentity(current) !== normalizeDateTimeIdentity(normalizedSelected);
+      const currentStatus = getAgendaEventDisplayStatus(current, nowRef);
+      const canReschedule = hasScheduleChanged && !isTimelineRelevantStatus(currentStatus);
+
+      if (canReschedule) {
+        const newEventId = `M-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const remarcadoOriginal = ensureAgendaEventDefaults({
+          ...current,
+          status: "remarcado",
+          eventType: "reagendamento",
+          rescheduledToEventId: newEventId,
+          updatedAt: nowIso,
+        });
+        const newEvent = ensureAgendaEventDefaults({
+          ...normalizedSelected,
+          id: newEventId,
+          status: "ativo",
+          eventType: normalizedSelected.eventType || current.eventType || inferAgendaEventTypeFromReason(current.reason),
+          channel: normalizedSelected.channel || current.channel || inferAgendaChannelFromType(normalizedSelected.eventType),
+          parentEventId: current.parentEventId || current.id,
+          rescheduledFromEventId: current.id,
+          rescheduledToEventId: null,
+          deletedAt: null,
+          canceledAt: null,
+          completedAt: null,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+        const updated = prev.map((meeting) => (meeting.id === current.id ? remarcadoOriginal : meeting));
+        return normalizeMeetingsSnapshot([...updated, newEvent]);
+      }
+
+      const updated = prev.map((meeting) => (meeting.id === current.id ? normalizedSelected : meeting));
+      return normalizeMeetingsSnapshot(updated);
     });
 
     setOpen(false);
@@ -324,7 +423,22 @@ export default function AgendaPage() {
   };
 
   const deleteMeeting = (meetingId: string) => {
-    setMeetings((prev) => prev.filter((meeting) => meeting.id !== meetingId));
+    const nowIso = new Date().toISOString();
+    setMeetings((prev) =>
+      normalizeMeetingsSnapshot(
+        prev.map((meeting) => {
+          if (meeting.id !== meetingId) return meeting;
+          const current = ensureAgendaEventDefaults(meeting);
+          return {
+            ...current,
+            status: "apagado_logico",
+            eventType: current.eventType || "exclusao_logica",
+            deletedAt: nowIso,
+            updatedAt: nowIso,
+          };
+        }),
+      ),
+    );
     setPendingDeleteMeeting(null);
   };
 
