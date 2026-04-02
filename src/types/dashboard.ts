@@ -1,9 +1,16 @@
 export type DashboardMetrics = {
-  funnel: {
-    ligacoes: number;
-    atendidas: number;
-    decisor: number;
-    agendamentos: number;
+  funnels: {
+    absoluto: {
+      ligacoes: number;
+      atendidas: number;
+      decisor: number;
+      agendamentos: number;
+    };
+    conversao: {
+      atendidasPercentual: number;
+      decisorPercentual: number;
+      agendamentosPercentual: number;
+    };
   };
   cards: {
     acionamentoBase: number;
@@ -17,4 +24,3 @@ export type DashboardMetrics = {
     noShow: number;
   };
 };
-

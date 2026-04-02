@@ -28,13 +28,32 @@ const LEADS_STORAGE_KEY = "crm.leads.v1";
 const MEETINGS_STORAGE_KEY = "crm.agenda.meetings.v1";
 const LEAD_FINALIZATIONS_STORAGE_KEY = "crm.leads.finalizations.v1";
 const WRAPUPS_STORAGE_KEY = "crm.calls.wrapups.v1";
+const REFRESH_EVENT_KEYS = new Set([
+  LEADS_STORAGE_KEY,
+  MEETINGS_STORAGE_KEY,
+  LEAD_FINALIZATIONS_STORAGE_KEY,
+  WRAPUPS_STORAGE_KEY,
+]);
+const REFRESH_EVENTS = [
+  "crm:leads:changed",
+  "crm:meetings:changed",
+  "crm:lead-finalizations:changed",
+  "crm:calls:flow:changed",
+];
 
 const EMPTY_METRICS: DashboardMetrics = {
-  funnel: {
-    ligacoes: 0,
-    atendidas: 0,
-    decisor: 0,
-    agendamentos: 0,
+  funnels: {
+    absoluto: {
+      ligacoes: 0,
+      atendidas: 0,
+      decisor: 0,
+      agendamentos: 0,
+    },
+    conversao: {
+      atendidasPercentual: 0,
+      decisorPercentual: 0,
+      agendamentosPercentual: 0,
+    },
   },
   cards: {
     acionamentoBase: 0,
@@ -109,6 +128,47 @@ export function useDashboardMetrics() {
     const controller = new AbortController();
     void fetchMetrics(controller.signal);
     return () => controller.abort();
+  }, [fetchMetrics]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    let debounceTimeout: number | null = null;
+    let mounted = true;
+
+    const triggerRefresh = () => {
+      if (!mounted) return;
+      if (debounceTimeout !== null) {
+        window.clearTimeout(debounceTimeout);
+      }
+      debounceTimeout = window.setTimeout(() => {
+        void fetchMetrics();
+      }, 180);
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (!event.key || !REFRESH_EVENT_KEYS.has(event.key)) return;
+      triggerRefresh();
+    };
+
+    window.addEventListener("storage", onStorage);
+    REFRESH_EVENTS.forEach((eventName) => {
+      window.addEventListener(eventName, triggerRefresh);
+    });
+
+    const intervalId = window.setInterval(triggerRefresh, 45000);
+
+    return () => {
+      mounted = false;
+      if (debounceTimeout !== null) {
+        window.clearTimeout(debounceTimeout);
+      }
+      window.clearInterval(intervalId);
+      window.removeEventListener("storage", onStorage);
+      REFRESH_EVENTS.forEach((eventName) => {
+        window.removeEventListener(eventName, triggerRefresh);
+      });
+    };
   }, [fetchMetrics]);
 
   const refresh = useCallback(() => {

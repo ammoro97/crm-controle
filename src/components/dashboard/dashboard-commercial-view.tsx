@@ -165,7 +165,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "leadDesqualificado",
         title: "Lead Desqualificado",
-        description: "Total de leads outbound com status Perdido.",
+        description: "Perdidos + finalizacoes oficiais com acao Apagar.",
         accentFrom: "#EF4444",
         accentTo: "#B91C1C",
         icon: iconWarning(),
@@ -189,7 +189,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "percentualCpc",
         title: "% CPC",
-        description: "Formula: (compras efetuadas / calls agendadas) x 100.",
+        description: "Formula: (clientes convertidos / ligacoes atendidas) x 100.",
         accentFrom: "#06B6D4",
         accentTo: "#0E7490",
         icon: iconChart(),
@@ -291,10 +291,13 @@ export function DashboardCommercialView() {
 
         <div className="grid gap-4 xl:grid-cols-[460px_minmax(0,1fr)]">
           <DashboardFunnel
-            ligacoes={metrics.funnel.ligacoes}
-            atendidas={metrics.funnel.atendidas}
-            decisor={metrics.funnel.decisor}
-            agendamentos={metrics.funnel.agendamentos}
+            ligacoes={metrics.funnels.absoluto.ligacoes}
+            atendidas={metrics.funnels.absoluto.atendidas}
+            decisor={metrics.funnels.absoluto.decisor}
+            agendamentos={metrics.funnels.absoluto.agendamentos}
+            atendidasPercentual={metrics.funnels.conversao.atendidasPercentual}
+            decisorPercentual={metrics.funnels.conversao.decisorPercentual}
+            agendamentosPercentual={metrics.funnels.conversao.agendamentosPercentual}
           />
 
           <div className="space-y-3">
