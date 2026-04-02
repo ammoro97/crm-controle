@@ -1,17 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { FunnelChart, type FunnelChartStep } from "@/components/dashboard/funnel-chart";
 
 type FunnelStepId = "ligacoes" | "atendidas" | "decisor" | "agendamentos";
-
-type FunnelStep = {
-  id: string;
-  iconId: FunnelStepId;
-  label: string;
-  value: number;
-  gradientFrom: string;
-  gradientTo: string;
-};
 
 type DashboardFunnelProps = {
   ligacoes: number;
@@ -68,96 +60,6 @@ function formatMetricPercent(value: number) {
   }).format(Math.max(0, value))}%`;
 }
 
-function buildStepWidths(
-  steps: FunnelStep[],
-  options: {
-    maxReferenceValue: number;
-    minWidthPercent: number;
-    firstMinWidthPercent: number;
-    shrinkPerStep: number;
-  },
-): number[] {
-  const maxValue = Math.max(1, options.maxReferenceValue);
-  const widths: number[] = [];
-
-  steps.forEach((step, index) => {
-    const proportionalWidth = Math.max(
-      options.minWidthPercent,
-      Math.min(100, Math.round((Math.max(0, step.value) / maxValue) * 100)),
-    );
-
-    if (index === 0) {
-      widths.push(Math.max(options.firstMinWidthPercent, proportionalWidth));
-      return;
-    }
-
-    const previous = widths[index - 1] ?? options.firstMinWidthPercent;
-    widths.push(Math.max(options.minWidthPercent, Math.min(proportionalWidth, previous - options.shrinkPerStep)));
-  });
-
-  return widths;
-}
-
-function renderFunnelBlock(params: {
-  animateIn: boolean;
-  title: string;
-  subtitle: string;
-  steps: FunnelStep[];
-  displayMode: "absolute" | "percent";
-  widthOptions: {
-    maxReferenceValue: number;
-    minWidthPercent: number;
-    firstMinWidthPercent: number;
-    shrinkPerStep: number;
-  };
-}) {
-  const { animateIn, title, subtitle, steps, displayMode, widthOptions } = params;
-  const stepWidths = buildStepWidths(steps, widthOptions);
-
-  return (
-    <section className="rounded-2xl border border-slate-700/75 bg-[#111A2E]/85 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_18px_34px_rgba(2,6,23,0.35)]">
-      <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">{title}</h3>
-      <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{subtitle}</p>
-
-      <div className="mt-4 space-y-0">
-        {steps.map((step, index) => {
-          const stepWidth = stepWidths[index] ?? widthOptions.minWidthPercent;
-          const displayValue = displayMode === "percent" ? formatMetricPercent(step.value) : formatMetricNumber(step.value);
-
-          return (
-            <div key={step.id} className={index === 0 ? "flex justify-center" : "-mt-2 flex justify-center"}>
-              <div
-                className="relative h-[82px] max-w-[640px] overflow-hidden border border-white/10"
-                style={{
-                  width: animateIn ? `${stepWidth}%` : "0%",
-                  clipPath: "polygon(8% 0, 92% 0, 100% 100%, 0 100%)",
-                  backgroundImage: `linear-gradient(108deg, ${step.gradientFrom}, ${step.gradientTo})`,
-                  transitionProperty: "width, box-shadow",
-                  transitionDuration: "840ms",
-                  transitionTimingFunction: "cubic-bezier(0.22,1,0.36,1)",
-                  transitionDelay: `${index * 90}ms`,
-                  boxShadow: `0 0 0 1px rgba(255,255,255,0.08), 0 16px 34px rgba(2,6,23,0.42), 0 0 24px ${step.gradientFrom}50`,
-                }}
-              >
-                <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.22)_0%,rgba(255,255,255,0.05)_44%,rgba(255,255,255,0)_100%)]" />
-
-                <div className="relative flex h-full flex-col items-center justify-center px-5 text-center">
-                  <p className="w-full truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-white/90">{step.label}</p>
-
-                  <div className="mt-1.5 inline-flex max-w-full items-center justify-center gap-1.5 text-white">
-                    <span className="opacity-80">{iconForStep(step.iconId)}</span>
-                    <span className="text-[28px] font-semibold tracking-[-0.03em] md:text-[32px]">{displayValue}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 export function DashboardFunnel({
   ligacoes,
   atendidas,
@@ -167,114 +69,90 @@ export function DashboardFunnel({
   decisorPercentual,
   agendamentosPercentual,
 }: DashboardFunnelProps) {
-  const [animateIn, setAnimateIn] = useState(false);
-
-  const absoluteSteps: FunnelStep[] = useMemo(
+  const absoluteSteps: FunnelChartStep[] = useMemo(
     () => [
       {
         id: "abs_ligacoes",
-        iconId: "ligacoes",
         label: "Ligacoes",
-        value: ligacoes,
-        gradientFrom: "#3B82F6",
-        gradientTo: "#1D4ED8",
+        value: formatMetricNumber(ligacoes),
+        widthPercent: 100,
+        variant: "blue",
+        icon: iconForStep("ligacoes"),
       },
       {
         id: "abs_atendidas",
-        iconId: "atendidas",
         label: "Atendidas",
-        value: atendidas,
-        gradientFrom: "#8B5CF6",
-        gradientTo: "#6D28D9",
+        value: formatMetricNumber(atendidas),
+        widthPercent: 78,
+        variant: "purple",
+        icon: iconForStep("atendidas"),
       },
       {
         id: "abs_decisor",
-        iconId: "decisor",
         label: "Decisor",
-        value: decisor,
-        gradientFrom: "#22C55E",
-        gradientTo: "#15803D",
+        value: formatMetricNumber(decisor),
+        widthPercent: 58,
+        variant: "green",
+        icon: iconForStep("decisor"),
       },
       {
         id: "abs_agendamentos",
-        iconId: "agendamentos",
         label: "Agendamentos",
-        value: agendamentos,
-        gradientFrom: "#F97316",
-        gradientTo: "#DC2626",
+        value: formatMetricNumber(agendamentos),
+        widthPercent: 42,
+        variant: "orange",
+        icon: iconForStep("agendamentos"),
       },
     ],
     [agendamentos, atendidas, decisor, ligacoes],
   );
 
-  const percentSteps: FunnelStep[] = useMemo(
+  const percentSteps: FunnelChartStep[] = useMemo(
     () => [
       {
         id: "pct_atendidas",
-        iconId: "atendidas",
         label: "Atendidas",
-        value: atendidasPercentual,
-        gradientFrom: "#8B5CF6",
-        gradientTo: "#6D28D9",
+        value: formatMetricPercent(atendidasPercentual),
+        widthPercent: 100,
+        variant: "purple",
+        icon: iconForStep("atendidas"),
       },
       {
         id: "pct_decisor",
-        iconId: "decisor",
         label: "Decisor",
-        value: decisorPercentual,
-        gradientFrom: "#22C55E",
-        gradientTo: "#15803D",
+        value: formatMetricPercent(decisorPercentual),
+        widthPercent: 72,
+        variant: "green",
+        icon: iconForStep("decisor"),
       },
       {
         id: "pct_agendamentos",
-        iconId: "agendamentos",
         label: "Agendamentos",
-        value: agendamentosPercentual,
-        gradientFrom: "#F97316",
-        gradientTo: "#DC2626",
+        value: formatMetricPercent(agendamentosPercentual),
+        widthPercent: 48,
+        variant: "orange",
+        icon: iconForStep("agendamentos"),
       },
     ],
     [agendamentosPercentual, atendidasPercentual, decisorPercentual],
   );
-
-  useEffect(() => {
-    setAnimateIn(false);
-    const frame = window.requestAnimationFrame(() => setAnimateIn(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, [absoluteSteps, percentSteps]);
 
   return (
     <section className="relative overflow-hidden rounded-3xl border border-slate-800/80 bg-[#0F172A]/95 p-5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_28px_68px_rgba(2,6,23,0.45)] md:p-6">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_0%,rgba(59,130,246,0.24),transparent_38%),radial-gradient(circle_at_90%_100%,rgba(244,63,94,0.18),transparent_44%)]" />
 
       <div className="relative space-y-4">
-        {renderFunnelBlock({
-          animateIn,
-          title: "Funil Principal (Valores Absolutos)",
-          subtitle: "Fonte real da tela de Ligacoes: Ligacoes -> Atendidas -> Decisor -> Agendamentos.",
-          steps: absoluteSteps,
-          displayMode: "absolute",
-          widthOptions: {
-            maxReferenceValue: Math.max(1, ...absoluteSteps.map((step) => step.value)),
-            minWidthPercent: 52,
-            firstMinWidthPercent: 88,
-            shrinkPerStep: 10,
-          },
-        })}
+        <FunnelChart
+          title="Funil Principal (Valores Absolutos)"
+          subtitle="Fonte real da tela de Ligacoes: Ligacoes -> Atendidas -> Decisor -> Agendamentos."
+          steps={absoluteSteps}
+        />
 
-        {renderFunnelBlock({
-          animateIn,
-          title: "Funil de Conversao (%)",
-          subtitle: "Atendidas = atendidas/ligacoes, Decisor = decisor/atendidas, Agendamentos = agendamentos/decisor.",
-          steps: percentSteps,
-          displayMode: "percent",
-          widthOptions: {
-            maxReferenceValue: 100,
-            minWidthPercent: 56,
-            firstMinWidthPercent: 72,
-            shrinkPerStep: 8,
-          },
-        })}
+        <FunnelChart
+          title="Funil de Conversao (%)"
+          subtitle="Atendidas = atendidas/ligacoes, Decisor = decisor/atendidas, Agendamentos = agendamentos/decisor."
+          steps={percentSteps}
+        />
       </div>
     </section>
   );
