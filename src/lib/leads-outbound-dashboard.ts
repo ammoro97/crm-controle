@@ -1,6 +1,6 @@
 import { isAgendaEventLinkedToLead, normalizeAgendaEventStatus, normalizeText as normalizeAgendaText } from "@/lib/agenda-events";
 import { getLeadPhones } from "@/lib/lead-contact-utils";
-import { CallLog, Lead, Meeting } from "@/types/crm";
+import { CallLog, Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
 import type { PostCallWrapup } from "@/lib/post-call-flow";
 
 export type OutboundDashboardFunnel = {
@@ -12,9 +12,14 @@ export type OutboundDashboardFunnel = {
 
 export type OutboundDashboardMetrics = {
   totalLeadsProspectados: number;
+  totalLeadsAtivos: number;
   totalCallsAgendadas: number;
   totalContatosDecisor: number;
   taxaConversao: number;
+  coberturaBaseRatio: number;
+  coberturaBasePercent: number;
+  totalLeadsFinalizados: number;
+  totalComprasEfetuadas: number;
   totalLigacoesAtendidas: number;
   totalLigacoesFeitas: number;
   totalEmailsEnviados: number;
@@ -27,6 +32,7 @@ type OutboundMetricsInput = {
   meetings: Meeting[];
   callLogs: CallLog[];
   wrapups: PostCallWrapup[];
+  finalizations?: LeadFinalizationRecord[];
   referenceDate?: Date;
 };
 
@@ -46,8 +52,13 @@ type OutboundAggregationContext = {
 const EMPTY_OUTBOUND_DASHBOARD_METRICS: OutboundDashboardMetrics = {
   totalLeadsProspectados: 0,
   totalCallsAgendadas: 0,
+  totalLeadsAtivos: 0,
   totalContatosDecisor: 0,
   taxaConversao: 0,
+  coberturaBaseRatio: 0,
+  coberturaBasePercent: 0,
+  totalLeadsFinalizados: 0,
+  totalComprasEfetuadas: 0,
   totalLigacoesAtendidas: 0,
   totalLigacoesFeitas: 0,
   totalEmailsEnviados: 0,
@@ -312,6 +323,10 @@ export function getTotalLeadsOutbound(leads: Lead[]): number {
   return leads.filter((lead) => lead.channel === "outbound").length;
 }
 
+export function getTotalLeadsAtivos(leads: Lead[]): number {
+  return getTotalLeadsOutbound(leads);
+}
+
 export function getTotalCallsAgendadas(input: OutboundMetricsInput): number {
   return createOutboundAggregationContext(input).leadsWithScheduledCall.size;
 }
@@ -344,6 +359,24 @@ export function getFollowupsPendentes(input: OutboundMetricsInput): number {
   return createOutboundAggregationContext(input).totalFollowupsPendentes;
 }
 
+export function getCoberturaDaBase(totalLigacoes: number, leadsAtivos: number): number {
+  if (leadsAtivos <= 0) return 0;
+  return totalLigacoes / leadsAtivos;
+}
+
+export function getTotalLeadsFinalizados(finalizations: LeadFinalizationRecord[]): number {
+  return finalizations.filter((item) => item.channel === "outbound" && item.finalizationSource === "lead_profile").length;
+}
+
+export function getTotalComprasEfetuadas(finalizations: LeadFinalizationRecord[]): number {
+  return finalizations.filter(
+    (item) =>
+      item.channel === "outbound" &&
+      item.finalizationSource === "lead_profile" &&
+      item.reason === "compra_efetuada",
+  ).length;
+}
+
 export function calculateOutboundConversionRate(callsAgendadas: number, contatosDecisor: number): number {
   if (contatosDecisor <= 0) return 0;
   return (callsAgendadas / contatosDecisor) * 100;
@@ -351,8 +384,21 @@ export function calculateOutboundConversionRate(callsAgendadas: number, contatos
 
 export function buildOutboundDashboardMetrics(input: OutboundMetricsInput): OutboundDashboardMetrics {
   const context = createOutboundAggregationContext(input);
+  const finalizations = input.finalizations || [];
 
-  if (context.outboundLeads.length === 0) return EMPTY_OUTBOUND_DASHBOARD_METRICS;
+  const totalLeadsAtivos = context.outboundLeads.length;
+  const totalLeadsFinalizados = getTotalLeadsFinalizados(finalizations);
+  const totalComprasEfetuadas = getTotalComprasEfetuadas(finalizations);
+  const coberturaBaseRatio = getCoberturaDaBase(context.totalLigacoesFeitas, totalLeadsAtivos);
+  const coberturaBasePercent = coberturaBaseRatio * 100;
+
+  if (context.outboundLeads.length === 0) {
+    return {
+      ...EMPTY_OUTBOUND_DASHBOARD_METRICS,
+      totalLeadsFinalizados,
+      totalComprasEfetuadas,
+    };
+  }
 
   const totalLeadsProspectados = context.outboundLeads.length;
   const totalContatosDecisor = context.leadsWithDecisionContact.size;
@@ -361,9 +407,14 @@ export function buildOutboundDashboardMetrics(input: OutboundMetricsInput): Outb
 
   return {
     totalLeadsProspectados,
+    totalLeadsAtivos,
     totalCallsAgendadas,
     totalContatosDecisor,
     taxaConversao,
+    coberturaBaseRatio,
+    coberturaBasePercent,
+    totalLeadsFinalizados,
+    totalComprasEfetuadas,
     totalLigacoesAtendidas: context.totalLigacoesAtendidas,
     totalLigacoesFeitas: context.totalLigacoesFeitas,
     totalEmailsEnviados: context.totalEmailsEnviados,
@@ -376,4 +427,3 @@ export function buildOutboundDashboardMetrics(input: OutboundMetricsInput): Outb
     },
   };
 }
-

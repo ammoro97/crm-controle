@@ -7,6 +7,8 @@ export type LeadStatus =
   | "Perdido"
   | "Fechado";
 export type LeadChannel = "inbound" | "outbound";
+export type LeadFinalizationReason = "apagar" | "compra_efetuada";
+export type LeadFinalizationSource = "lead_profile";
 export type LeadUrgency = "baixa" | "media" | "alta";
 export type LeadTemperature = "frio" | "morno" | "quente";
 export type LeadContactQuality = "bom" | "ruim";
@@ -146,6 +148,27 @@ export type Lead = {
   avaliacoes?: number | string | null;
   horario_funcionamento?: string | null;
   expediente?: "Aberto" | "Fechado" | "Indefinido" | null;
+  finalizedAt?: string | null;
+  finalizedBy?: string | null;
+  finalizationReason?: LeadFinalizationReason | null;
+  finalizationSource?: LeadFinalizationSource | null;
+  finalizedViaLeadProfile?: boolean;
+  convertedToCustomerAt?: string | null;
+  customerStatus?: "cliente" | null;
+};
+
+export type LeadFinalizationRecord = {
+  id: string;
+  leadId: string;
+  leadName: string;
+  leadCompany: string;
+  channel: LeadChannel;
+  reason: LeadFinalizationReason;
+  finalizedAt: string;
+  finalizedBy?: string | null;
+  finalizationSource: LeadFinalizationSource;
+  finalizedViaLeadProfile: true;
+  convertedToCustomerAt?: string | null;
 };
 
 export type CallReason = "apresentacao" | "acompanhamento" | "fechamento" | "follow-up";

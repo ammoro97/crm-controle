@@ -5,16 +5,31 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { PageTopbar } from "@/components/layout/page-topbar";
 import { Modal } from "@/components/ui/modal";
 import {
+  getCustomersSnapshot,
+  getLeadFinalizationsSnapshot,
   getLeadsSnapshot,
   getMeetingsSnapshot,
+  setCustomersSnapshot,
+  setLeadFinalizationsSnapshot,
   setLeadsSnapshot,
+  subscribeLeadFinalizationsSnapshot,
   subscribeMeetingsSnapshot,
 } from "@/lib/crm-data-store";
 import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { getPostCallWrapups, subscribePostCallFlow, type PostCallWrapup } from "@/lib/post-call-flow";
 import { buildOutboundDashboardMetrics } from "@/lib/leads-outbound-dashboard";
-import { CallLog, Lead, LeadChannel, LeadHistoryEvent, LeadObservation, LeadStatus, Meeting } from "@/types/crm";
+import {
+  CallLog,
+  Lead,
+  LeadChannel,
+  LeadFinalizationReason,
+  LeadFinalizationRecord,
+  LeadHistoryEvent,
+  LeadObservation,
+  LeadStatus,
+  Meeting,
+} from "@/types/crm";
 import { LeadDetailDrawer } from "./lead-detail-drawer";
 import { LeadsTable } from "./leads-table";
 import { OutboundLeadsTable } from "./outbound-leads-table";
@@ -397,6 +412,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   const [leads, setLeads] = useState<Lead[]>(() => getLeadsSnapshot().map(normalizeLead));
   const [meetings, setMeetings] = useState<Meeting[]>(() => getMeetingsSnapshot());
+  const [leadFinalizations, setLeadFinalizations] = useState<LeadFinalizationRecord[]>(() => getLeadFinalizationsSnapshot());
   const [dashboardCallLogs, setDashboardCallLogs] = useState<CallLog[]>([]);
   const [dashboardWrapups, setDashboardWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
   const [dashboardReferenceDate, setDashboardReferenceDate] = useState<Date>(() => new Date());
@@ -535,6 +551,14 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   useEffect(() => {
     if (!isDashboardMode) return;
+    setLeadFinalizations(getLeadFinalizationsSnapshot());
+    return subscribeLeadFinalizationsSnapshot(() => {
+      setLeadFinalizations(getLeadFinalizationsSnapshot());
+    });
+  }, [isDashboardMode]);
+
+  useEffect(() => {
+    if (!isDashboardMode) return;
 
     let cancelled = false;
     const loadCallLogs = async (showLoading: boolean) => {
@@ -621,13 +645,22 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       meetings,
       callLogs: dashboardCallLogs,
       wrapups: dashboardWrapups,
+      finalizations: leadFinalizations,
       referenceDate: dashboardReferenceDate,
     });
-  }, [dashboardCallLogs, dashboardReferenceDate, dashboardWrapups, leads, meetings]);
+  }, [dashboardCallLogs, dashboardReferenceDate, dashboardWrapups, leadFinalizations, leads, meetings]);
 
   const dashboardConversionRateLabel = useMemo(() => {
     return `${dashboardMetrics.taxaConversao.toFixed(1).replace(".", ",")}%`;
   }, [dashboardMetrics.taxaConversao]);
+
+  const dashboardCoverageLabel = useMemo(() => {
+    return `${dashboardMetrics.coberturaBaseRatio.toFixed(2).replace(".", ",")} ligacoes/lead`;
+  }, [dashboardMetrics.coberturaBaseRatio]);
+
+  const dashboardCoveragePercentLabel = useMemo(() => {
+    return `${dashboardMetrics.coberturaBasePercent.toFixed(1).replace(".", ",")}%`;
+  }, [dashboardMetrics.coberturaBasePercent]);
 
   const dashboardFunnelSteps = useMemo(
     () => [
@@ -742,6 +775,70 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const deleteLeadsById = (ids: string[]) => {
     const toDelete = new Set(ids);
     setLeads((prev) => prev.filter((lead) => !toDelete.has(lead.id)));
+  };
+
+  const finalizeLeadViaProfile = (leadToFinalize: Lead, reason: LeadFinalizationReason) => {
+    const resolvedLead = leads.find((lead) => lead.id === leadToFinalize.id) || leadToFinalize;
+    const finalizedAt = new Date();
+    const finalizedAtIso = finalizedAt.toISOString();
+    const stamp = nowStamp();
+    const finalizedBy = resolvedLead.owner || "Time Comercial";
+
+    const finalizationRecord: LeadFinalizationRecord = {
+      id: `LF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      leadId: resolvedLead.id,
+      leadName: resolvedLead.name || "-",
+      leadCompany: resolvedLead.company || "-",
+      channel: resolvedLead.channel,
+      reason,
+      finalizedAt: finalizedAtIso,
+      finalizedBy,
+      finalizationSource: "lead_profile",
+      finalizedViaLeadProfile: true,
+      convertedToCustomerAt: reason === "compra_efetuada" ? finalizedAtIso : null,
+    };
+
+    setLeads((prev) => prev.filter((lead) => lead.id !== resolvedLead.id));
+
+    if (reason === "compra_efetuada") {
+      const finalizedCustomerLead: Lead = {
+        ...resolvedLead,
+        status: "Fechado",
+        finalizedAt: finalizedAtIso,
+        finalizedBy,
+        finalizationReason: "compra_efetuada",
+        finalizationSource: "lead_profile",
+        finalizedViaLeadProfile: true,
+        convertedToCustomerAt: finalizedAtIso,
+        customerStatus: "cliente",
+        history: [
+          ...resolvedLead.history,
+          historyEvent(finalizedBy, "LEAD_FINALIZADO", "Lead finalizado como compra efetuada e movido para Clientes."),
+          {
+            id: `H-CUSTOMER-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            date: stamp.date,
+            time: stamp.time,
+            eventType: "CLIENTE",
+            description: "Lead convertido em cliente.",
+            owner: finalizedBy,
+          },
+        ],
+      };
+
+      const currentCustomers = getCustomersSnapshot();
+      const nextCustomers = [...currentCustomers.filter((lead) => lead.id !== finalizedCustomerLead.id), finalizedCustomerLead];
+      setCustomersSnapshot(nextCustomers);
+    }
+
+    const currentFinalizations = getLeadFinalizationsSnapshot();
+    const nextFinalizations = [finalizationRecord, ...currentFinalizations];
+    setLeadFinalizationsSnapshot(nextFinalizations);
+    setLeadFinalizations(nextFinalizations);
+
+    setDetailOpen(false);
+    setDetailLeadId(null);
+    setDetailInitialTab("resumo");
+    setDetailInitialObservationId(null);
   };
 
   const handleCreateLead = (event: FormEvent<HTMLFormElement>) => {
@@ -1188,6 +1285,29 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             </article>
           </div>
 
+          <div className="grid gap-3 lg:grid-cols-3">
+            <article className="panel p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Cobertura da Base</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-100">{dashboardCoverageLabel}</p>
+              <p className="mt-1 text-xs text-slate-400">
+                {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
+              </p>
+              <p className="mt-1 text-[11px] text-slate-500">Equivalente percentual: {dashboardCoveragePercentLabel}</p>
+            </article>
+
+            <article className="panel p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Total de Leads Finalizados</p>
+              <p className="mt-2 text-3xl font-semibold text-slate-100">{dashboardMetrics.totalLeadsFinalizados}</p>
+              <p className="mt-1 text-xs text-slate-400">Conta apenas finalizacao oficial via visao personalizada</p>
+            </article>
+
+            <article className="panel p-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Compras Efetuadas</p>
+              <p className="mt-2 text-3xl font-semibold text-emerald-300">{dashboardMetrics.totalComprasEfetuadas}</p>
+              <p className="mt-1 text-xs text-slate-400">Leads finalizados com motivo compra efetuada</p>
+            </article>
+          </div>
+
           <div className="grid gap-3 xl:grid-cols-[1.4fr_1fr]">
             <article className="panel p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
@@ -1583,6 +1703,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         lead={detailLead}
         open={detailOpen}
         onSave={updateLeadById}
+        onFinalizeLead={finalizeLeadViaProfile}
         initialTab={detailInitialTab}
         initialObservationId={detailInitialObservationId}
         onClose={() => {

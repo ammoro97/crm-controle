@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Lead, LeadObservationType } from "@/types/crm";
+import { Modal } from "@/components/ui/modal";
+import { Lead, LeadFinalizationReason, LeadObservationType } from "@/types/crm";
 import { LeadGeneralTab } from "./lead-detail/lead-general-tab";
 import { LeadIntelligenceTab } from "./lead-detail/lead-intelligence-tab";
 import { LeadAgendaTab } from "./lead-detail/lead-agenda-tab";
@@ -16,6 +17,8 @@ type LeadDetailDrawerProps = {
   lead: Lead | null;
   open: boolean;
   onSave: (lead: Lead) => void;
+  onFinalizeLead: (lead: Lead, reason: LeadFinalizationReason) => void;
+  showFinalizeAction?: boolean;
   onClose: () => void;
   initialTab?: DetailTab;
   initialObservationId?: string | null;
@@ -278,6 +281,8 @@ export function LeadDetailDrawer({
   lead,
   open,
   onSave,
+  onFinalizeLead,
+  showFinalizeAction = true,
   onClose,
   initialTab,
   initialObservationId,
@@ -286,6 +291,8 @@ export function LeadDetailDrawer({
   const [isEditing, setIsEditing] = useState(false);
   const [draftLead, setDraftLead] = useState<Lead | null>(lead);
   const [targetObservationId, setTargetObservationId] = useState<string | null>(null);
+  const [finalizeOpen, setFinalizeOpen] = useState(false);
+  const [finalizeReason, setFinalizeReason] = useState<LeadFinalizationReason>("apagar");
   const prevLeadIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -293,6 +300,8 @@ export function LeadDetailDrawer({
     setIsEditing(false);
     setActiveTab(initialTab || "resumo");
     setTargetObservationId(initialObservationId || null);
+    setFinalizeOpen(false);
+    setFinalizeReason("apagar");
     prevLeadIdRef.current = lead?.id ?? null;
   }, [initialObservationId, initialTab, lead?.id]);
 
@@ -309,6 +318,12 @@ export function LeadDetailDrawer({
   }, [lead?.observationLog]);
 
   if (!open || !lead || !draftLead) return null;
+
+  const finalizeLabel = finalizeReason === "compra_efetuada" ? "Compra efetuada" : "Apagar";
+  const finalizeDescription =
+    finalizeReason === "compra_efetuada"
+      ? "O lead sera removido da base operacional e movido para a aba Clientes."
+      : "O lead sera removido da base operacional como finalizado.";
 
   const persistDraft = (next: Lead) => {
     onSave(next);
@@ -363,6 +378,15 @@ export function LeadDetailDrawer({
           </div>
           <div className="flex items-center gap-2">
             <ChannelBadge channel={lead.channel} />
+            {showFinalizeAction ? (
+              <button
+                className="rounded-md border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200 transition hover:bg-amber-500/20"
+                type="button"
+                onClick={() => setFinalizeOpen(true)}
+              >
+                Finalizar Lead
+              </button>
+            ) : null}
             {isEditing ? (
               <>
                 <button
@@ -412,6 +436,71 @@ export function LeadDetailDrawer({
 
         <div className="h-[calc(100vh-140px)] overflow-y-auto px-5 py-4">{tabContent}</div>
       </aside>
+
+      <Modal
+        title="Finalizar Lead"
+        open={showFinalizeAction && finalizeOpen}
+        onClose={() => {
+          setFinalizeOpen(false);
+        }}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-300">
+            Escolha como deseja finalizar <span className="font-semibold text-slate-100">{lead.company || lead.name}</span>.
+          </p>
+
+          <label className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
+            Acao de finalizacao
+            <select
+              className="field mt-1 h-9 px-2.5 py-1.5 text-xs"
+              value={finalizeReason}
+              onChange={(event) => setFinalizeReason(event.target.value as LeadFinalizationReason)}
+            >
+              <option value="apagar">Apagar</option>
+              <option value="compra_efetuada">Compra efetuada</option>
+            </select>
+          </label>
+
+          <div
+            className={`rounded-lg border p-3 text-xs ${
+              finalizeReason === "compra_efetuada"
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                : "border-amber-500/40 bg-amber-500/10 text-amber-200"
+            }`}
+          >
+            {finalizeDescription}
+          </div>
+
+          <p className="text-xs text-slate-400">
+            Esta acao sera contabilizada no indicador oficial de leads finalizados.
+          </p>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-ghost h-9 px-3 py-1.5 text-xs"
+              onClick={() => setFinalizeOpen(false)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className={`h-9 rounded-md border px-3 py-1.5 text-xs transition ${
+                finalizeReason === "compra_efetuada"
+                  ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
+                  : "border-rose-500/40 bg-rose-500/20 text-rose-200 hover:bg-rose-500/30"
+              }`}
+              onClick={() => {
+                onFinalizeLead(draftLead, finalizeReason);
+                setFinalizeOpen(false);
+                onClose();
+              }}
+            >
+              Confirmar: {finalizeLabel}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
