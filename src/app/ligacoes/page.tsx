@@ -2199,9 +2199,9 @@ export default function LigacoesPage() {
         callId: call.id,
         leadId,
         observationId,
-        url: `/leads?${params.toString()}`,
+        url: `/leads/outbound?${params.toString()}`,
       });
-      router.push(`/leads?${params.toString()}`);
+      router.push(`/leads/outbound?${params.toString()}`);
     } catch (error) {
       console.error(`${LIGACOES_DEBUG_PREFIX} VIEW_ANALYSIS_ERROR`, {
         callId: call.id,
