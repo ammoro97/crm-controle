@@ -155,6 +155,7 @@ export type Lead = {
   finalizedViaLeadProfile?: boolean;
   convertedToCustomerAt?: string | null;
   customerStatus?: "cliente" | null;
+  saleValueCents?: number | null;
 };
 
 export type LeadFinalizationRecord = {
@@ -169,6 +170,7 @@ export type LeadFinalizationRecord = {
   finalizationSource: LeadFinalizationSource;
   finalizedViaLeadProfile: true;
   convertedToCustomerAt?: string | null;
+  saleValueCents?: number | null;
 };
 
 export type CallReason = "apresentacao" | "acompanhamento" | "fechamento" | "follow-up";

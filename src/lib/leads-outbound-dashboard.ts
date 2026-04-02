@@ -20,6 +20,7 @@ export type OutboundDashboardMetrics = {
   coberturaBasePercent: number;
   totalLeadsFinalizados: number;
   totalComprasEfetuadas: number;
+  valorTotalFeitoCents: number;
   totalLigacoesAtendidas: number;
   totalLigacoesFeitas: number;
   totalEmailsEnviados: number;
@@ -59,6 +60,7 @@ const EMPTY_OUTBOUND_DASHBOARD_METRICS: OutboundDashboardMetrics = {
   coberturaBasePercent: 0,
   totalLeadsFinalizados: 0,
   totalComprasEfetuadas: 0,
+  valorTotalFeitoCents: 0,
   totalLigacoesAtendidas: 0,
   totalLigacoesFeitas: 0,
   totalEmailsEnviados: 0,
@@ -377,6 +379,19 @@ export function getTotalComprasEfetuadas(finalizations: LeadFinalizationRecord[]
   ).length;
 }
 
+export function getValorTotalFeitoCents(finalizations: LeadFinalizationRecord[]): number {
+  return finalizations
+    .filter(
+      (item) =>
+        item.channel === "outbound" &&
+        item.finalizationSource === "lead_profile" &&
+        item.reason === "compra_efetuada" &&
+        Number.isFinite(item.saleValueCents) &&
+        Number(item.saleValueCents) > 0,
+    )
+    .reduce((total, item) => total + Number(item.saleValueCents), 0);
+}
+
 export function calculateOutboundConversionRate(callsAgendadas: number, contatosDecisor: number): number {
   if (contatosDecisor <= 0) return 0;
   return (callsAgendadas / contatosDecisor) * 100;
@@ -389,6 +404,7 @@ export function buildOutboundDashboardMetrics(input: OutboundMetricsInput): Outb
   const totalLeadsAtivos = context.outboundLeads.length;
   const totalLeadsFinalizados = getTotalLeadsFinalizados(finalizations);
   const totalComprasEfetuadas = getTotalComprasEfetuadas(finalizations);
+  const valorTotalFeitoCents = getValorTotalFeitoCents(finalizations);
   const coberturaBaseRatio = getCoberturaDaBase(context.totalLigacoesFeitas, totalLeadsAtivos);
   const coberturaBasePercent = coberturaBaseRatio * 100;
 
@@ -397,6 +413,7 @@ export function buildOutboundDashboardMetrics(input: OutboundMetricsInput): Outb
       ...EMPTY_OUTBOUND_DASHBOARD_METRICS,
       totalLeadsFinalizados,
       totalComprasEfetuadas,
+      valorTotalFeitoCents,
     };
   }
 
@@ -415,6 +432,7 @@ export function buildOutboundDashboardMetrics(input: OutboundMetricsInput): Outb
     coberturaBasePercent,
     totalLeadsFinalizados,
     totalComprasEfetuadas,
+    valorTotalFeitoCents,
     totalLigacoesAtendidas: context.totalLigacoesAtendidas,
     totalLigacoesFeitas: context.totalLigacoesFeitas,
     totalEmailsEnviados: context.totalEmailsEnviados,

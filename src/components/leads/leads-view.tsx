@@ -18,6 +18,7 @@ import {
 import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { getPostCallWrapups, subscribePostCallFlow, type PostCallWrapup } from "@/lib/post-call-flow";
+import { formatSaleValueCents, isValidSaleValueCents } from "@/lib/sale-value";
 import { buildOutboundDashboardMetrics } from "@/lib/leads-outbound-dashboard";
 import {
   CallLog,
@@ -695,6 +696,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const animatedTotalCallsAgendadas = useCountUp(dashboardMetrics.totalCallsAgendadas, 760);
   const animatedTotalLeadsFinalizados = useCountUp(dashboardMetrics.totalLeadsFinalizados, 760);
   const animatedTotalComprasEfetuadas = useCountUp(dashboardMetrics.totalComprasEfetuadas, 760);
+  const animatedValorTotalFeitoCents = useCountUp(dashboardMetrics.valorTotalFeitoCents, 760);
   const animatedTotalFollowupsPendentes = useCountUp(dashboardMetrics.totalFollowupsPendentes, 760);
   const animatedTotalEmailsEnviados = useCountUp(dashboardMetrics.totalEmailsEnviados, 760);
   const animatedTotalLigacoesFeitas = useCountUp(dashboardMetrics.totalLigacoesFeitas, 760);
@@ -710,6 +712,10 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const dashboardCoveragePercentLabel = useMemo(() => {
     return `${animatedCoveragePercent.toFixed(1).replace(".", ",")}%`;
   }, [animatedCoveragePercent]);
+
+  const dashboardValorTotalFeitoLabel = useMemo(() => {
+    return formatSaleValueCents(Math.round(animatedValorTotalFeitoCents));
+  }, [animatedValorTotalFeitoCents]);
 
   const dashboardFunnelSteps = useMemo(
     () => [
@@ -786,6 +792,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       dashboardMetrics.totalEmailsEnviados,
       dashboardMetrics.totalLigacoesFeitas,
       dashboardMetrics.totalFollowupsPendentes,
+      dashboardMetrics.valorTotalFeitoCents,
     ].join("|");
   }, [
     dashboardMetrics.taxaConversao,
@@ -794,6 +801,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     dashboardMetrics.totalFollowupsPendentes,
     dashboardMetrics.totalLeadsProspectados,
     dashboardMetrics.totalLigacoesFeitas,
+    dashboardMetrics.valorTotalFeitoCents,
   ]);
 
   useEffect(() => {
@@ -896,12 +904,17 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     setLeads((prev) => prev.filter((lead) => !toDelete.has(lead.id)));
   };
 
-  const finalizeLeadViaProfile = (leadToFinalize: Lead, reason: LeadFinalizationReason) => {
+  const finalizeLeadViaProfile = (leadToFinalize: Lead, reason: LeadFinalizationReason, saleValueCents?: number): boolean => {
     const resolvedLead = leads.find((lead) => lead.id === leadToFinalize.id) || leadToFinalize;
     const finalizedAt = new Date();
     const finalizedAtIso = finalizedAt.toISOString();
     const stamp = nowStamp();
     const finalizedBy = resolvedLead.owner || "Time Comercial";
+    const safeSaleValueCents = Number.isFinite(saleValueCents) ? Math.round(Number(saleValueCents)) : 0;
+
+    if (reason === "compra_efetuada" && !isValidSaleValueCents(safeSaleValueCents)) {
+      return false;
+    }
 
     const finalizationRecord: LeadFinalizationRecord = {
       id: `LF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -915,6 +928,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       finalizationSource: "lead_profile",
       finalizedViaLeadProfile: true,
       convertedToCustomerAt: reason === "compra_efetuada" ? finalizedAtIso : null,
+      saleValueCents: reason === "compra_efetuada" ? safeSaleValueCents : null,
     };
 
     setLeads((prev) => prev.filter((lead) => lead.id !== resolvedLead.id));
@@ -930,15 +944,20 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         finalizedViaLeadProfile: true,
         convertedToCustomerAt: finalizedAtIso,
         customerStatus: "cliente",
+        saleValueCents: safeSaleValueCents,
         history: [
           ...resolvedLead.history,
-          historyEvent(finalizedBy, "LEAD_FINALIZADO", "Lead finalizado como compra efetuada e movido para Clientes."),
+          historyEvent(
+            finalizedBy,
+            "LEAD_FINALIZADO",
+            `Lead finalizado como compra efetuada e movido para Clientes. Valor registrado: ${formatSaleValueCents(safeSaleValueCents)}.`,
+          ),
           {
             id: `H-CUSTOMER-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             date: stamp.date,
             time: stamp.time,
             eventType: "CLIENTE",
-            description: "Lead convertido em cliente.",
+            description: `Lead convertido em cliente com venda de ${formatSaleValueCents(safeSaleValueCents)}.`,
             owner: finalizedBy,
           },
         ],
@@ -958,6 +977,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     setDetailLeadId(null);
     setDetailInitialTab("resumo");
     setDetailInitialObservationId(null);
+
+    return true;
   };
 
   const handleCreateLead = (event: FormEvent<HTMLFormElement>) => {
@@ -1388,7 +1409,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             ) : null}
           </div>
 
-          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-5">
             <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
               <p className={dashboardLabelClass}>Taxa de Conversao</p>
               <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
@@ -1418,6 +1439,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                 {Math.max(0, Math.round(animatedTotalComprasEfetuadas))}
               </p>
               <p className="mt-2 text-xs text-slate-400">Leads convertidos em clientes</p>
+            </article>
+
+            <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
+              <p className={dashboardLabelClass}>Valor Total Feito</p>
+              <p className="mt-4 text-[30px] font-semibold tracking-[-0.03em] text-[#22C55E]">{dashboardValorTotalFeitoLabel}</p>
+              <p className="mt-2 text-xs text-slate-400">Soma oficial das vendas por Compra efetuada</p>
             </article>
           </div>
 

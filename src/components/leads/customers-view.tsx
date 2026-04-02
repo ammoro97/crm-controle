@@ -201,9 +201,11 @@ export function CustomersView() {
         onSave={updateCustomerById}
         initialTab={detailInitialTab}
         showFinalizeAction={false}
-        onFinalizeLead={(lead, reason) => {
+        onFinalizeLead={(lead, reason, saleValueCents) => {
           void lead;
           void reason;
+          void saleValueCents;
+          return false;
         }}
         onClose={() => {
           setDetailOpen(false);
