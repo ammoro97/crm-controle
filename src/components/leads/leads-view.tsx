@@ -2,6 +2,7 @@
 
 import { ChangeEvent, DragEvent, FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useAuth } from "@/components/auth/auth-provider";
 import { PageTopbar } from "@/components/layout/page-topbar";
 import { Modal } from "@/components/ui/modal";
 import {
@@ -147,6 +148,111 @@ type AutomationApiResponse = {
   pending?: boolean;
   message?: string;
 };
+
+type DashboardSectionKey = "top" | "operational" | "main" | "base";
+
+type DashboardWidgetId =
+  | "taxa_conversao"
+  | "cobertura_base"
+  | "leads_finalizados"
+  | "compras_efetuadas"
+  | "valor_total_feito"
+  | "leads_prospectados"
+  | "calls_agendadas"
+  | "ligacoes_feitas"
+  | "emails_enviados"
+  | "funil_vendas"
+  | "atividades_bdr"
+  | "followups_pendentes"
+  | "taxa_conversao_indicador";
+
+type DashboardWidgetLayout = Record<DashboardSectionKey, DashboardWidgetId[]>;
+
+const DASHBOARD_LAYOUT_STORAGE_KEY = "crm.leads.dashboard.layout.v1";
+const DASHBOARD_GUEST_USER_KEY = "guest";
+
+const defaultDashboardLayout: DashboardWidgetLayout = {
+  top: ["taxa_conversao", "cobertura_base", "leads_finalizados", "compras_efetuadas", "valor_total_feito"],
+  operational: ["leads_prospectados", "calls_agendadas", "ligacoes_feitas", "emails_enviados"],
+  main: ["funil_vendas", "atividades_bdr"],
+  base: ["followups_pendentes", "taxa_conversao_indicador"],
+};
+
+function normalizeSectionOrder(sectionValue: unknown, defaults: DashboardWidgetId[]): DashboardWidgetId[] {
+  const source = Array.isArray(sectionValue) ? sectionValue : [];
+  const allowed = new Set<DashboardWidgetId>(defaults);
+  const unique = new Set<DashboardWidgetId>();
+  const ordered: DashboardWidgetId[] = [];
+
+  for (const candidate of source) {
+    const key = String(candidate || "") as DashboardWidgetId;
+    if (!allowed.has(key) || unique.has(key)) continue;
+    unique.add(key);
+    ordered.push(key);
+  }
+
+  for (const fallback of defaults) {
+    if (unique.has(fallback)) continue;
+    ordered.push(fallback);
+  }
+
+  return ordered;
+}
+
+function normalizeDashboardLayout(rawLayout: unknown): DashboardWidgetLayout {
+  const source = rawLayout && typeof rawLayout === "object" ? (rawLayout as Partial<DashboardWidgetLayout>) : {};
+  return {
+    top: normalizeSectionOrder(source.top, defaultDashboardLayout.top),
+    operational: normalizeSectionOrder(source.operational, defaultDashboardLayout.operational),
+    main: normalizeSectionOrder(source.main, defaultDashboardLayout.main),
+    base: normalizeSectionOrder(source.base, defaultDashboardLayout.base),
+  };
+}
+
+function getDashboardLayoutSnapshot(userId: string): DashboardWidgetLayout {
+  if (typeof window === "undefined") return defaultDashboardLayout;
+
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY);
+    if (!raw) return defaultDashboardLayout;
+    const parsed = JSON.parse(raw);
+    const byUser = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    return normalizeDashboardLayout(byUser[userId] || byUser[DASHBOARD_GUEST_USER_KEY] || defaultDashboardLayout);
+  } catch {
+    return defaultDashboardLayout;
+  }
+}
+
+function setDashboardLayoutSnapshot(userId: string, layout: DashboardWidgetLayout) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const byUser = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    byUser[userId] = layout;
+    window.localStorage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify(byUser));
+  } catch {
+    window.localStorage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify({ [userId]: layout }));
+  }
+}
+
+function moveWidgetWithinSection(
+  sectionOrder: DashboardWidgetId[],
+  draggedWidgetId: DashboardWidgetId,
+  targetWidgetId: DashboardWidgetId,
+  position: "before" | "after",
+): DashboardWidgetId[] {
+  if (draggedWidgetId === targetWidgetId) return sectionOrder;
+
+  const filtered = sectionOrder.filter((id) => id !== draggedWidgetId);
+  const targetIndex = filtered.indexOf(targetWidgetId);
+  if (targetIndex < 0) return sectionOrder;
+
+  const insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
+  filtered.splice(insertIndex, 0, draggedWidgetId);
+  return filtered;
+}
 
 function normalizeLead(lead: Lead): Lead {
   const names = getLeadNames(lead);
@@ -444,6 +550,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const isDashboardMode = filter === "all";
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { currentUser } = useAuth();
   const responsaveis = useResponsaveis();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const openedFromQueryRef = useRef<string | null>(null);
@@ -457,6 +564,13 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardAnimateIn, setDashboardAnimateIn] = useState(false);
+  const [dashboardLayout, setDashboardLayout] = useState<DashboardWidgetLayout>(defaultDashboardLayout);
+  const [draggingWidget, setDraggingWidget] = useState<{ section: DashboardSectionKey; widgetId: DashboardWidgetId } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    section: DashboardSectionKey;
+    widgetId: DashboardWidgetId;
+    position: "before" | "after";
+  } | null>(null);
   const [draftLead, setDraftLead] = useState<Lead | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
@@ -487,6 +601,10 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [isParsingImportFile, setIsParsingImportFile] = useState(false);
   const [importFileName, setImportFileName] = useState("");
   const [importRows, setImportRows] = useState<ImportedLeadRow[]>([]);
+
+  const dashboardLayoutUserId = useMemo(() => {
+    return String(currentUser?.id || DASHBOARD_GUEST_USER_KEY).trim() || DASHBOARD_GUEST_USER_KEY;
+  }, [currentUser?.id]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -658,6 +776,22 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     };
   }, [isDashboardMode]);
 
+  useEffect(() => {
+    if (!isDashboardMode) return;
+    setDashboardLayout(getDashboardLayoutSnapshot(dashboardLayoutUserId));
+  }, [dashboardLayoutUserId, isDashboardMode]);
+
+  useEffect(() => {
+    if (!isDashboardMode) return;
+    setDashboardLayoutSnapshot(dashboardLayoutUserId, dashboardLayout);
+  }, [dashboardLayout, dashboardLayoutUserId, isDashboardMode]);
+
+  useEffect(() => {
+    if (isDashboardMode) return;
+    setDraggingWidget(null);
+    setDropTarget(null);
+  }, [isDashboardMode]);
+
   const visibleLeads = useMemo(() => {
     const base = filter === "all" ? leads : leads.filter((lead) => lead.channel === filter);
     const sorted = [...base].sort((a, b) => a.name.localeCompare(b.name));
@@ -783,6 +917,242 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     "group relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-6 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_16px_34px_rgba(2,6,23,0.35)] backdrop-blur transition-all duration-200 hover:-translate-y-[2px] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.3)]";
 
   const dashboardLabelClass = "text-xs uppercase tracking-[0.08em] text-slate-400";
+
+  const handleWidgetDragStart = (
+    event: DragEvent<HTMLElement>,
+    section: DashboardSectionKey,
+    widgetId: DashboardWidgetId,
+  ) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", widgetId);
+    setDraggingWidget({ section, widgetId });
+  };
+
+  const handleWidgetDragOver = (
+    event: DragEvent<HTMLElement>,
+    section: DashboardSectionKey,
+    widgetId: DashboardWidgetId,
+  ) => {
+    if (!draggingWidget || draggingWidget.section !== section || draggingWidget.widgetId === widgetId) return;
+    event.preventDefault();
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const position: "before" | "after" = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    setDropTarget({ section, widgetId, position });
+  };
+
+  const handleWidgetDrop = (
+    event: DragEvent<HTMLElement>,
+    section: DashboardSectionKey,
+    targetWidgetId: DashboardWidgetId,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!draggingWidget || draggingWidget.section !== section || draggingWidget.widgetId === targetWidgetId) {
+      setDropTarget(null);
+      return;
+    }
+
+    const targetPosition = dropTarget?.section === section && dropTarget.widgetId === targetWidgetId
+      ? dropTarget.position
+      : "before";
+
+    setDashboardLayout((prev) => ({
+      ...prev,
+      [section]: moveWidgetWithinSection(prev[section], draggingWidget.widgetId, targetWidgetId, targetPosition),
+    }));
+
+    setDropTarget(null);
+    setDraggingWidget(null);
+  };
+
+  const handleWidgetDragEnd = () => {
+    setDropTarget(null);
+    setDraggingWidget(null);
+  };
+
+  const renderDashboardWidget = (section: DashboardSectionKey, widgetId: DashboardWidgetId) => {
+    const isDragging = draggingWidget?.section === section && draggingWidget.widgetId === widgetId;
+    const isDropTarget = dropTarget?.section === section && dropTarget.widgetId === widgetId && !isDragging;
+    const sectionHeightClass =
+      section === "main"
+        ? "min-h-[330px]"
+        : section === "operational"
+          ? "min-h-[160px]"
+          : section === "base"
+            ? "min-h-[170px]"
+            : "min-h-[176px]";
+
+    const content =
+      widgetId === "taxa_conversao" ? (
+        <>
+          <p className={dashboardLabelClass}>Taxa de Conversao</p>
+          <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
+          <p className="mt-2 text-xs text-slate-300">Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})</p>
+        </>
+      ) : widgetId === "cobertura_base" ? (
+        <>
+          <p className={dashboardLabelClass}>Cobertura da Base</p>
+          <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#3B82F6]">{dashboardCoveragePercentLabel}</p>
+          <p className="mt-2 text-xs text-slate-300">
+            {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
+          </p>
+          <p className="mt-2 text-[11px] uppercase tracking-[0.08em] text-slate-500">{dashboardCoverageLabel}</p>
+        </>
+      ) : widgetId === "leads_finalizados" ? (
+        <>
+          <p className={dashboardLabelClass}>Leads Finalizados</p>
+          <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-white">
+            {Math.max(0, Math.round(animatedTotalLeadsFinalizados))}
+          </p>
+          <p className="mt-2 text-xs text-slate-400">Finalizacao oficial via visao personalizada</p>
+        </>
+      ) : widgetId === "compras_efetuadas" ? (
+        <>
+          <p className={dashboardLabelClass}>Compras Efetuadas</p>
+          <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#22C55E]">
+            {Math.max(0, Math.round(animatedTotalComprasEfetuadas))}
+          </p>
+          <p className="mt-2 text-xs text-slate-400">Leads convertidos em clientes</p>
+        </>
+      ) : widgetId === "valor_total_feito" ? (
+        <>
+          <p className={dashboardLabelClass}>Valor Total Feito</p>
+          <p className="mt-4 text-[30px] font-semibold tracking-[-0.03em] text-[#22C55E]">{dashboardValorTotalFeitoLabel}</p>
+          <p className="mt-2 text-xs text-slate-400">Soma oficial das vendas por Compra efetuada</p>
+        </>
+      ) : widgetId === "leads_prospectados" ? (
+        <>
+          <p className={dashboardLabelClass}>Leads Prospectados</p>
+          <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">
+            {Math.max(0, Math.round(animatedTotalLeadsProspectados))}
+          </p>
+        </>
+      ) : widgetId === "calls_agendadas" ? (
+        <>
+          <p className={dashboardLabelClass}>Calls Agendadas</p>
+          <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#22C55E]">
+            {Math.max(0, Math.round(animatedTotalCallsAgendadas))}
+          </p>
+        </>
+      ) : widgetId === "ligacoes_feitas" ? (
+        <>
+          <p className={dashboardLabelClass}>Ligacoes Feitas</p>
+          <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#8B5CF6]">
+            {Math.max(0, Math.round(animatedTotalLigacoesFeitas))}
+          </p>
+        </>
+      ) : widgetId === "emails_enviados" ? (
+        <>
+          <p className={dashboardLabelClass}>Emails Enviados</p>
+          <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">
+            {Math.max(0, Math.round(animatedTotalEmailsEnviados))}
+          </p>
+        </>
+      ) : widgetId === "funil_vendas" ? (
+        <>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <p className={dashboardLabelClass}>Funil de Vendas Outbound</p>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Etapas consolidadas da operacao</p>
+          </div>
+          <div className="pt-2">
+            {dashboardFunnelSteps.map((step, index) => {
+              const width =
+                step.value <= 0 ? 36 : Math.max(38, Math.min(100, Math.round((step.value / dashboardFunnelMaxValue) * 100)));
+              return (
+                <div key={step.label} className={index === 0 ? "" : "-mt-2"}>
+                  <div
+                    className="relative h-10 overflow-hidden rounded-full shadow-[0_14px_22px_rgba(2,6,23,0.34)]"
+                    style={{
+                      width: dashboardAnimateIn ? `${width}%` : "0%",
+                      transitionDelay: `${index * 90}ms`,
+                      transitionProperty: "width",
+                      transitionDuration: "0.8s",
+                      transitionTimingFunction: "cubic-bezier(0.22,1,0.36,1)",
+                      boxShadow: `${step.glowShadow}, 0 14px 22px rgba(2,6,23,0.34)`,
+                    }}
+                  >
+                    <div className={`absolute inset-0 bg-gradient-to-r ${step.gradientClass}`} />
+                    <div className={`absolute inset-0 border ${step.borderClass}`} />
+                    <div className="relative flex h-full items-center justify-between px-4">
+                      <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-100">{step.label}</span>
+                      <span className="text-sm font-semibold text-white">{step.value}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : widgetId === "atividades_bdr" ? (
+        <>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <p className={dashboardLabelClass}>Atividades (BDR)</p>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Email + ligacoes</p>
+          </div>
+          <div className="space-y-4">
+            {dashboardActivities.map((activity, index) => {
+              const width =
+                activity.value <= 0 ? 8 : Math.max(14, Math.min(100, Math.round((activity.value / dashboardActivitiesMaxValue) * 100)));
+              return (
+                <div key={activity.label} className="rounded-xl bg-[#111827]/80 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]">
+                  <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
+                    <span>{activity.label}</span>
+                    <span className={`text-2xl font-semibold tracking-[-0.02em] ${activity.metricClass}`}>{activity.animatedValue}</span>
+                  </div>
+                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-900/80">
+                    <div
+                      className={`h-full rounded-full transition-[width] duration-[600ms] ease-out ${activity.barClass}`}
+                      style={{
+                        width: dashboardAnimateIn ? `${width}%` : "0%",
+                        transitionDelay: `${index * 90}ms`,
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : widgetId === "followups_pendentes" ? (
+        <>
+          <p className={dashboardLabelClass}>Follow-ups Pendentes</p>
+          <p className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-[#F59E0B]">
+            {Math.max(0, Math.round(animatedTotalFollowupsPendentes))}
+          </p>
+          <p className="mt-2 text-xs text-slate-400">Follow-ups futuros com status ativo</p>
+        </>
+      ) : (
+        <>
+          <p className={dashboardLabelClass}>Taxa de Conversao (Indicador)</p>
+          <p className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
+          <p className="mt-2 text-xs text-slate-400">
+            {dashboardMetrics.totalCallsAgendadas} calls agendadas para {dashboardMetrics.totalContatosDecisor} contatos com decisor
+          </p>
+        </>
+      );
+
+    return (
+      <article
+        key={`${section}-${widgetId}`}
+        draggable
+        onDragStart={(event) => handleWidgetDragStart(event, section, widgetId)}
+        onDragOver={(event) => handleWidgetDragOver(event, section, widgetId)}
+        onDrop={(event) => handleWidgetDrop(event, section, widgetId)}
+        onDragEnd={handleWidgetDragEnd}
+        className={`${dashboardCardBaseClass} ${sectionHeightClass} cursor-grab active:cursor-grabbing ${isDragging ? "scale-[0.995] opacity-60" : ""} ${isDropTarget ? "ring-2 ring-sky-400/70" : ""}`}
+      >
+        <span className="absolute right-3 top-3 select-none text-xs tracking-[0.12em] text-slate-500">⋮⋮</span>
+        {isDropTarget ? (
+          <span
+            className={`pointer-events-none absolute left-3 right-3 h-[2px] rounded-full bg-sky-400/80 ${
+              dropTarget?.position === "before" ? "top-1.5" : "bottom-1.5"
+            }`}
+          />
+        ) : null}
+        {content}
+      </article>
+    );
+  };
 
   const dashboardAnimationSeed = useMemo(() => {
     return [
@@ -1410,153 +1780,19 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           </div>
 
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-5">
-            <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
-              <p className={dashboardLabelClass}>Taxa de Conversao</p>
-              <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
-              <p className="mt-2 text-xs text-slate-300">Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})</p>
-            </article>
-
-            <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
-              <p className={dashboardLabelClass}>Cobertura da Base</p>
-              <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#3B82F6]">{dashboardCoveragePercentLabel}</p>
-              <p className="mt-2 text-xs text-slate-300">
-                {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
-              </p>
-              <p className="mt-2 text-[11px] uppercase tracking-[0.08em] text-slate-500">{dashboardCoverageLabel}</p>
-            </article>
-
-            <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
-              <p className={dashboardLabelClass}>Leads Finalizados</p>
-              <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-white">
-                {Math.max(0, Math.round(animatedTotalLeadsFinalizados))}
-              </p>
-              <p className="mt-2 text-xs text-slate-400">Finalizacao oficial via visao personalizada</p>
-            </article>
-
-            <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
-              <p className={dashboardLabelClass}>Compras Efetuadas</p>
-              <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#22C55E]">
-                {Math.max(0, Math.round(animatedTotalComprasEfetuadas))}
-              </p>
-              <p className="mt-2 text-xs text-slate-400">Leads convertidos em clientes</p>
-            </article>
-
-            <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
-              <p className={dashboardLabelClass}>Valor Total Feito</p>
-              <p className="mt-4 text-[30px] font-semibold tracking-[-0.03em] text-[#22C55E]">{dashboardValorTotalFeitoLabel}</p>
-              <p className="mt-2 text-xs text-slate-400">Soma oficial das vendas por Compra efetuada</p>
-            </article>
+            {dashboardLayout.top.map((widgetId) => renderDashboardWidget("top", widgetId))}
           </div>
 
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-            <article className={`${dashboardCardBaseClass} min-h-[160px]`}>
-              <p className={dashboardLabelClass}>Leads Prospectados</p>
-              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">
-                {Math.max(0, Math.round(animatedTotalLeadsProspectados))}
-              </p>
-            </article>
-            <article className={`${dashboardCardBaseClass} min-h-[160px]`}>
-              <p className={dashboardLabelClass}>Calls Agendadas</p>
-              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#22C55E]">
-                {Math.max(0, Math.round(animatedTotalCallsAgendadas))}
-              </p>
-            </article>
-            <article className={`${dashboardCardBaseClass} min-h-[160px]`}>
-              <p className={dashboardLabelClass}>Ligacoes Feitas</p>
-              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#8B5CF6]">
-                {Math.max(0, Math.round(animatedTotalLigacoesFeitas))}
-              </p>
-            </article>
-            <article className={`${dashboardCardBaseClass} min-h-[160px]`}>
-              <p className={dashboardLabelClass}>Emails Enviados</p>
-              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">
-                {Math.max(0, Math.round(animatedTotalEmailsEnviados))}
-              </p>
-            </article>
+            {dashboardLayout.operational.map((widgetId) => renderDashboardWidget("operational", widgetId))}
           </div>
 
           <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
-            <article className={`${dashboardCardBaseClass} min-h-[330px]`}>
-              <div className="mb-4 flex items-center justify-between gap-2">
-                <p className={dashboardLabelClass}>Funil de Vendas Outbound</p>
-                <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Etapas consolidadas da operacao</p>
-              </div>
-              <div className="pt-2">
-                {dashboardFunnelSteps.map((step, index) => {
-                  const width =
-                    step.value <= 0 ? 36 : Math.max(38, Math.min(100, Math.round((step.value / dashboardFunnelMaxValue) * 100)));
-                  return (
-                    <div key={step.label} className={index === 0 ? "" : "-mt-2"}>
-                      <div
-                        className="relative h-10 overflow-hidden rounded-full shadow-[0_14px_22px_rgba(2,6,23,0.34)]"
-                        style={{
-                          width: dashboardAnimateIn ? `${width}%` : "0%",
-                          transitionDelay: `${index * 90}ms`,
-                          transitionProperty: "width",
-                          transitionDuration: "0.8s",
-                          transitionTimingFunction: "cubic-bezier(0.22,1,0.36,1)",
-                          boxShadow: `${step.glowShadow}, 0 14px 22px rgba(2,6,23,0.34)`,
-                        }}
-                      >
-                        <div className={`absolute inset-0 bg-gradient-to-r ${step.gradientClass}`} />
-                        <div className={`absolute inset-0 border ${step.borderClass}`} />
-                        <div className="relative flex h-full items-center justify-between px-4">
-                          <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-100">{step.label}</span>
-                          <span className="text-sm font-semibold text-white">{step.value}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </article>
-
-            <article className={`${dashboardCardBaseClass} min-h-[330px]`}>
-              <div className="mb-4 flex items-center justify-between gap-2">
-                <p className={dashboardLabelClass}>Atividades (BDR)</p>
-                <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Email + ligacoes</p>
-              </div>
-              <div className="space-y-4">
-                {dashboardActivities.map((activity, index) => {
-                  const width =
-                    activity.value <= 0 ? 8 : Math.max(14, Math.min(100, Math.round((activity.value / dashboardActivitiesMaxValue) * 100)));
-                  return (
-                    <div key={activity.label} className="rounded-xl bg-[#111827]/80 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]">
-                      <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
-                        <span>{activity.label}</span>
-                        <span className={`text-2xl font-semibold tracking-[-0.02em] ${activity.metricClass}`}>{activity.animatedValue}</span>
-                      </div>
-                      <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-900/80">
-                        <div
-                          className={`h-full rounded-full transition-[width] duration-[600ms] ease-out ${activity.barClass}`}
-                          style={{
-                            width: dashboardAnimateIn ? `${width}%` : "0%",
-                            transitionDelay: `${index * 90}ms`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </article>
+            {dashboardLayout.main.map((widgetId) => renderDashboardWidget("main", widgetId))}
           </div>
 
           <div className="grid gap-6 md:grid-cols-2">
-            <article className={dashboardCardBaseClass}>
-              <p className={dashboardLabelClass}>Follow-ups Pendentes</p>
-              <p className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-[#F59E0B]">
-                {Math.max(0, Math.round(animatedTotalFollowupsPendentes))}
-              </p>
-              <p className="mt-2 text-xs text-slate-400">Follow-ups futuros com status ativo</p>
-            </article>
-            <article className={dashboardCardBaseClass}>
-              <p className={dashboardLabelClass}>Taxa de Conversao (Indicador)</p>
-              <p className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
-              <p className="mt-2 text-xs text-slate-400">
-                {dashboardMetrics.totalCallsAgendadas} calls agendadas para {dashboardMetrics.totalContatosDecisor} contatos com decisor
-              </p>
-            </article>
+            {dashboardLayout.base.map((widgetId) => renderDashboardWidget("base", widgetId))}
           </div>
 
           <style jsx>{`
