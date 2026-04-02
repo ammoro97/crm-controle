@@ -1388,60 +1388,68 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             ) : null}
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
-            <article className={`${dashboardCardBaseClass} min-h-[260px]`}>
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(34,197,94,0.12),transparent_58%)]" />
-              <div className="relative">
-                <p className={dashboardLabelClass}>Taxa de Conversao</p>
-                <p className="mt-4 text-[48px] font-semibold leading-[0.92] tracking-[-0.04em] text-[#22C55E] drop-shadow-[0_0_20px_rgba(34,197,94,0.24)]">
-                  {dashboardConversionRateLabel}
-                </p>
-                <p className="mt-3 text-xs text-slate-300">
-                  Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})
-                </p>
-                <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl bg-[#111827]/80 p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
-                    <p className={dashboardLabelClass}>Leads Prospectados</p>
-                    <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-[#3B82F6]">
-                      {Math.max(0, Math.round(animatedTotalLeadsProspectados))}
-                    </p>
-                  </div>
-                  <div className="rounded-xl bg-[#111827]/80 p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
-                    <p className={dashboardLabelClass}>Calls Agendadas</p>
-                    <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-[#22C55E]">
-                      {Math.max(0, Math.round(animatedTotalCallsAgendadas))}
-                    </p>
-                  </div>
-                </div>
-              </div>
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+            <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
+              <p className={dashboardLabelClass}>Taxa de Conversao</p>
+              <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
+              <p className="mt-2 text-xs text-slate-300">Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})</p>
             </article>
 
-            <div className="grid gap-6">
-              <article className={`${dashboardCardBaseClass} min-h-[170px]`}>
-                <p className={dashboardLabelClass}>Cobertura da Base</p>
-                <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">{dashboardCoveragePercentLabel}</p>
-                <p className="mt-2 text-xs text-slate-300">
-                  {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
-                </p>
-                <p className="mt-3 text-[11px] uppercase tracking-[0.08em] text-slate-500">{dashboardCoverageLabel}</p>
-              </article>
+            <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
+              <p className={dashboardLabelClass}>Cobertura da Base</p>
+              <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#3B82F6]">{dashboardCoveragePercentLabel}</p>
+              <p className="mt-2 text-xs text-slate-300">
+                {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
+              </p>
+              <p className="mt-2 text-[11px] uppercase tracking-[0.08em] text-slate-500">{dashboardCoverageLabel}</p>
+            </article>
 
-              <article className={`${dashboardCardBaseClass} min-h-[170px]`}>
-                <p className={dashboardLabelClass}>Total de Leads Finalizados</p>
-                <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-white">
-                  {Math.max(0, Math.round(animatedTotalLeadsFinalizados))}
-                </p>
-                <p className="mt-2 text-xs text-slate-400">Conta apenas finalizacao oficial via visao personalizada</p>
-                <p className={`${dashboardLabelClass} mt-6`}>Compras Efetuadas</p>
-                <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-[#22C55E]">
-                  {Math.max(0, Math.round(animatedTotalComprasEfetuadas))}
-                </p>
-              </article>
-            </div>
+            <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
+              <p className={dashboardLabelClass}>Leads Finalizados</p>
+              <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-white">
+                {Math.max(0, Math.round(animatedTotalLeadsFinalizados))}
+              </p>
+              <p className="mt-2 text-xs text-slate-400">Finalizacao oficial via visao personalizada</p>
+            </article>
+
+            <article className={`${dashboardCardBaseClass} min-h-[176px]`}>
+              <p className={dashboardLabelClass}>Compras Efetuadas</p>
+              <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#22C55E]">
+                {Math.max(0, Math.round(animatedTotalComprasEfetuadas))}
+              </p>
+              <p className="mt-2 text-xs text-slate-400">Leads convertidos em clientes</p>
+            </article>
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
-            <article className={`${dashboardCardBaseClass} min-h-[310px]`}>
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+            <article className={`${dashboardCardBaseClass} min-h-[160px]`}>
+              <p className={dashboardLabelClass}>Leads Prospectados</p>
+              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">
+                {Math.max(0, Math.round(animatedTotalLeadsProspectados))}
+              </p>
+            </article>
+            <article className={`${dashboardCardBaseClass} min-h-[160px]`}>
+              <p className={dashboardLabelClass}>Calls Agendadas</p>
+              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#22C55E]">
+                {Math.max(0, Math.round(animatedTotalCallsAgendadas))}
+              </p>
+            </article>
+            <article className={`${dashboardCardBaseClass} min-h-[160px]`}>
+              <p className={dashboardLabelClass}>Ligacoes Feitas</p>
+              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#8B5CF6]">
+                {Math.max(0, Math.round(animatedTotalLigacoesFeitas))}
+              </p>
+            </article>
+            <article className={`${dashboardCardBaseClass} min-h-[160px]`}>
+              <p className={dashboardLabelClass}>Emails Enviados</p>
+              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">
+                {Math.max(0, Math.round(animatedTotalEmailsEnviados))}
+              </p>
+            </article>
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
+            <article className={`${dashboardCardBaseClass} min-h-[330px]`}>
               <div className="mb-4 flex items-center justify-between gap-2">
                 <p className={dashboardLabelClass}>Funil de Vendas Outbound</p>
                 <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Etapas consolidadas da operacao</p>
@@ -1476,7 +1484,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               </div>
             </article>
 
-            <article className={`${dashboardCardBaseClass} min-h-[310px]`}>
+            <article className={`${dashboardCardBaseClass} min-h-[330px]`}>
               <div className="mb-4 flex items-center justify-between gap-2">
                 <p className={dashboardLabelClass}>Atividades (BDR)</p>
                 <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Email + ligacoes</p>
@@ -1507,7 +1515,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             </article>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 md:grid-cols-2">
             <article className={dashboardCardBaseClass}>
               <p className={dashboardLabelClass}>Follow-ups Pendentes</p>
               <p className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-[#F59E0B]">
