@@ -197,36 +197,43 @@ const defaultDashboardWidgetOrder: DashboardWidgetId[] = [
 ];
 
 const dashboardWidgetDimensions: Record<DashboardWidgetId, { w: number; h: number }> = {
-  taxa_conversao: { w: 3, h: 1 },
-  cobertura_base: { w: 3, h: 1 },
-  leads_finalizados: { w: 3, h: 1 },
-  compras_efetuadas: { w: 3, h: 1 },
-  valor_total_feito: { w: 3, h: 1 },
-  leads_prospectados: { w: 3, h: 1 },
-  calls_agendadas: { w: 3, h: 1 },
-  ligacoes_feitas: { w: 3, h: 1 },
-  emails_enviados: { w: 3, h: 1 },
-  funil_vendas: { w: 8, h: 2 },
-  atividades_bdr: { w: 4, h: 2 },
-  followups_pendentes: { w: 6, h: 1 },
-  taxa_conversao_indicador: { w: 6, h: 1 },
+  taxa_conversao: { w: 3, h: 2 },
+  cobertura_base: { w: 3, h: 2 },
+  leads_finalizados: { w: 3, h: 2 },
+  compras_efetuadas: { w: 3, h: 2 },
+  valor_total_feito: { w: 3, h: 2 },
+  leads_prospectados: { w: 3, h: 2 },
+  calls_agendadas: { w: 3, h: 2 },
+  ligacoes_feitas: { w: 3, h: 2 },
+  emails_enviados: { w: 3, h: 2 },
+  funil_vendas: { w: 8, h: 4 },
+  atividades_bdr: { w: 4, h: 4 },
+  followups_pendentes: { w: 6, h: 2 },
+  taxa_conversao_indicador: { w: 6, h: 2 },
 };
 
-const dashboardWidgetGridClasses: Record<DashboardWidgetId, string> = {
-  taxa_conversao: "basis-[260px] grow min-h-[176px]",
-  cobertura_base: "basis-[260px] grow min-h-[176px]",
-  leads_finalizados: "basis-[260px] grow min-h-[176px]",
-  compras_efetuadas: "basis-[260px] grow min-h-[176px]",
-  valor_total_feito: "basis-[260px] grow min-h-[176px]",
-  leads_prospectados: "basis-[240px] grow min-h-[160px]",
-  calls_agendadas: "basis-[240px] grow min-h-[160px]",
-  ligacoes_feitas: "basis-[240px] grow min-h-[160px]",
-  emails_enviados: "basis-[240px] grow min-h-[160px]",
-  funil_vendas: "basis-[720px] grow-[2] min-h-[330px]",
-  atividades_bdr: "basis-[420px] grow min-h-[330px]",
-  followups_pendentes: "basis-[320px] grow min-h-[170px]",
-  taxa_conversao_indicador: "basis-[320px] grow min-h-[170px]",
-};
+function resolveDashboardGridColumns(viewportWidth: number): number {
+  if (viewportWidth >= 1536) return 12;
+  if (viewportWidth >= 1280) return 10;
+  if (viewportWidth >= 1024) return 8;
+  if (viewportWidth >= 768) return 6;
+  if (viewportWidth >= 560) return 4;
+  if (viewportWidth >= 420) return 2;
+  return 1;
+}
+
+function getDashboardResponsiveDimensions(columns: number): Record<DashboardWidgetId, { w: number; h: number }> {
+  const normalizedColumns = Math.max(1, columns);
+  const output = {} as Record<DashboardWidgetId, { w: number; h: number }>;
+  for (const widgetId of defaultDashboardWidgetOrder) {
+    const base = dashboardWidgetDimensions[widgetId];
+    const widthScaled = Math.ceil((base.w / 12) * normalizedColumns);
+    const width = Math.max(1, Math.min(normalizedColumns, widthScaled));
+    const height = base.h;
+    output[widgetId] = { w: width, h: height };
+  }
+  return output;
+}
 
 function normalizeDashboardWidgetOrder(orderValue: unknown): DashboardWidgetId[] {
   const source = Array.isArray(orderValue) ? orderValue : [];
@@ -701,6 +708,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardAnimateIn, setDashboardAnimateIn] = useState(false);
   const [dashboardWidgetOrder, setDashboardWidgetOrder] = useState<DashboardWidgetId[]>(defaultDashboardWidgetOrder);
+  const [dashboardViewportWidth, setDashboardViewportWidth] = useState<number>(() =>
+    typeof window === "undefined" ? 1440 : window.innerWidth,
+  );
   const [draggingWidgetId, setDraggingWidgetId] = useState<DashboardWidgetId | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     widgetId: DashboardWidgetId;
@@ -740,6 +750,16 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const dashboardLayoutUserId = useMemo(() => {
     return String(currentUser?.id || DASHBOARD_GUEST_USER_KEY).trim() || DASHBOARD_GUEST_USER_KEY;
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!isDashboardMode || typeof window === "undefined") return;
+    const handleResize = () => setDashboardViewportWidth(window.innerWidth);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [isDashboardMode]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1052,8 +1072,16 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     return Math.max(1, ...dashboardActivities.map((activity) => activity.value));
   }, [dashboardActivities]);
 
+  const dashboardGridColumns = useMemo(() => {
+    return resolveDashboardGridColumns(dashboardViewportWidth);
+  }, [dashboardViewportWidth]);
+
+  const dashboardResponsiveDimensions = useMemo(() => {
+    return getDashboardResponsiveDimensions(dashboardGridColumns);
+  }, [dashboardGridColumns]);
+
   const dashboardCardBaseClass =
-    "group relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-6 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_16px_34px_rgba(2,6,23,0.35)] backdrop-blur transition-all duration-200 hover:-translate-y-[2px] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.3)]";
+    "group relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_16px_34px_rgba(2,6,23,0.35)] backdrop-blur transition-all duration-200 hover:-translate-y-[2px] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.3)]";
 
   const dashboardLabelClass = "text-xs uppercase tracking-[0.08em] text-slate-400";
 
@@ -1119,7 +1147,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const renderDashboardWidget = (widgetId: DashboardWidgetId) => {
     const isDragging = draggingWidgetId === widgetId;
     const isDropTarget = dropTarget?.widgetId === widgetId && !isDragging;
-    const gridClass = dashboardWidgetGridClasses[widgetId];
+    const widgetDimensions = dashboardResponsiveDimensions[widgetId];
+    const widgetPlacementStyle = {
+      gridColumn: `span ${widgetDimensions.w} / span ${widgetDimensions.w}`,
+      gridRow: `span ${widgetDimensions.h} / span ${widgetDimensions.h}`,
+    };
 
     const content =
       widgetId === "taxa_conversao" ? (
@@ -1278,9 +1310,10 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         onDragOver={(event) => handleWidgetDragOver(event, widgetId)}
         onDrop={(event) => handleWidgetDrop(event, widgetId)}
         onDragEnd={handleWidgetDragEnd}
-        className={`min-w-0 ${gridClass} ${dashboardCardBaseClass} cursor-grab active:cursor-grabbing ${isDragging ? "scale-[0.995] opacity-60" : ""} ${isDropTarget ? "ring-2 ring-sky-400/70" : ""}`}
+        style={widgetPlacementStyle}
+        className={`${dashboardCardBaseClass} h-full min-w-0 cursor-grab active:cursor-grabbing ${isDragging ? "scale-[0.995] opacity-60" : ""} ${isDropTarget ? "ring-2 ring-sky-400/70" : ""}`}
       >
-        <span className="absolute right-3 top-3 select-none text-xs tracking-[0.12em] text-slate-500">⋮⋮</span>
+        <span className="absolute right-3 top-3 select-none text-xs tracking-[0.12em] text-slate-500">::</span>
         {isDropTarget ? (
           <span
             className={`pointer-events-none absolute left-3 right-3 h-[2px] rounded-full bg-sky-400/80 ${
@@ -1890,39 +1923,50 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       />
 
       {isDashboardMode ? (
-        <section className="space-y-6 rounded-2xl bg-[#0B1220] p-4 md:p-6">
-          <div className="relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-6 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_22px_46px_rgba(2,6,23,0.42)] backdrop-blur">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.14),transparent_44%)]" />
-            <div className="relative flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className={dashboardLabelClass}>Painel de acompanhamento - Outbound</p>
-                <p className="mt-2 max-w-3xl text-sm text-slate-300">
-                  Visao consolidada da operacao outbound com funil, atividades e indicadores de conversao.
-                </p>
-              </div>
-              <p className="rounded-lg bg-[#111827] px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-slate-400 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
-                Atualizado em {dashboardReferenceDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-              </p>
-            </div>
-
-            {dashboardLoading ? (
-              <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                {[0, 1, 2].map((item) => (
-                  <div key={item} className="dashboard-skeleton-shimmer h-16 rounded-xl" />
-                ))}
-              </div>
-            ) : dashboardError ? (
-              <p className="mt-4 rounded-lg border border-amber-400/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                {dashboardError}
-              </p>
-            ) : null}
-          </div>
-
+        <section className="rounded-2xl bg-[#0B1220] p-3 md:p-4">
           <div
-            className="flex flex-wrap items-stretch gap-3"
+            className="grid gap-3"
+            style={{
+              gridTemplateColumns: `repeat(${dashboardGridColumns}, minmax(0, 1fr))`,
+              gridAutoRows: "68px",
+              gridAutoFlow: "dense",
+            }}
             onDragOver={handleWidgetGridDragOver}
             onDrop={handleWidgetGridDrop}
           >
+            <div
+              className="relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_22px_46px_rgba(2,6,23,0.42)] backdrop-blur md:p-5"
+              style={{
+                gridColumn: `1 / span ${dashboardGridColumns}`,
+                gridRow: "span 2 / span 2",
+              }}
+            >
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.14),transparent_44%)]" />
+              <div className="relative flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className={dashboardLabelClass}>Painel de acompanhamento - Outbound</p>
+                  <p className="mt-1.5 max-w-3xl text-sm text-slate-300">
+                    Visao consolidada da operacao outbound com funil, atividades e indicadores de conversao.
+                  </p>
+                </div>
+                <p className="rounded-lg bg-[#111827] px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-slate-400 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
+                  Atualizado em {dashboardReferenceDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                </p>
+              </div>
+
+              {dashboardLoading ? (
+                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                  {[0, 1, 2].map((item) => (
+                    <div key={item} className="dashboard-skeleton-shimmer h-12 rounded-xl" />
+                  ))}
+                </div>
+              ) : dashboardError ? (
+                <p className="mt-3 rounded-lg border border-amber-400/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  {dashboardError}
+                </p>
+              ) : null}
+            </div>
+
             {dashboardWidgetOrder.map((widgetId) => renderDashboardWidget(widgetId))}
           </div>
 
