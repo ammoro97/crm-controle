@@ -27,7 +27,7 @@ export function AppShell({ children }: AppShellProps) {
       return;
     }
     if (currentUser && isAuthRoute) {
-      router.replace("/leads");
+      router.replace("/dashboard");
     }
   }, [currentUser, isAuthRoute, loading, router]);
 
