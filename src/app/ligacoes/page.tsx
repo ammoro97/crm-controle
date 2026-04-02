@@ -359,6 +359,21 @@ function formatDurationHuman(seconds?: number) {
   return `${remaining}s`;
 }
 
+function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees: number) {
+  const radians = ((angleInDegrees - 90) * Math.PI) / 180;
+  return {
+    x: cx + radius * Math.cos(radians),
+    y: cy + radius * Math.sin(radians),
+  };
+}
+
+function buildPieSlicePath(cx: number, cy: number, radius: number, startAngle: number, endAngle: number) {
+  const start = polarToCartesian(cx, cy, radius, endAngle);
+  const end = polarToCartesian(cx, cy, radius, startAngle);
+  const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
+  return `M ${cx} ${cy} L ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} 0 ${end.x} ${end.y} Z`;
+}
+
 function normalizeText(value?: string | null) {
   return String(value || "")
     .toLowerCase()
@@ -2814,19 +2829,13 @@ export default function LigacoesPage() {
     };
   }, [filteredCalls]);
 
-  const atendimentoRate = useMemo(() => {
-    const total = filteredCalls.length;
-    if (total <= 0) return 0;
-    return Math.round((summary.answered / total) * 100);
-  }, [filteredCalls.length, summary.answered]);
-
   const tmaSegmentado = useMemo(() => {
-    const build = (finalizacaoKey: string) => {
+    const build = (finalizacaoKey?: string) => {
       let totalSeconds = 0;
       let count = 0;
 
       for (const call of filteredCalls) {
-        if (normalizeFinalizacaoKey(call.finalizacao) !== finalizacaoKey) continue;
+        if (finalizacaoKey && normalizeFinalizacaoKey(call.finalizacao) !== finalizacaoKey) continue;
         totalSeconds += Math.max(0, Number(call.durationSeconds || 0));
         count += 1;
       }
@@ -2841,6 +2850,7 @@ export default function LigacoesPage() {
     return {
       cliente: build("falou com cliente"),
       secretaria: build("falou com secretaria"),
+      geral: build(),
     };
   }, [filteredCalls]);
 
@@ -2879,61 +2889,50 @@ export default function LigacoesPage() {
     return { cpc, cpcRate, cpcPositive, cpcPositiveRate, cpcNegative, cpcNegativeRate, improdutivas };
   }, [filteredCalls]);
 
-  const conversion = useMemo(() => {
-    const isAnsweredCall = (call: MappedCall) => isTechnicalAnswered(call.status, Number(call.durationSeconds || 0));
+  const cpcPieSegments = useMemo(() => {
+    const segments = [
+      {
+        id: "cpc_positivo",
+        label: "CPC Positivo",
+        count: contactQuality.cpcPositive,
+        color: "#10B981",
+      },
+      {
+        id: "cpc_negativo",
+        label: "CPC Negativo",
+        count: contactQuality.cpcNegative,
+        color: "#F43F5E",
+      },
+      {
+        id: "improdutivas",
+        label: "Improdutivas",
+        count: contactQuality.improdutivas,
+        color: "#F59E0B",
+      },
+    ];
 
-    const cpcPositiveBase = filteredCalls.filter((call) => {
-      if (!isAnsweredCall(call)) return false;
-      const normalized = normalizeFinalizacaoKey(call.finalizacao);
-      return CPC_POSITIVE_FINALIZACOES.has(normalized);
-    }).length;
+    const total = segments.reduce((acc, segment) => acc + segment.count, 0);
+    let startAngle = 0;
 
-    const followUpBase = filteredCalls.filter((call) =>
-      FOLLOWUP_VALID_FINALIZACOES.has(normalizeFinalizacaoKey(call.finalizacao)),
-    ).length;
-
-    const agendamentos = filteredCalls.filter((call) => {
-      const finalizacao = normalizeFinalizacaoKey(call.finalizacao);
-      const subfinalizacao = normalizeFinalizacaoKey(call.subfinalizacao);
-      return (
-        FOLLOWUP_VALID_FINALIZACOES.has(finalizacao) &&
-        FOLLOWUP_VALID_SUBFINALIZACOES.has(subfinalizacao)
-      );
-    }).length;
-
-    const videoCalls = filteredCalls.filter((call) => {
-      if (!isAnsweredCall(call)) return false;
-      return normalizeFinalizacaoKey(call.subfinalizacao) === "agendar video chamada";
-    }).length;
-
-    const conversionRate = cpcPositiveBase > 0 ? Math.round((videoCalls / cpcPositiveBase) * 100) : 0;
-
-    return {
-      conversionRate,
-      agendamentos,
-      followUpBase,
-      videoCalls,
-      cpcPositiveBase,
-    };
-  }, [filteredCalls]);
-
-  const followUpRates = useMemo(() => {
-    const vsBaseFollowUp =
-      conversion.followUpBase > 0 ? Math.round((conversion.agendamentos / conversion.followUpBase) * 100) : 0;
-    return { vsBaseFollowUp };
-  }, [conversion.agendamentos, conversion.followUpBase]);
-
-  const clienteSemInteresseNoCpc = useMemo(() => {
-    const quantidade = contactQuality.cpcNegative;
-    const base = contactQuality.cpc;
-    const percentual = base > 0 ? Math.round((quantidade / base) * 100) : 0;
-    return { quantidade, base, percentual };
-  }, [contactQuality.cpc, contactQuality.cpcNegative]);
-
-  const improdutivasRate = useMemo(
-    () => (filteredCalls.length > 0 ? Math.round((contactQuality.improdutivas / filteredCalls.length) * 100) : 0),
-    [contactQuality.improdutivas, filteredCalls.length],
-  );
+    return segments.map((segment) => {
+      const percent = total > 0 ? (segment.count / total) * 100 : 0;
+      const sweepAngle = total > 0 ? (segment.count / total) * 360 : 0;
+      const endAngle = startAngle + sweepAngle;
+      const path = sweepAngle > 0 ? buildPieSlicePath(70, 70, 62, startAngle, endAngle) : "";
+      const midAngle = startAngle + sweepAngle / 2;
+      const labelPos = polarToCartesian(70, 70, 36, midAngle);
+      const normalized = {
+        ...segment,
+        total,
+        percent,
+        path,
+        labelX: labelPos.x,
+        labelY: labelPos.y,
+      };
+      startAngle = endAngle;
+      return normalized;
+    });
+  }, [contactQuality.cpcNegative, contactQuality.cpcPositive, contactQuality.improdutivas]);
 
   const finalizacaoChart = useMemo(() => {
     const counts = new Map<string, number>();
@@ -3506,131 +3505,118 @@ export default function LigacoesPage() {
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold text-slate-200">Volume e Eficiência</p>
-              <p className="text-[11px] text-slate-400">Panorama principal da operação de ligações</p>
+              <p className="text-[11px] text-slate-400">Tempo médio por tipo de atendimento</p>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <article className="h-full rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-4 shadow-sm shadow-emerald-950/30">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-emerald-200">Taxa de Atendimento</p>
-              <p className="mt-1.5 text-4xl font-semibold leading-none text-emerald-100">{atendimentoRate}%</p>
-              <p className="mt-1.5 text-[12px] text-emerald-100/80">
-                <span className="font-semibold text-emerald-100">{summary.answered}</span> de {filteredCalls.length} atendidas
-              </p>
-            </article>
-            <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Ligações Gerais</p>
-              <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{filteredCalls.length}</p>
-              <p className="mt-1.5 text-[12px] text-slate-400">Volume total</p>
-            </article>
-            <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Tempo Total</p>
-              <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{summary.totalCallTime}</p>
-              <p className="mt-1.5 text-[12px] text-slate-400">Duração acumulada</p>
-            </article>
-            <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Cliente</p>
-              <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.cliente.tma}</p>
-              <p className="mt-1.5 text-[12px] text-slate-400">Somente &quot;Falou com cliente&quot;</p>
-            </article>
-            <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Secretaria</p>
-              <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.secretaria.tma}</p>
-              <p className="mt-1.5 text-[12px] text-slate-400">Somente &quot;Falou com secretária&quot;</p>
-            </article>
-          </div>
+          {loading ? (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              {[0, 1, 2].map((item) => (
+                <div
+                  key={`tma-loading-${item}`}
+                  className="h-[118px] animate-pulse rounded-lg border border-slate-800/80 bg-slate-900/50"
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
+                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Cliente</p>
+                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.cliente.tma}</p>
+                <p className="mt-1.5 text-[12px] text-slate-400">
+                  {tmaSegmentado.cliente.count} ligação{tmaSegmentado.cliente.count === 1 ? "" : "ões"} com cliente
+                </p>
+              </article>
+
+              <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
+                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Secretaria</p>
+                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.secretaria.tma}</p>
+                <p className="mt-1.5 text-[12px] text-slate-400">
+                  {tmaSegmentado.secretaria.count} ligação{tmaSegmentado.secretaria.count === 1 ? "" : "ões"} com secretária
+                </p>
+              </article>
+
+              <article className="h-full rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-4">
+                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-cyan-200">TMA Geral</p>
+                <p className="mt-1.5 text-3xl font-semibold leading-none text-cyan-100">{tmaSegmentado.geral.tma}</p>
+                <p className="mt-1.5 text-[12px] text-cyan-100/80">
+                  {tmaSegmentado.geral.count} ligação{tmaSegmentado.geral.count === 1 ? "" : "ões"} no total
+                </p>
+              </article>
+            </div>
+          )}
         </div>
 
         <div className="panel border-slate-800/90 bg-slate-950/70 p-3">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold text-slate-200">Qualidade (CPC)</p>
-              <p className="text-[11px] text-slate-400">Comparativo direto dos resultados de contato</p>
+              <p className="text-[11px] text-slate-400">Distribuição entre positivos, negativos e improdutivos</p>
             </div>
           </div>
-          <div className="rounded-lg border border-slate-800/85 bg-slate-950/85 p-3">
-            <div className="space-y-2.5">
-              <div className="grid grid-cols-[minmax(0,170px)_1fr_auto] items-center gap-2 rounded-md border border-emerald-500/25 bg-emerald-500/5 px-2.5 py-2">
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  <p className="text-[12px] font-semibold text-emerald-100">CPC Positivo</p>
+          {loading ? (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[260px_1fr]">
+              <div className="h-[250px] animate-pulse rounded-lg border border-slate-800/80 bg-slate-900/50" />
+              <div className="h-[250px] animate-pulse rounded-lg border border-slate-800/80 bg-slate-900/50" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[260px_1fr]">
+              <div className="rounded-lg border border-slate-800/85 bg-slate-950/85 p-3">
+                <div className="flex items-center justify-center">
+                  <div className="relative h-44 w-44">
+                    <svg viewBox="0 0 140 140" className="h-full w-full -rotate-90">
+                      <circle cx="70" cy="70" r="62" fill="none" stroke="#1e293b" strokeWidth="16" />
+                      {cpcPieSegments.map((segment) =>
+                        segment.path ? <path key={segment.id} d={segment.path} fill={segment.color} /> : null,
+                      )}
+                      {cpcPieSegments.map((segment) =>
+                        segment.percent >= 7 ? (
+                          <text
+                            key={`pie-label-${segment.id}`}
+                            x={segment.labelX}
+                            y={segment.labelY}
+                            transform={`rotate(90 ${segment.labelX} ${segment.labelY})`}
+                            textAnchor="middle"
+                            dominantBaseline="middle"
+                            className="fill-slate-950 text-[8px] font-semibold"
+                          >
+                            {Math.round(segment.percent)}%
+                          </text>
+                        ) : null,
+                      )}
+                    </svg>
+                    <div className="absolute inset-[38px] flex flex-col items-center justify-center rounded-full border border-slate-800 bg-slate-950/95 text-center">
+                      <p className="text-[10px] uppercase tracking-[0.1em] text-slate-500">Total</p>
+                      <p className="mt-1 text-2xl font-semibold leading-none text-slate-100">
+                        {cpcPieSegments[0]?.total || 0}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
-                  <div className="h-full bg-emerald-500" style={{ width: `${contactQuality.cpcPositiveRate}%` }} />
-                </div>
-                <p className="text-[12px] font-medium text-emerald-100">{contactQuality.cpcPositiveRate}% · {contactQuality.cpcPositive}</p>
               </div>
 
-              <div className="grid grid-cols-[minmax(0,170px)_1fr_auto] items-center gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-                  <p className="text-[12px] font-medium text-slate-200">CPC Negativo</p>
+              <div className="rounded-lg border border-slate-800/85 bg-slate-950/85 p-3">
+                <div className="space-y-2.5">
+                  {cpcPieSegments.map((segment) => (
+                    <div
+                      key={`legend-${segment.id}`}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2.5"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
+                        <div>
+                          <p className="text-[12px] font-medium text-slate-100">{segment.label}</p>
+                          <p className="text-[11px] text-slate-400">
+                            {segment.count} ligação{segment.count === 1 ? "" : "ões"}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-sm font-semibold text-slate-100">{Math.round(segment.percent)}%</p>
+                    </div>
+                  ))}
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
-                  <div className="h-full bg-rose-500" style={{ width: `${contactQuality.cpcNegativeRate}%` }} />
-                </div>
-                <p className="text-[12px] text-slate-300">{contactQuality.cpcNegativeRate}% · {contactQuality.cpcNegative}</p>
-              </div>
-
-              <div className="grid grid-cols-[minmax(0,170px)_1fr_auto] items-center gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-                  <p className="text-[12px] font-medium text-slate-200">Improdutivas</p>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
-                  <div className="h-full bg-amber-500" style={{ width: `${improdutivasRate}%` }} />
-                </div>
-                <p className="text-[12px] text-slate-300">{improdutivasRate}% · {contactQuality.improdutivas}</p>
-              </div>
-
-              <div className="grid grid-cols-[minmax(0,170px)_1fr_auto] items-center gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-slate-400" />
-                  <p className="text-[12px] font-medium text-slate-200">CPC Total</p>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
-                  <div className="h-full bg-slate-400" style={{ width: `${contactQuality.cpcRate}%` }} />
-                </div>
-                <p className="text-[12px] text-slate-300">{contactQuality.cpcRate}% · {contactQuality.cpc}</p>
               </div>
             </div>
-          </div>
-        </div>
-
-        <div className="panel border-slate-800/90 bg-slate-950/70 p-3">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold text-slate-200">Resultado</p>
-              <p className="text-[11px] text-slate-400">Impacto comercial das ligações</p>
-            </div>
-          </div>
-          <div className="grid gap-2 md:grid-cols-3">
-            <article className="rounded-lg border border-slate-800/85 bg-slate-950/85 p-3.5">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">Agendamentos de Follow-up</p>
-              <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{conversion.agendamentos}</p>
-              <p className="mt-1.5 text-[12px] text-slate-400">Somente Agendar Ligação e Agendar WhatsApp</p>
-              <p className="mt-1 text-[12px] text-slate-400">{followUpRates.vsBaseFollowUp}% da base elegível de finalizações</p>
-              <p className="mt-1 text-[12px] text-slate-400">
-                {conversion.agendamentos} de {conversion.followUpBase} (Falou com cliente + Falou com secretária)
-              </p>
-            </article>
-            <article className="rounded-lg border border-orange-500/25 bg-orange-500/8 p-3.5">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-orange-200">Cliente sem interesse / CPC</p>
-              <p className="mt-1.5 text-3xl font-semibold leading-none text-orange-100">{clienteSemInteresseNoCpc.percentual}%</p>
-              <p className="mt-1.5 text-[12px] text-slate-300">
-                {clienteSemInteresseNoCpc.quantidade} de {clienteSemInteresseNoCpc.base}
-              </p>
-              <p className="mt-1 text-[12px] text-slate-400">Finalização &quot;Cliente sem interesse&quot; dentro da base CPC</p>
-            </article>
-            <article className="rounded-lg border border-fuchsia-500/35 bg-fuchsia-500/8 p-3.5">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-fuchsia-200">Conversão</p>
-              <p className="mt-1.5 text-3xl font-semibold leading-none text-fuchsia-100">{conversion.conversionRate}%</p>
-              <p className="mt-1.5 text-[12px] text-slate-300">{conversion.videoCalls} de {conversion.cpcPositiveBase}</p>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800/90">
-                <div className="h-full bg-fuchsia-500" style={{ width: `${conversion.conversionRate}%` }} />
-              </div>
-              <p className="mt-1 text-[12px] text-slate-400">Chamadas de vídeo / CPC positivo</p>
-            </article>
-          </div>
+          )}
         </div>
 
         <article className="panel border-slate-800/90 bg-slate-950/70 p-3">
