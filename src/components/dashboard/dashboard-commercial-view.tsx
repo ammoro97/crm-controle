@@ -274,7 +274,9 @@ export function DashboardCommercialView() {
         }
       />
 
-      <p className="-mt-2 mb-1 px-1 text-sm text-slate-300">Painel comercial outbound com formulas operacionais e dados consolidados.</p>
+      <p className="-mt-2 mb-1 px-1 text-sm text-slate-300">
+        Painel comercial outbound com dois funis laterais (absoluto e conversao percentual) e metricas operacionais.
+      </p>
 
       <section className="rounded-3xl border border-slate-800/80 bg-[#0B1220]/95 p-3 shadow-[0_36px_90px_rgba(2,6,23,0.5)] md:p-4">
         {error ? (
@@ -287,7 +289,7 @@ export function DashboardCommercialView() {
           </div>
         ) : null}
 
-        <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+        <div className="grid gap-4 xl:grid-cols-[460px_minmax(0,1fr)]">
           <DashboardFunnel
             ligacoes={metrics.funnel.ligacoes}
             atendidas={metrics.funnel.atendidas}
