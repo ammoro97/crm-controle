@@ -184,14 +184,28 @@ function ensureSnapshotsHydrated() {
 export function getLeadsSnapshot(): Lead[] {
   ensureSnapshotsHydrated();
   if (typeof window === "undefined") return cloneLeads(initialLeads);
+  const seeded = cloneLeads(initialLeads);
   try {
     const raw = window.localStorage.getItem(LEADS_STORAGE_KEY);
-    if (!raw) return cloneLeads(initialLeads);
+    if (!raw) {
+      window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(seeded));
+      window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: seeded }));
+      enqueueSnapshotSync(LEADS_STORAGE_KEY, seeded);
+      return seeded;
+    }
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return cloneLeads(initialLeads);
+    if (!Array.isArray(parsed)) {
+      window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(seeded));
+      window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: seeded }));
+      enqueueSnapshotSync(LEADS_STORAGE_KEY, seeded);
+      return seeded;
+    }
     return cloneLeads(parsed as Lead[]);
   } catch {
-    return cloneLeads(initialLeads);
+    window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(seeded));
+    window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: seeded }));
+    enqueueSnapshotSync(LEADS_STORAGE_KEY, seeded);
+    return seeded;
   }
 }
 
@@ -206,14 +220,28 @@ export function setLeadsSnapshot(next: Lead[]) {
 export function getMeetingsSnapshot(): Meeting[] {
   ensureSnapshotsHydrated();
   if (typeof window === "undefined") return cloneMeetings(initialMeetings);
+  const seeded = cloneMeetings(initialMeetings);
   try {
     const raw = window.localStorage.getItem(MEETINGS_STORAGE_KEY);
-    if (!raw) return cloneMeetings(initialMeetings);
+    if (!raw) {
+      window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(seeded));
+      window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: seeded }));
+      enqueueSnapshotSync(MEETINGS_STORAGE_KEY, seeded);
+      return seeded;
+    }
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return cloneMeetings(initialMeetings);
+    if (!Array.isArray(parsed)) {
+      window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(seeded));
+      window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: seeded }));
+      enqueueSnapshotSync(MEETINGS_STORAGE_KEY, seeded);
+      return seeded;
+    }
     return cloneMeetings(parsed as Meeting[]);
   } catch {
-    return cloneMeetings(initialMeetings);
+    window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(seeded));
+    window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: seeded }));
+    enqueueSnapshotSync(MEETINGS_STORAGE_KEY, seeded);
+    return seeded;
   }
 }
 

@@ -5,6 +5,7 @@ import { CallLog } from "@/types/crm";
 const ACTIVE_CALL_SESSION_KEY = "crm.calls.active-session.v1";
 const POST_CALL_WRAPUPS_KEY = "crm.calls.wrapups.v1";
 const POST_CALL_EVENT = "crm:calls:flow:changed";
+const SNAPSHOTS_ENDPOINT = "/api/crm/snapshots";
 
 export type ActiveCallSessionStatus = "dialing" | "ended_detected" | "wrapped";
 export type EndDetectionSource = "webhook" | "api4com-history";
@@ -74,9 +75,20 @@ type CallEndDetectionResult = {
   detectionSource?: EndDetectionSource;
 };
 
+type SnapshotResponse = {
+  success?: boolean;
+  snapshots?: {
+    wrapups?: PostCallWrapup[];
+  };
+};
+
 export type NewCallBlockReason = "active_call" | "pending_wrapup";
 
 const POST_CALL_DEBUG_PREFIX = "[POSTCALL_DEBUG]";
+let wrapupsHydrationStarted = false;
+let wrapupsSyncTimer: number | null = null;
+let wrapupsSyncInFlight = false;
+let pendingWrapupsSync: PostCallWrapup[] | null = null;
 
 function debugLog(message: string, payload?: unknown) {
   if (payload === undefined) {
@@ -102,6 +114,103 @@ function safeParseJSON<T>(raw: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function cloneWrapups(items: PostCallWrapup[]): PostCallWrapup[] {
+  return items.map((item) => ({ ...item }));
+}
+
+function shouldHydrateWrapups() {
+  if (!isBrowser()) return false;
+  const raw = window.localStorage.getItem(POST_CALL_WRAPUPS_KEY);
+  if (raw === null) return true;
+  try {
+    const parsed = JSON.parse(raw);
+    return !Array.isArray(parsed);
+  } catch {
+    return true;
+  }
+}
+
+function applyHydratedWrapups(next: PostCallWrapup[]) {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(POST_CALL_WRAPUPS_KEY, JSON.stringify(next));
+  emitFlowChanged();
+}
+
+async function hydrateWrapupsFromServer() {
+  if (!isBrowser()) return;
+  try {
+    const response = await fetch(SNAPSHOTS_ENDPOINT, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!response.ok) return;
+
+    const data = (await response.json()) as SnapshotResponse;
+    const serverWrapups = data?.snapshots?.wrapups;
+    if (!data.success || !Array.isArray(serverWrapups) || !shouldHydrateWrapups()) return;
+
+    applyHydratedWrapups(cloneWrapups(serverWrapups));
+    debugLog("Wrapups hidratados do Supabase", { count: serverWrapups.length });
+  } catch {
+    // Falha de rede/autorizacao nao deve quebrar fluxo local.
+  }
+}
+
+function ensureWrapupsHydrated() {
+  if (!isBrowser()) return;
+  if (wrapupsHydrationStarted) return;
+  wrapupsHydrationStarted = true;
+  void hydrateWrapupsFromServer();
+}
+
+async function flushWrapupsSyncQueue() {
+  if (!isBrowser()) return;
+  if (wrapupsSyncInFlight || !pendingWrapupsSync) return;
+
+  wrapupsSyncInFlight = true;
+  const snapshot = pendingWrapupsSync;
+  pendingWrapupsSync = null;
+
+  try {
+    const response = await fetch(SNAPSHOTS_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ wrapups: snapshot }),
+    });
+    if (!response.ok) {
+      throw new Error("WRAPUPS_SYNC_FAILED");
+    }
+  } catch {
+    if (!pendingWrapupsSync) {
+      pendingWrapupsSync = snapshot;
+    }
+  } finally {
+    wrapupsSyncInFlight = false;
+    if (pendingWrapupsSync) {
+      scheduleWrapupsSync();
+    }
+  }
+}
+
+function scheduleWrapupsSync() {
+  if (!isBrowser()) return;
+  if (wrapupsSyncTimer !== null) {
+    window.clearTimeout(wrapupsSyncTimer);
+  }
+  wrapupsSyncTimer = window.setTimeout(() => {
+    wrapupsSyncTimer = null;
+    void flushWrapupsSyncQueue();
+  }, 320);
+}
+
+function enqueueWrapupsSync(next: PostCallWrapup[]) {
+  if (!isBrowser()) return;
+  pendingWrapupsSync = cloneWrapups(next);
+  scheduleWrapupsSync();
 }
 
 function normalizePhoneDigits(value?: string | null) {
@@ -187,6 +296,7 @@ function writeActiveSession(next: ActiveCallSession | null) {
 }
 
 function readWrapups(): PostCallWrapup[] {
+  ensureWrapupsHydrated();
   if (!isBrowser()) return [];
   const parsed = safeParseJSON<PostCallWrapup[]>(window.localStorage.getItem(POST_CALL_WRAPUPS_KEY), []);
   return Array.isArray(parsed) ? parsed : [];
@@ -194,9 +304,11 @@ function readWrapups(): PostCallWrapup[] {
 
 function writeWrapups(next: PostCallWrapup[]) {
   if (!isBrowser()) return;
-  window.localStorage.setItem(POST_CALL_WRAPUPS_KEY, JSON.stringify(next));
+  const safeNext = cloneWrapups(next);
+  window.localStorage.setItem(POST_CALL_WRAPUPS_KEY, JSON.stringify(safeNext));
+  enqueueWrapupsSync(safeNext);
   emitFlowChanged();
-  debugLog("Wrapups salvos", { total: next.length });
+  debugLog("Wrapups salvos", { total: safeNext.length });
 }
 
 function isEndedCallLog(entry: CallLog) {

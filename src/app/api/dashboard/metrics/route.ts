@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getCallLogs } from "@/lib/calls-store";
 import { isAgendaEventLinkedToLead, normalizeAgendaEventStatus, normalizeText } from "@/lib/agenda-events";
 import { readLeadsCollection } from "@/lib/leads-customers-store";
@@ -7,13 +7,6 @@ import { requireAuth } from "@/lib/require-auth";
 import type { DashboardMetrics } from "@/types/dashboard";
 import type { CallLog, Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
 import type { PostCallWrapup } from "@/lib/post-call-flow";
-
-type DashboardMetricsInput = {
-  leads?: Lead[];
-  meetings?: Meeting[];
-  finalizations?: LeadFinalizationRecord[];
-  wrapups?: PostCallWrapup[];
-};
 
 const MEETINGS_FILE = "crm.agenda.meetings.v1.json";
 const LEAD_FINALIZATIONS_FILE = "crm.leads.finalizations.v1.json";
@@ -276,29 +269,6 @@ function buildPayload(params: {
   };
 }
 
-async function resolveInputFromRequest(request?: NextRequest) {
-  const fallback = await readServerSnapshot();
-  if (!request) return fallback;
-
-  try {
-    const body = (await request.json()) as DashboardMetricsInput;
-
-    const leads = asArray<Lead>(body?.leads);
-    const meetings = asArray<Meeting>(body?.meetings);
-    const finalizations = asArray<LeadFinalizationRecord>(body?.finalizations);
-    const wrapups = asArray<PostCallWrapup>(body?.wrapups);
-
-    return {
-      leads: leads.length > 0 ? leads : fallback.leads,
-      meetings: meetings.length > 0 ? meetings : fallback.meetings,
-      finalizations: finalizations.length > 0 ? finalizations : fallback.finalizations,
-      wrapups: wrapups.length > 0 ? wrapups : fallback.wrapups,
-    };
-  } catch {
-    return fallback;
-  }
-}
-
 export async function GET() {
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
@@ -323,12 +293,12 @@ export async function GET() {
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
   try {
-    const [callLogs, snapshot] = await Promise.all([getCallLogs(), resolveInputFromRequest(request)]);
+    const [callLogs, snapshot] = await Promise.all([getCallLogs(), readServerSnapshot()]);
     const payload = buildPayload({
       ...snapshot,
       callLogs,

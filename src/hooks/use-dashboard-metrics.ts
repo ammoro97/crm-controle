@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DashboardMetrics } from "@/types/dashboard";
-import type { Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
-import type { PostCallWrapup } from "@/lib/post-call-flow";
 
 type ApiSuccessResponse = {
   success: true;
@@ -16,13 +14,6 @@ type ApiErrorResponse = {
 };
 
 type DashboardMetricsResponse = ApiSuccessResponse | ApiErrorResponse;
-
-type DashboardMetricsRequestBody = {
-  leads: Lead[];
-  meetings: Meeting[];
-  finalizations: LeadFinalizationRecord[];
-  wrapups: PostCallWrapup[];
-};
 
 const LEADS_STORAGE_KEY = "crm.leads.v1";
 const MEETINGS_STORAGE_KEY = "crm.agenda.meetings.v1";
@@ -68,27 +59,6 @@ const EMPTY_METRICS: DashboardMetrics = {
   },
 };
 
-function readSnapshotArray<T>(storageKey: string): T[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function readDashboardRequestBody(): DashboardMetricsRequestBody {
-  return {
-    leads: readSnapshotArray<Lead>(LEADS_STORAGE_KEY),
-    meetings: readSnapshotArray<Meeting>(MEETINGS_STORAGE_KEY),
-    finalizations: readSnapshotArray<LeadFinalizationRecord>(LEAD_FINALIZATIONS_STORAGE_KEY),
-    wrapups: readSnapshotArray<PostCallWrapup>(WRAPUPS_STORAGE_KEY),
-  };
-}
-
 export function useDashboardMetrics() {
   const [metrics, setMetrics] = useState<DashboardMetrics>(EMPTY_METRICS);
   const [loading, setLoading] = useState(true);
@@ -99,15 +69,10 @@ export function useDashboardMetrics() {
     setError(null);
 
     try {
-      const payload = readDashboardRequestBody();
       const response = await fetch("/api/dashboard/metrics", {
-        method: "POST",
+        method: "GET",
         cache: "no-store",
         signal,
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(payload),
       });
       const data = (await response.json()) as DashboardMetricsResponse;
 
@@ -143,7 +108,7 @@ export function useDashboardMetrics() {
       }
       debounceTimeout = window.setTimeout(() => {
         void fetchMetrics();
-      }, 180);
+      }, 700);
     };
 
     const onStorage = (event: StorageEvent) => {

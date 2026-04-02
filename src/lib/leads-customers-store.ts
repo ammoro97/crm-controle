@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Lead } from "@/types/crm";
+import { initialLeads } from "@/lib/mock-data";
 import { readDataFile, writeDataFile } from "./storage-paths";
 import { getSupabaseAdmin } from "./supabase-admin";
 
@@ -182,18 +183,38 @@ async function readCollectionWithFallback(tableName: LeadTableName, legacyFile: 
   }
 
   const legacyLeads = dedupeByLeadId(asLeadArray(await readDataFile<Lead[]>(legacyFile, [])));
-  if (legacyLeads.length === 0) {
-    return tableLeads ?? [];
+  if (legacyLeads.length > 0) {
+    if (tableLeads !== null) {
+      const migrated = await writeToTable(tableName, legacyLeads);
+      if (migrated) {
+        console.log(`[LEAD_TABLE] legacy migration completed table=${tableName} count=${legacyLeads.length}`);
+      }
+    }
+    return legacyLeads;
   }
 
-  if (tableLeads !== null) {
-    const migrated = await writeToTable(tableName, legacyLeads);
-    if (migrated) {
-      console.log(`[LEAD_TABLE] legacy migration completed table=${tableName} count=${legacyLeads.length}`);
+  if (tableName === LEADS_TABLE) {
+    const bootstrapLeads = dedupeByLeadId(asLeadArray(initialLeads));
+    if (bootstrapLeads.length > 0) {
+      if (tableLeads !== null) {
+        const seeded = await writeToTable(tableName, bootstrapLeads);
+        if (seeded) {
+          console.log(`[LEAD_TABLE] bootstrap seed completed table=${tableName} count=${bootstrapLeads.length}`);
+        }
+      }
+      try {
+        await writeDataFile(legacyFile, bootstrapLeads);
+      } catch (error) {
+        console.error(
+          `[LEAD_TABLE] bootstrap legacy snapshot write error file=${legacyFile}`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+      return bootstrapLeads;
     }
   }
 
-  return legacyLeads;
+  return tableLeads ?? [];
 }
 
 async function writeCollection(tableName: LeadTableName, legacyFile: string, leads: Lead[]) {

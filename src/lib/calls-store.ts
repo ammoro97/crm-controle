@@ -1,10 +1,10 @@
 ﻿import { initialLeads } from "@/lib/mock-data";
 import { CallAnalysisStatus, CallLog } from "@/types/crm";
+import { readCallLogsCollection, writeCallLogsCollection } from "./calls-collection-store";
 import { readDataFile, writeDataFile } from "./storage-paths";
 
 type LeadLastContactOverrides = Record<string, string>;
 
-const CALLS_FILE = "call-logs.json";
 const LEADS_CONTACT_FILE = "lead-last-contact-overrides.json";
 
 let callLogsCache: CallLog[] | null = null;
@@ -117,7 +117,7 @@ export function mapWebhookStatus(input: {
 }
 
 async function readCallLogsFromDisk(): Promise<CallLog[]> {
-  const parsed = await readDataFile<unknown[]>(CALLS_FILE, []);
+  const parsed = await readCallLogsCollection();
   return parsed
     .map((item) => normalizeCallLog(item as Partial<CallLog> & Pick<CallLog, "id">))
     .sort((a, b) => {
@@ -129,7 +129,7 @@ async function readCallLogsFromDisk(): Promise<CallLog[]> {
 
 async function flushCallLogsToDisk() {
   if (!callLogsCache) return;
-  await writeDataFile(CALLS_FILE, callLogsCache);
+  await writeCallLogsCollection(callLogsCache);
 }
 
 // Flush imediato — em Vercel serverless setTimeout pode ser morto antes de disparar
