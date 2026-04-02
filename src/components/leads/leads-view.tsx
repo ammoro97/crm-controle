@@ -1548,31 +1548,39 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         </section>
       ) : (
         <>
-          <section className="panel mb-3 p-3 xl:p-3.5">
-            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-              <label className="w-full text-[11px] font-medium uppercase tracking-[0.08em] text-muted md:max-w-xl">
-                Busca global de leads
-                <input
-                  className="field mt-1.5 h-9 px-2.5 py-1.5 text-xs xl:text-[13px]"
-                  placeholder="Buscar por nome, empresa, telefone ou email"
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                />
-              </label>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="btn-ghost h-9 px-3 py-1.5 text-xs"
-                  onClick={() => {
-                    if (typeof window !== "undefined") window.location.reload();
-                  }}
-                >
-                  Atualizar pagina
-                </button>
-                <button type="button" className="btn-ghost h-9 px-3 py-1.5 text-xs" onClick={() => setImportOpen(true)}>
-                  Importar Leads
-                </button>
-              </div>
+          <section className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="relative w-full md:max-w-lg">
+              <svg
+                className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <circle cx="6.5" cy="6.5" r="4.5" />
+                <path d="M10.5 10.5l3 3" strokeLinecap="round" />
+              </svg>
+              <input
+                className="field h-9 w-full pl-8 pr-3 text-[13px]"
+                placeholder="Buscar por nome, empresa, telefone ou email..."
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+              />
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                className="btn-ghost h-9 px-3 text-xs"
+                onClick={() => {
+                  if (typeof window !== "undefined") window.location.reload();
+                }}
+              >
+                Atualizar
+              </button>
+              <div className="h-4 w-px bg-border" />
+              <button type="button" className="btn-ghost h-9 px-3 text-xs" onClick={() => setImportOpen(true)}>
+                Importar
+              </button>
             </div>
           </section>
 

@@ -35,6 +35,62 @@ const channelBadgeClass: Record<Lead["channel"], string> = {
   outbound: "bg-sky-500/20 text-sky-300 border-sky-400/40",
 };
 
+const statusBadgeConfig: Record<string, { bg: string; text: string; border: string; dot: string }> = {
+  Novo: {
+    bg: "bg-slate-700/50",
+    text: "text-slate-300",
+    border: "border-slate-600/60",
+    dot: "bg-slate-400",
+  },
+  "Contato iniciado": {
+    bg: "bg-sky-500/15",
+    text: "text-sky-300",
+    border: "border-sky-400/35",
+    dot: "bg-sky-400",
+  },
+  Qualificado: {
+    bg: "bg-violet-500/15",
+    text: "text-violet-300",
+    border: "border-violet-400/35",
+    dot: "bg-violet-400",
+  },
+  "Reuniao marcada": {
+    bg: "bg-amber-500/15",
+    text: "text-amber-300",
+    border: "border-amber-400/35",
+    dot: "bg-amber-400",
+  },
+  "Proposta enviada": {
+    bg: "bg-blue-500/15",
+    text: "text-blue-300",
+    border: "border-blue-400/35",
+    dot: "bg-blue-400",
+  },
+  Perdido: {
+    bg: "bg-rose-500/15",
+    text: "text-rose-300",
+    border: "border-rose-400/35",
+    dot: "bg-rose-400",
+  },
+  Fechado: {
+    bg: "bg-emerald-500/15",
+    text: "text-emerald-300",
+    border: "border-emerald-400/35",
+    dot: "bg-emerald-400",
+  },
+};
+
+function getStatusBadgeConfig(status: string) {
+  return (
+    statusBadgeConfig[status] || {
+      bg: "bg-slate-700/50",
+      text: "text-slate-300",
+      border: "border-slate-600/60",
+      dot: "bg-slate-400",
+    }
+  );
+}
+
 function parseCityState(city: string): { city: string; state: string } {
   if (!city.trim()) return { city: "-", state: "-" };
 
@@ -616,7 +672,19 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                   </td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.city}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.state}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{lead.status}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    {(() => {
+                      const cfg = getStatusBadgeConfig(lead.status);
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${cfg.bg} ${cfg.text} ${cfg.border}`}
+                        >
+                          <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
+                          {lead.status}
+                        </span>
+                      );
+                    })()}
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <span
                       className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${channelBadgeClass[lead.channel]}`}
@@ -630,13 +698,17 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <TruncatedCellText value={lead.owner} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{formatDateBR(lead.entryDate)}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{formatDateBR(lead.firstContactDate)}</td>
-                  <td className="w-[240px] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <span className="text-[12px] tabular-nums text-slate-400">{formatDateBR(lead.entryDate)}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <span className="text-[12px] tabular-nums text-slate-400">{formatDateBR(lead.firstContactDate)}</span>
+                  </td>
+                  <td className="w-[200px] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
-                        className="rounded-md border border-border px-2 py-1 text-[11px] text-slate-200 transition hover:bg-slate-800"
+                        className="rounded-md border border-accent/50 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent transition hover:bg-accent/20"
                         onClick={(event) => {
                           event.stopPropagation();
                           onSelectLead(lead);
@@ -646,15 +718,17 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
                       </button>
                       <button
                         type="button"
-                        className={`rounded-md border px-2 py-1 text-[11px] text-slate-200 transition hover:bg-slate-800 ${
-                          editingRowId === lead.id ? "border-emerald-400/40 bg-emerald-500/10" : "border-border"
+                        className={`rounded-md border px-2.5 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 ${
+                          editingRowId === lead.id
+                            ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
+                            : "border-border hover:border-slate-600 hover:bg-slate-800/60"
                         }`}
                         onClick={(event) => {
                           event.stopPropagation();
                           openRowEdit(lead);
                         }}
                       >
-                        Editar linha
+                        Editar
                       </button>
                     </div>
                   </td>
