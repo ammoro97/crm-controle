@@ -1,5 +1,5 @@
-import { LeadsView } from "@/components/leads/leads-view";
+import { DashboardCommercialView } from "@/components/dashboard/dashboard-commercial-view";
 
 export default function LeadsPage() {
-  return <LeadsView title="Leads" filter="all" />;
+  return <DashboardCommercialView />;
 }

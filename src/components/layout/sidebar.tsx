@@ -25,18 +25,6 @@ export function Sidebar({ onNavigate }: SidebarProps) {
         <h1 className="mt-1 text-lg font-semibold text-slate-100">Comercial Pro</h1>
       </div>
       <nav className="space-y-1 px-3">
-        <Link
-          href="/dashboard"
-          onClick={onNavigate}
-          className={`flex items-center rounded-lg px-3 py-2 text-sm transition ${
-            pathname === "/dashboard"
-              ? "bg-slate-800 text-slate-100"
-              : "text-slate-300 hover:bg-slate-900 hover:text-slate-100"
-          }`}
-        >
-          Dashboard
-        </Link>
-
         <div className="rounded-lg">
           <Link
             href="/leads"
