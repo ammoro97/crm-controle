@@ -206,7 +206,7 @@ const dashboardWidgetDimensions: Record<DashboardWidgetId, { w: number; h: numbe
   calls_agendadas: { w: 3, h: 2 },
   ligacoes_feitas: { w: 3, h: 2 },
   emails_enviados: { w: 3, h: 2 },
-  funil_vendas: { w: 8, h: 4 },
+  funil_vendas: { w: 8, h: 3 },
   atividades_bdr: { w: 4, h: 4 },
   followups_pendentes: { w: 6, h: 2 },
   taxa_conversao_indicador: { w: 6, h: 2 },
@@ -1221,18 +1221,18 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         </>
       ) : widgetId === "funil_vendas" ? (
         <>
-          <div className="mb-4 flex items-center justify-between gap-2">
+          <div className="mb-3 flex items-center justify-between gap-2">
             <p className={dashboardLabelClass}>Funil de Vendas Outbound</p>
             <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Etapas consolidadas da operacao</p>
           </div>
-          <div className="pt-2">
+          <div className="pt-1">
             {dashboardFunnelSteps.map((step, index) => {
               const width =
                 step.value <= 0 ? 36 : Math.max(38, Math.min(100, Math.round((step.value / dashboardFunnelMaxValue) * 100)));
               return (
                 <div key={step.label} className={index === 0 ? "" : "-mt-2"}>
                   <div
-                    className="relative h-10 overflow-hidden rounded-full shadow-[0_14px_22px_rgba(2,6,23,0.34)]"
+                    className="relative h-9 overflow-hidden rounded-full shadow-[0_14px_22px_rgba(2,6,23,0.34)]"
                     style={{
                       width: dashboardAnimateIn ? `${width}%` : "0%",
                       transitionDelay: `${index * 90}ms`,
