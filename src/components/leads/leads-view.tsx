@@ -213,19 +213,19 @@ const dashboardWidgetDimensions: Record<DashboardWidgetId, { w: number; h: numbe
 };
 
 const dashboardWidgetGridClasses: Record<DashboardWidgetId, string> = {
-  taxa_conversao: "md:col-span-1 xl:col-span-3 min-h-[176px]",
-  cobertura_base: "md:col-span-1 xl:col-span-3 min-h-[176px]",
-  leads_finalizados: "md:col-span-1 xl:col-span-3 min-h-[176px]",
-  compras_efetuadas: "md:col-span-1 xl:col-span-3 min-h-[176px]",
-  valor_total_feito: "md:col-span-1 xl:col-span-3 min-h-[176px]",
-  leads_prospectados: "md:col-span-1 xl:col-span-3 min-h-[160px]",
-  calls_agendadas: "md:col-span-1 xl:col-span-3 min-h-[160px]",
-  ligacoes_feitas: "md:col-span-1 xl:col-span-3 min-h-[160px]",
-  emails_enviados: "md:col-span-1 xl:col-span-3 min-h-[160px]",
-  funil_vendas: "md:col-span-2 xl:col-span-8 min-h-[330px]",
-  atividades_bdr: "md:col-span-2 xl:col-span-4 min-h-[330px]",
-  followups_pendentes: "md:col-span-1 xl:col-span-6 min-h-[170px]",
-  taxa_conversao_indicador: "md:col-span-1 xl:col-span-6 min-h-[170px]",
+  taxa_conversao: "basis-[260px] grow min-h-[176px]",
+  cobertura_base: "basis-[260px] grow min-h-[176px]",
+  leads_finalizados: "basis-[260px] grow min-h-[176px]",
+  compras_efetuadas: "basis-[260px] grow min-h-[176px]",
+  valor_total_feito: "basis-[260px] grow min-h-[176px]",
+  leads_prospectados: "basis-[240px] grow min-h-[160px]",
+  calls_agendadas: "basis-[240px] grow min-h-[160px]",
+  ligacoes_feitas: "basis-[240px] grow min-h-[160px]",
+  emails_enviados: "basis-[240px] grow min-h-[160px]",
+  funil_vendas: "basis-[720px] grow-[2] min-h-[330px]",
+  atividades_bdr: "basis-[420px] grow min-h-[330px]",
+  followups_pendentes: "basis-[320px] grow min-h-[170px]",
+  taxa_conversao_indicador: "basis-[320px] grow min-h-[170px]",
 };
 
 function normalizeDashboardWidgetOrder(orderValue: unknown): DashboardWidgetId[] {
@@ -380,6 +380,14 @@ function moveWidgetOrder(
   const insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
   filtered.splice(insertIndex, 0, draggedWidgetId);
   return filtered;
+}
+
+function isSameWidgetOrder(a: DashboardWidgetId[], b: DashboardWidgetId[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
 }
 
 function normalizeLead(lead: Lead): Lead {
@@ -1068,6 +1076,10 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         ? "before"
         : "after";
     setDropTarget({ widgetId: targetWidgetId, position });
+    setDashboardWidgetOrder((prev) => {
+      const next = moveWidgetOrder(prev, draggingWidgetId, targetWidgetId, position);
+      return isSameWidgetOrder(prev, next) ? prev : next;
+    });
   };
 
   const handleWidgetDrop = (event: DragEvent<HTMLElement>, targetWidgetId: DashboardWidgetId) => {
@@ -1077,10 +1089,6 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       setDropTarget(null);
       return;
     }
-
-    const targetPosition = dropTarget?.widgetId === targetWidgetId ? dropTarget.position : "before";
-
-    setDashboardWidgetOrder((prev) => moveWidgetOrder(prev, draggingWidgetId, targetWidgetId, targetPosition));
 
     setDropTarget(null);
     setDraggingWidgetId(null);
@@ -1270,7 +1278,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         onDragOver={(event) => handleWidgetDragOver(event, widgetId)}
         onDrop={(event) => handleWidgetDrop(event, widgetId)}
         onDragEnd={handleWidgetDragEnd}
-        className={`col-span-1 ${gridClass} ${dashboardCardBaseClass} cursor-grab active:cursor-grabbing ${isDragging ? "scale-[0.995] opacity-60" : ""} ${isDropTarget ? "ring-2 ring-sky-400/70" : ""}`}
+        className={`min-w-0 ${gridClass} ${dashboardCardBaseClass} cursor-grab active:cursor-grabbing ${isDragging ? "scale-[0.995] opacity-60" : ""} ${isDropTarget ? "ring-2 ring-sky-400/70" : ""}`}
       >
         <span className="absolute right-3 top-3 select-none text-xs tracking-[0.12em] text-slate-500">⋮⋮</span>
         {isDropTarget ? (
@@ -1911,7 +1919,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           </div>
 
           <div
-            className="grid auto-rows-fr grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-12 xl:grid-flow-row-dense"
+            className="flex flex-wrap items-stretch gap-3"
             onDragOver={handleWidgetGridDragOver}
             onDrop={handleWidgetGridDrop}
           >
