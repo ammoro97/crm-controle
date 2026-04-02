@@ -149,8 +149,6 @@ type AutomationApiResponse = {
   message?: string;
 };
 
-type DashboardSectionKey = "top" | "operational" | "main" | "base";
-
 type DashboardWidgetId =
   | "taxa_conversao"
   | "cobertura_base"
@@ -166,21 +164,73 @@ type DashboardWidgetId =
   | "followups_pendentes"
   | "taxa_conversao_indicador";
 
-type DashboardWidgetLayout = Record<DashboardSectionKey, DashboardWidgetId[]>;
+type DashboardWidgetLayoutItem = {
+  id: DashboardWidgetId;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+type PersistedDashboardLayout = {
+  order: DashboardWidgetId[];
+  items: DashboardWidgetLayoutItem[];
+};
 
 const DASHBOARD_LAYOUT_STORAGE_KEY = "crm.leads.dashboard.layout.v1";
 const DASHBOARD_GUEST_USER_KEY = "guest";
 
-const defaultDashboardLayout: DashboardWidgetLayout = {
-  top: ["taxa_conversao", "cobertura_base", "leads_finalizados", "compras_efetuadas", "valor_total_feito"],
-  operational: ["leads_prospectados", "calls_agendadas", "ligacoes_feitas", "emails_enviados"],
-  main: ["funil_vendas", "atividades_bdr"],
-  base: ["followups_pendentes", "taxa_conversao_indicador"],
+const defaultDashboardWidgetOrder: DashboardWidgetId[] = [
+  "taxa_conversao",
+  "cobertura_base",
+  "leads_finalizados",
+  "compras_efetuadas",
+  "valor_total_feito",
+  "leads_prospectados",
+  "calls_agendadas",
+  "ligacoes_feitas",
+  "emails_enviados",
+  "funil_vendas",
+  "atividades_bdr",
+  "followups_pendentes",
+  "taxa_conversao_indicador",
+];
+
+const dashboardWidgetDimensions: Record<DashboardWidgetId, { w: number; h: number }> = {
+  taxa_conversao: { w: 3, h: 1 },
+  cobertura_base: { w: 3, h: 1 },
+  leads_finalizados: { w: 3, h: 1 },
+  compras_efetuadas: { w: 3, h: 1 },
+  valor_total_feito: { w: 3, h: 1 },
+  leads_prospectados: { w: 3, h: 1 },
+  calls_agendadas: { w: 3, h: 1 },
+  ligacoes_feitas: { w: 3, h: 1 },
+  emails_enviados: { w: 3, h: 1 },
+  funil_vendas: { w: 8, h: 2 },
+  atividades_bdr: { w: 4, h: 2 },
+  followups_pendentes: { w: 6, h: 1 },
+  taxa_conversao_indicador: { w: 6, h: 1 },
 };
 
-function normalizeSectionOrder(sectionValue: unknown, defaults: DashboardWidgetId[]): DashboardWidgetId[] {
-  const source = Array.isArray(sectionValue) ? sectionValue : [];
-  const allowed = new Set<DashboardWidgetId>(defaults);
+const dashboardWidgetGridClasses: Record<DashboardWidgetId, string> = {
+  taxa_conversao: "md:col-span-1 xl:col-span-3 min-h-[176px]",
+  cobertura_base: "md:col-span-1 xl:col-span-3 min-h-[176px]",
+  leads_finalizados: "md:col-span-1 xl:col-span-3 min-h-[176px]",
+  compras_efetuadas: "md:col-span-1 xl:col-span-3 min-h-[176px]",
+  valor_total_feito: "md:col-span-1 xl:col-span-3 min-h-[176px]",
+  leads_prospectados: "md:col-span-1 xl:col-span-3 min-h-[160px]",
+  calls_agendadas: "md:col-span-1 xl:col-span-3 min-h-[160px]",
+  ligacoes_feitas: "md:col-span-1 xl:col-span-3 min-h-[160px]",
+  emails_enviados: "md:col-span-1 xl:col-span-3 min-h-[160px]",
+  funil_vendas: "md:col-span-2 xl:col-span-8 min-h-[330px]",
+  atividades_bdr: "md:col-span-2 xl:col-span-4 min-h-[330px]",
+  followups_pendentes: "md:col-span-1 xl:col-span-6 min-h-[170px]",
+  taxa_conversao_indicador: "md:col-span-1 xl:col-span-6 min-h-[170px]",
+};
+
+function normalizeDashboardWidgetOrder(orderValue: unknown): DashboardWidgetId[] {
+  const source = Array.isArray(orderValue) ? orderValue : [];
+  const allowed = new Set<DashboardWidgetId>(defaultDashboardWidgetOrder);
   const unique = new Set<DashboardWidgetId>();
   const ordered: DashboardWidgetId[] = [];
 
@@ -191,7 +241,7 @@ function normalizeSectionOrder(sectionValue: unknown, defaults: DashboardWidgetI
     ordered.push(key);
   }
 
-  for (const fallback of defaults) {
+  for (const fallback of defaultDashboardWidgetOrder) {
     if (unique.has(fallback)) continue;
     ordered.push(fallback);
   }
@@ -199,31 +249,109 @@ function normalizeSectionOrder(sectionValue: unknown, defaults: DashboardWidgetI
   return ordered;
 }
 
-function normalizeDashboardLayout(rawLayout: unknown): DashboardWidgetLayout {
-  const source = rawLayout && typeof rawLayout === "object" ? (rawLayout as Partial<DashboardWidgetLayout>) : {};
-  return {
-    top: normalizeSectionOrder(source.top, defaultDashboardLayout.top),
-    operational: normalizeSectionOrder(source.operational, defaultDashboardLayout.operational),
-    main: normalizeSectionOrder(source.main, defaultDashboardLayout.main),
-    base: normalizeSectionOrder(source.base, defaultDashboardLayout.base),
-  };
+function extractDashboardOrder(rawLayout: unknown): DashboardWidgetId[] {
+  if (Array.isArray(rawLayout)) {
+    return normalizeDashboardWidgetOrder(rawLayout);
+  }
+
+  const source = rawLayout && typeof rawLayout === "object" ? (rawLayout as Record<string, unknown>) : null;
+  if (!source) return defaultDashboardWidgetOrder;
+
+  if (Array.isArray(source.order)) {
+    return normalizeDashboardWidgetOrder(source.order);
+  }
+
+  // Compatibilidade com versao anterior (layout por secoes)
+  const legacyOrder = [
+    ...(Array.isArray(source.top) ? source.top : []),
+    ...(Array.isArray(source.operational) ? source.operational : []),
+    ...(Array.isArray(source.main) ? source.main : []),
+    ...(Array.isArray(source.base) ? source.base : []),
+  ];
+
+  if (legacyOrder.length > 0) {
+    return normalizeDashboardWidgetOrder(legacyOrder);
+  }
+
+  return defaultDashboardWidgetOrder;
 }
 
-function getDashboardLayoutSnapshot(userId: string): DashboardWidgetLayout {
-  if (typeof window === "undefined") return defaultDashboardLayout;
+function buildDashboardLayoutItems(order: DashboardWidgetId[], columns = 12): DashboardWidgetLayoutItem[] {
+  const occupied = new Set<string>();
+  const items: DashboardWidgetLayoutItem[] = [];
+
+  const canPlace = (x: number, y: number, w: number, h: number) => {
+    if (x + w > columns) return false;
+    for (let row = y; row < y + h; row += 1) {
+      for (let col = x; col < x + w; col += 1) {
+        if (occupied.has(`${col}:${row}`)) return false;
+      }
+    }
+    return true;
+  };
+
+  const markPlaced = (x: number, y: number, w: number, h: number) => {
+    for (let row = y; row < y + h; row += 1) {
+      for (let col = x; col < x + w; col += 1) {
+        occupied.add(`${col}:${row}`);
+      }
+    }
+  };
+
+  for (const id of order) {
+    const dimensions = dashboardWidgetDimensions[id];
+    const w = dimensions?.w || 3;
+    const h = dimensions?.h || 1;
+    let placed = false;
+    let y = 0;
+
+    while (!placed && y < 200) {
+      for (let x = 0; x <= columns - w; x += 1) {
+        if (!canPlace(x, y, w, h)) continue;
+        markPlaced(x, y, w, h);
+        items.push({ id, x, y, w, h });
+        placed = true;
+        break;
+      }
+      if (!placed) y += 1;
+    }
+  }
+
+  return items;
+}
+
+function getDashboardLayoutSnapshot(userId: string): PersistedDashboardLayout {
+  if (typeof window === "undefined") {
+    return {
+      order: defaultDashboardWidgetOrder,
+      items: buildDashboardLayoutItems(defaultDashboardWidgetOrder),
+    };
+  }
 
   try {
     const raw = window.localStorage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY);
-    if (!raw) return defaultDashboardLayout;
+    if (!raw) {
+      return {
+        order: defaultDashboardWidgetOrder,
+        items: buildDashboardLayoutItems(defaultDashboardWidgetOrder),
+      };
+    }
     const parsed = JSON.parse(raw);
     const byUser = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
-    return normalizeDashboardLayout(byUser[userId] || byUser[DASHBOARD_GUEST_USER_KEY] || defaultDashboardLayout);
+    const order = extractDashboardOrder(byUser[userId] || byUser[DASHBOARD_GUEST_USER_KEY] || defaultDashboardWidgetOrder);
+    return {
+      order,
+      items: buildDashboardLayoutItems(order),
+    };
   } catch {
-    return defaultDashboardLayout;
+    return {
+      order: defaultDashboardWidgetOrder,
+      items: buildDashboardLayoutItems(defaultDashboardWidgetOrder),
+    };
   }
 }
 
-function setDashboardLayoutSnapshot(userId: string, layout: DashboardWidgetLayout) {
+function setDashboardLayoutSnapshot(userId: string, layout: PersistedDashboardLayout) {
   if (typeof window === "undefined") return;
 
   try {
@@ -237,17 +365,17 @@ function setDashboardLayoutSnapshot(userId: string, layout: DashboardWidgetLayou
   }
 }
 
-function moveWidgetWithinSection(
-  sectionOrder: DashboardWidgetId[],
+function moveWidgetOrder(
+  currentOrder: DashboardWidgetId[],
   draggedWidgetId: DashboardWidgetId,
   targetWidgetId: DashboardWidgetId,
   position: "before" | "after",
 ): DashboardWidgetId[] {
-  if (draggedWidgetId === targetWidgetId) return sectionOrder;
+  if (draggedWidgetId === targetWidgetId) return currentOrder;
 
-  const filtered = sectionOrder.filter((id) => id !== draggedWidgetId);
+  const filtered = currentOrder.filter((id) => id !== draggedWidgetId);
   const targetIndex = filtered.indexOf(targetWidgetId);
-  if (targetIndex < 0) return sectionOrder;
+  if (targetIndex < 0) return currentOrder;
 
   const insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
   filtered.splice(insertIndex, 0, draggedWidgetId);
@@ -564,10 +692,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardAnimateIn, setDashboardAnimateIn] = useState(false);
-  const [dashboardLayout, setDashboardLayout] = useState<DashboardWidgetLayout>(defaultDashboardLayout);
-  const [draggingWidget, setDraggingWidget] = useState<{ section: DashboardSectionKey; widgetId: DashboardWidgetId } | null>(null);
+  const [dashboardWidgetOrder, setDashboardWidgetOrder] = useState<DashboardWidgetId[]>(defaultDashboardWidgetOrder);
+  const [draggingWidgetId, setDraggingWidgetId] = useState<DashboardWidgetId | null>(null);
   const [dropTarget, setDropTarget] = useState<{
-    section: DashboardSectionKey;
     widgetId: DashboardWidgetId;
     position: "before" | "after";
   } | null>(null);
@@ -778,17 +905,21 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   useEffect(() => {
     if (!isDashboardMode) return;
-    setDashboardLayout(getDashboardLayoutSnapshot(dashboardLayoutUserId));
+    setDashboardWidgetOrder(getDashboardLayoutSnapshot(dashboardLayoutUserId).order);
   }, [dashboardLayoutUserId, isDashboardMode]);
 
   useEffect(() => {
     if (!isDashboardMode) return;
-    setDashboardLayoutSnapshot(dashboardLayoutUserId, dashboardLayout);
-  }, [dashboardLayout, dashboardLayoutUserId, isDashboardMode]);
+    const normalizedOrder = normalizeDashboardWidgetOrder(dashboardWidgetOrder);
+    setDashboardLayoutSnapshot(dashboardLayoutUserId, {
+      order: normalizedOrder,
+      items: buildDashboardLayoutItems(normalizedOrder),
+    });
+  }, [dashboardLayoutUserId, dashboardWidgetOrder, isDashboardMode]);
 
   useEffect(() => {
     if (isDashboardMode) return;
-    setDraggingWidget(null);
+    setDraggingWidgetId(null);
     setDropTarget(null);
   }, [isDashboardMode]);
 
@@ -918,69 +1049,69 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   const dashboardLabelClass = "text-xs uppercase tracking-[0.08em] text-slate-400";
 
-  const handleWidgetDragStart = (
-    event: DragEvent<HTMLElement>,
-    section: DashboardSectionKey,
-    widgetId: DashboardWidgetId,
-  ) => {
+  const handleWidgetDragStart = (event: DragEvent<HTMLElement>, widgetId: DashboardWidgetId) => {
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", widgetId);
-    setDraggingWidget({ section, widgetId });
+    setDraggingWidgetId(widgetId);
   };
 
-  const handleWidgetDragOver = (
-    event: DragEvent<HTMLElement>,
-    section: DashboardSectionKey,
-    widgetId: DashboardWidgetId,
-  ) => {
-    if (!draggingWidget || draggingWidget.section !== section || draggingWidget.widgetId === widgetId) return;
+  const handleWidgetDragOver = (event: DragEvent<HTMLElement>, targetWidgetId: DashboardWidgetId) => {
+    if (!draggingWidgetId || draggingWidgetId === targetWidgetId) return;
     event.preventDefault();
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    const position: "before" | "after" = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-    setDropTarget({ section, widgetId, position });
+    const isVerticalTarget = rect.height >= rect.width;
+    const position: "before" | "after" = isVerticalTarget
+      ? event.clientY < rect.top + rect.height / 2
+        ? "before"
+        : "after"
+      : event.clientX < rect.left + rect.width / 2
+        ? "before"
+        : "after";
+    setDropTarget({ widgetId: targetWidgetId, position });
   };
 
-  const handleWidgetDrop = (
-    event: DragEvent<HTMLElement>,
-    section: DashboardSectionKey,
-    targetWidgetId: DashboardWidgetId,
-  ) => {
+  const handleWidgetDrop = (event: DragEvent<HTMLElement>, targetWidgetId: DashboardWidgetId) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!draggingWidget || draggingWidget.section !== section || draggingWidget.widgetId === targetWidgetId) {
+    if (!draggingWidgetId || draggingWidgetId === targetWidgetId) {
       setDropTarget(null);
       return;
     }
 
-    const targetPosition = dropTarget?.section === section && dropTarget.widgetId === targetWidgetId
-      ? dropTarget.position
-      : "before";
+    const targetPosition = dropTarget?.widgetId === targetWidgetId ? dropTarget.position : "before";
 
-    setDashboardLayout((prev) => ({
-      ...prev,
-      [section]: moveWidgetWithinSection(prev[section], draggingWidget.widgetId, targetWidgetId, targetPosition),
-    }));
+    setDashboardWidgetOrder((prev) => moveWidgetOrder(prev, draggingWidgetId, targetWidgetId, targetPosition));
 
     setDropTarget(null);
-    setDraggingWidget(null);
+    setDraggingWidgetId(null);
+  };
+
+  const handleWidgetGridDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!draggingWidgetId) return;
+    event.preventDefault();
+  };
+
+  const handleWidgetGridDrop = (event: DragEvent<HTMLElement>) => {
+    if (!draggingWidgetId) return;
+    event.preventDefault();
+    setDashboardWidgetOrder((prev) => {
+      const filtered = prev.filter((id) => id !== draggingWidgetId);
+      filtered.push(draggingWidgetId);
+      return filtered;
+    });
+    setDropTarget(null);
+    setDraggingWidgetId(null);
   };
 
   const handleWidgetDragEnd = () => {
     setDropTarget(null);
-    setDraggingWidget(null);
+    setDraggingWidgetId(null);
   };
 
-  const renderDashboardWidget = (section: DashboardSectionKey, widgetId: DashboardWidgetId) => {
-    const isDragging = draggingWidget?.section === section && draggingWidget.widgetId === widgetId;
-    const isDropTarget = dropTarget?.section === section && dropTarget.widgetId === widgetId && !isDragging;
-    const sectionHeightClass =
-      section === "main"
-        ? "min-h-[330px]"
-        : section === "operational"
-          ? "min-h-[160px]"
-          : section === "base"
-            ? "min-h-[170px]"
-            : "min-h-[176px]";
+  const renderDashboardWidget = (widgetId: DashboardWidgetId) => {
+    const isDragging = draggingWidgetId === widgetId;
+    const isDropTarget = dropTarget?.widgetId === widgetId && !isDragging;
+    const gridClass = dashboardWidgetGridClasses[widgetId];
 
     const content =
       widgetId === "taxa_conversao" ? (
@@ -1133,13 +1264,13 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
     return (
       <article
-        key={`${section}-${widgetId}`}
+        key={widgetId}
         draggable
-        onDragStart={(event) => handleWidgetDragStart(event, section, widgetId)}
-        onDragOver={(event) => handleWidgetDragOver(event, section, widgetId)}
-        onDrop={(event) => handleWidgetDrop(event, section, widgetId)}
+        onDragStart={(event) => handleWidgetDragStart(event, widgetId)}
+        onDragOver={(event) => handleWidgetDragOver(event, widgetId)}
+        onDrop={(event) => handleWidgetDrop(event, widgetId)}
         onDragEnd={handleWidgetDragEnd}
-        className={`${dashboardCardBaseClass} ${sectionHeightClass} cursor-grab active:cursor-grabbing ${isDragging ? "scale-[0.995] opacity-60" : ""} ${isDropTarget ? "ring-2 ring-sky-400/70" : ""}`}
+        className={`col-span-1 ${gridClass} ${dashboardCardBaseClass} cursor-grab active:cursor-grabbing ${isDragging ? "scale-[0.995] opacity-60" : ""} ${isDropTarget ? "ring-2 ring-sky-400/70" : ""}`}
       >
         <span className="absolute right-3 top-3 select-none text-xs tracking-[0.12em] text-slate-500">⋮⋮</span>
         {isDropTarget ? (
@@ -1779,20 +1910,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             ) : null}
           </div>
 
-          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-5">
-            {dashboardLayout.top.map((widgetId) => renderDashboardWidget("top", widgetId))}
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-            {dashboardLayout.operational.map((widgetId) => renderDashboardWidget("operational", widgetId))}
-          </div>
-
-          <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
-            {dashboardLayout.main.map((widgetId) => renderDashboardWidget("main", widgetId))}
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            {dashboardLayout.base.map((widgetId) => renderDashboardWidget("base", widgetId))}
+          <div
+            className="grid auto-rows-fr grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-12 xl:grid-flow-row-dense"
+            onDragOver={handleWidgetGridDragOver}
+            onDrop={handleWidgetGridDrop}
+          >
+            {dashboardWidgetOrder.map((widgetId) => renderDashboardWidget(widgetId))}
           </div>
 
           <style jsx>{`
