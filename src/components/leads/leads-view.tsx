@@ -718,24 +718,28 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         value: dashboardMetrics.funnel.leadsProspectados,
         borderClass: "border-[#3B82F6]/45",
         gradientClass: "from-[#3B82F6] to-[#1D4ED8]",
+        glowShadow: "0 0 20px rgba(59,130,246,0.15)",
       },
       {
         label: "Ligacoes Atendidas",
         value: dashboardMetrics.funnel.ligacoesAtendidas,
         borderClass: "border-[#8B5CF6]/45",
         gradientClass: "from-[#8B5CF6] to-[#6D28D9]",
+        glowShadow: "0 0 20px rgba(139,92,246,0.15)",
       },
       {
         label: "Contato com Decisor",
         value: dashboardMetrics.funnel.contatosComDecisor,
         borderClass: "border-[#F59E0B]/50",
         gradientClass: "from-[#F59E0B] to-[#B45309]",
+        glowShadow: "0 0 20px rgba(245,158,11,0.16)",
       },
       {
         label: "Calls Agendadas",
         value: dashboardMetrics.funnel.callsAgendadas,
         borderClass: "border-[#22C55E]/45",
         gradientClass: "from-[#22C55E] to-[#15803D]",
+        glowShadow: "0 0 20px rgba(34,197,94,0.15)",
       },
     ],
     [dashboardMetrics.funnel.callsAgendadas, dashboardMetrics.funnel.contatosComDecisor, dashboardMetrics.funnel.leadsProspectados, dashboardMetrics.funnel.ligacoesAtendidas],
@@ -1384,12 +1388,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             ) : null}
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr_1fr]">
-            <article className={`${dashboardCardBaseClass} min-h-[220px]`}>
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_35%,rgba(34,197,94,0.18),transparent_55%)]" />
+          <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
+            <article className={`${dashboardCardBaseClass} min-h-[260px]`}>
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(34,197,94,0.12),transparent_58%)]" />
               <div className="relative">
                 <p className={dashboardLabelClass}>Taxa de Conversao</p>
-                <p className="mt-4 text-[40px] font-semibold leading-none tracking-[-0.03em] text-[#22C55E] drop-shadow-[0_0_16px_rgba(34,197,94,0.22)]">
+                <p className="mt-4 text-[48px] font-semibold leading-[0.92] tracking-[-0.04em] text-[#22C55E] drop-shadow-[0_0_20px_rgba(34,197,94,0.24)]">
                   {dashboardConversionRateLabel}
                 </p>
                 <p className="mt-3 text-xs text-slate-300">
@@ -1412,26 +1416,28 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               </div>
             </article>
 
-            <article className={`${dashboardCardBaseClass} min-h-[220px]`}>
-              <p className={dashboardLabelClass}>Cobertura da Base</p>
-              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">{dashboardCoveragePercentLabel}</p>
-              <p className="mt-2 text-xs text-slate-300">
-                {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
-              </p>
-              <p className="mt-3 text-[11px] uppercase tracking-[0.08em] text-slate-500">{dashboardCoverageLabel}</p>
-            </article>
+            <div className="grid gap-6">
+              <article className={`${dashboardCardBaseClass} min-h-[170px]`}>
+                <p className={dashboardLabelClass}>Cobertura da Base</p>
+                <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">{dashboardCoveragePercentLabel}</p>
+                <p className="mt-2 text-xs text-slate-300">
+                  {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
+                </p>
+                <p className="mt-3 text-[11px] uppercase tracking-[0.08em] text-slate-500">{dashboardCoverageLabel}</p>
+              </article>
 
-            <article className={`${dashboardCardBaseClass} min-h-[220px]`}>
-              <p className={dashboardLabelClass}>Total de Leads Finalizados</p>
-              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-white">
-                {Math.max(0, Math.round(animatedTotalLeadsFinalizados))}
-              </p>
-              <p className="mt-2 text-xs text-slate-400">Conta apenas finalizacao oficial via visao personalizada</p>
-              <p className={`${dashboardLabelClass} mt-6`}>Compras Efetuadas</p>
-              <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-[#22C55E]">
-                {Math.max(0, Math.round(animatedTotalComprasEfetuadas))}
-              </p>
-            </article>
+              <article className={`${dashboardCardBaseClass} min-h-[170px]`}>
+                <p className={dashboardLabelClass}>Total de Leads Finalizados</p>
+                <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-white">
+                  {Math.max(0, Math.round(animatedTotalLeadsFinalizados))}
+                </p>
+                <p className="mt-2 text-xs text-slate-400">Conta apenas finalizacao oficial via visao personalizada</p>
+                <p className={`${dashboardLabelClass} mt-6`}>Compras Efetuadas</p>
+                <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-[#22C55E]">
+                  {Math.max(0, Math.round(animatedTotalComprasEfetuadas))}
+                </p>
+              </article>
+            </div>
           </div>
 
           <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
@@ -1447,10 +1453,14 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                   return (
                     <div key={step.label} className={index === 0 ? "" : "-mt-2"}>
                       <div
-                        className="relative h-10 overflow-hidden rounded-full shadow-[0_14px_22px_rgba(2,6,23,0.34)] transition-[width] duration-700 ease-out"
+                        className="relative h-10 overflow-hidden rounded-full shadow-[0_14px_22px_rgba(2,6,23,0.34)]"
                         style={{
                           width: dashboardAnimateIn ? `${width}%` : "0%",
                           transitionDelay: `${index * 90}ms`,
+                          transitionProperty: "width",
+                          transitionDuration: "0.8s",
+                          transitionTimingFunction: "cubic-bezier(0.22,1,0.36,1)",
+                          boxShadow: `${step.glowShadow}, 0 14px 22px rgba(2,6,23,0.34)`,
                         }}
                       >
                         <div className={`absolute inset-0 bg-gradient-to-r ${step.gradientClass}`} />
