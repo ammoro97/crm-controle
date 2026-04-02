@@ -21,6 +21,7 @@ import { useResponsaveis } from "@/lib/responsaveis-store";
 import { getPostCallWrapups, subscribePostCallFlow, type PostCallWrapup } from "@/lib/post-call-flow";
 import { formatSaleValueCents, isValidSaleValueCents } from "@/lib/sale-value";
 import { buildOutboundDashboardMetrics } from "@/lib/leads-outbound-dashboard";
+import GridLayout, { WidthProvider, type Layout as ReactGridLayoutItem } from "react-grid-layout";
 import {
   CallLog,
   Lead,
@@ -35,6 +36,8 @@ import {
 import { LeadDetailDrawer } from "./lead-detail-drawer";
 import { LeadsTable } from "./leads-table";
 import { OutboundLeadsTable } from "./outbound-leads-table";
+
+const DashboardGridLayout = WidthProvider(GridLayout);
 
 type LeadFilter = "all" | LeadChannel;
 type ImportDestination = "" | LeadChannel;
@@ -196,6 +199,10 @@ const defaultDashboardWidgetOrder: DashboardWidgetId[] = [
   "taxa_conversao_indicador",
 ];
 
+const DASHBOARD_LAYOUT_COLUMNS_MAX = 12;
+const DASHBOARD_LAYOUT_ROW_HEIGHT = 62;
+const DASHBOARD_LAYOUT_GAP = 12;
+
 const dashboardWidgetDimensions: Record<DashboardWidgetId, { w: number; h: number }> = {
   taxa_conversao: { w: 3, h: 2 },
   cobertura_base: { w: 3, h: 2 },
@@ -206,11 +213,31 @@ const dashboardWidgetDimensions: Record<DashboardWidgetId, { w: number; h: numbe
   calls_agendadas: { w: 3, h: 2 },
   ligacoes_feitas: { w: 3, h: 2 },
   emails_enviados: { w: 3, h: 2 },
-  funil_vendas: { w: 8, h: 3 },
+  funil_vendas: { w: 8, h: 4 },
   atividades_bdr: { w: 4, h: 4 },
   followups_pendentes: { w: 6, h: 2 },
   taxa_conversao_indicador: { w: 6, h: 2 },
 };
+
+const dashboardWidgetConstraints: Record<DashboardWidgetId, { minW: number; minH: number; maxW?: number; maxH?: number }> = {
+  taxa_conversao: { minW: 2, minH: 1 },
+  cobertura_base: { minW: 2, minH: 1 },
+  leads_finalizados: { minW: 2, minH: 1 },
+  compras_efetuadas: { minW: 2, minH: 1 },
+  valor_total_feito: { minW: 2, minH: 1 },
+  leads_prospectados: { minW: 2, minH: 1 },
+  calls_agendadas: { minW: 2, minH: 1 },
+  ligacoes_feitas: { minW: 2, minH: 1 },
+  emails_enviados: { minW: 2, minH: 1 },
+  funil_vendas: { minW: 4, minH: 2 },
+  atividades_bdr: { minW: 3, minH: 2 },
+  followups_pendentes: { minW: 3, minH: 1 },
+  taxa_conversao_indicador: { minW: 3, minH: 1 },
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
 function resolveDashboardGridColumns(viewportWidth: number): number {
   if (viewportWidth >= 1536) return 12;
@@ -218,21 +245,8 @@ function resolveDashboardGridColumns(viewportWidth: number): number {
   if (viewportWidth >= 1024) return 8;
   if (viewportWidth >= 768) return 6;
   if (viewportWidth >= 560) return 4;
-  if (viewportWidth >= 420) return 2;
-  return 1;
-}
-
-function getDashboardResponsiveDimensions(columns: number): Record<DashboardWidgetId, { w: number; h: number }> {
-  const normalizedColumns = Math.max(1, columns);
-  const output = {} as Record<DashboardWidgetId, { w: number; h: number }>;
-  for (const widgetId of defaultDashboardWidgetOrder) {
-    const base = dashboardWidgetDimensions[widgetId];
-    const widthScaled = Math.ceil((base.w / 12) * normalizedColumns);
-    const width = Math.max(1, Math.min(normalizedColumns, widthScaled));
-    const height = base.h;
-    output[widgetId] = { w: width, h: height };
-  }
-  return output;
+  if (viewportWidth >= 420) return 3;
+  return 2;
 }
 
 function normalizeDashboardWidgetOrder(orderValue: unknown): DashboardWidgetId[] {
@@ -256,34 +270,100 @@ function normalizeDashboardWidgetOrder(orderValue: unknown): DashboardWidgetId[]
   return ordered;
 }
 
-function extractDashboardOrder(rawLayout: unknown): DashboardWidgetId[] {
-  if (Array.isArray(rawLayout)) {
-    return normalizeDashboardWidgetOrder(rawLayout);
-  }
-
-  const source = rawLayout && typeof rawLayout === "object" ? (rawLayout as Record<string, unknown>) : null;
-  if (!source) return defaultDashboardWidgetOrder;
-
-  if (Array.isArray(source.order)) {
-    return normalizeDashboardWidgetOrder(source.order);
-  }
-
-  // Compatibilidade com versao anterior (layout por secoes)
-  const legacyOrder = [
-    ...(Array.isArray(source.top) ? source.top : []),
-    ...(Array.isArray(source.operational) ? source.operational : []),
-    ...(Array.isArray(source.main) ? source.main : []),
-    ...(Array.isArray(source.base) ? source.base : []),
-  ];
-
-  if (legacyOrder.length > 0) {
-    return normalizeDashboardWidgetOrder(legacyOrder);
-  }
-
-  return defaultDashboardWidgetOrder;
+function getWidgetBounds(widgetId: DashboardWidgetId, columns: number) {
+  const normalizedColumns = Math.max(1, columns);
+  const defaults = dashboardWidgetDimensions[widgetId];
+  const constraints = dashboardWidgetConstraints[widgetId];
+  const minW = Math.min(normalizedColumns, Math.max(1, constraints.minW));
+  const maxW = Math.min(normalizedColumns, Math.max(minW, constraints.maxW ?? normalizedColumns));
+  const minH = Math.max(1, constraints.minH);
+  const maxH = Math.max(minH, constraints.maxH ?? 12);
+  const defaultW = clamp(defaults.w, minW, maxW);
+  const defaultH = clamp(defaults.h, minH, maxH);
+  return { minW, maxW, minH, maxH, defaultW, defaultH };
 }
 
-function buildDashboardLayoutItems(order: DashboardWidgetId[], columns = 12): DashboardWidgetLayoutItem[] {
+function toLayoutRecord(items: DashboardWidgetLayoutItem[]): Record<DashboardWidgetId, DashboardWidgetLayoutItem> {
+  const record = {} as Record<DashboardWidgetId, DashboardWidgetLayoutItem>;
+  for (const item of items) {
+    record[item.id] = item;
+  }
+  return record;
+}
+
+function compactDashboardLayoutItems(items: DashboardWidgetLayoutItem[], columns: number): DashboardWidgetLayoutItem[] {
+  const normalizedColumns = Math.max(1, columns);
+  const sorted = [...items].sort((a, b) => a.y - b.y || a.x - b.x || a.id.localeCompare(b.id));
+  const occupied = new Set<string>();
+  const compacted: DashboardWidgetLayoutItem[] = [];
+
+  const canPlace = (x: number, y: number, w: number, h: number) => {
+    if (x + w > normalizedColumns) return false;
+    for (let row = y; row < y + h; row += 1) {
+      for (let col = x; col < x + w; col += 1) {
+        if (occupied.has(`${col}:${row}`)) return false;
+      }
+    }
+    return true;
+  };
+
+  const markPlaced = (x: number, y: number, w: number, h: number) => {
+    for (let row = y; row < y + h; row += 1) {
+      for (let col = x; col < x + w; col += 1) {
+        occupied.add(`${col}:${row}`);
+      }
+    }
+  };
+
+  for (const item of sorted) {
+    const bounds = getWidgetBounds(item.id, normalizedColumns);
+    const w = clamp(item.w, bounds.minW, bounds.maxW);
+    const h = clamp(item.h, bounds.minH, bounds.maxH);
+    const x = clamp(item.x, 0, Math.max(0, normalizedColumns - w));
+
+    let y = 0;
+    while (!canPlace(x, y, w, h) && y < 400) {
+      y += 1;
+    }
+
+    markPlaced(x, y, w, h);
+    compacted.push({ id: item.id, x, y, w, h });
+  }
+
+  return compacted;
+}
+
+function scaleDashboardLayoutItems(
+  items: DashboardWidgetLayoutItem[],
+  fromColumns: number,
+  toColumns: number,
+): DashboardWidgetLayoutItem[] {
+  const safeFrom = Math.max(1, fromColumns);
+  const safeTo = Math.max(1, toColumns);
+  if (safeFrom === safeTo) return compactDashboardLayoutItems(items, safeTo);
+
+  const scaled = items.map((item) => {
+    const bounds = getWidgetBounds(item.id, safeTo);
+    const scaledW = clamp(Math.round((item.w / safeFrom) * safeTo), bounds.minW, bounds.maxW);
+    const scaledX = clamp(Math.round((item.x / safeFrom) * safeTo), 0, Math.max(0, safeTo - scaledW));
+    const scaledH = clamp(item.h, bounds.minH, bounds.maxH);
+    return {
+      ...item,
+      x: scaledX,
+      w: scaledW,
+      h: scaledH,
+    };
+  });
+
+  return compactDashboardLayoutItems(scaled, safeTo);
+}
+
+function buildDashboardLayoutItems(
+  order: DashboardWidgetId[],
+  columns = DASHBOARD_LAYOUT_COLUMNS_MAX,
+  preferredById: Partial<Record<DashboardWidgetId, Partial<DashboardWidgetLayoutItem>>> = {},
+): DashboardWidgetLayoutItem[] {
+  const normalizedColumns = Math.max(1, columns);
   const occupied = new Set<string>();
   const items: DashboardWidgetLayoutItem[] = [];
 
@@ -306,32 +386,118 @@ function buildDashboardLayoutItems(order: DashboardWidgetId[], columns = 12): Da
   };
 
   for (const id of order) {
-    const dimensions = dashboardWidgetDimensions[id];
-    const w = dimensions?.w || 3;
-    const h = dimensions?.h || 1;
+    const bounds = getWidgetBounds(id, normalizedColumns);
+    const preferred = preferredById[id];
+    const w = clamp(Math.round(Number(preferred?.w ?? bounds.defaultW)), bounds.minW, bounds.maxW);
+    const h = clamp(Math.round(Number(preferred?.h ?? bounds.defaultH)), bounds.minH, bounds.maxH);
+    const preferredX = clamp(Math.round(Number(preferred?.x ?? 0)), 0, Math.max(0, normalizedColumns - w));
+    const preferredY = Math.max(0, Math.round(Number(preferred?.y ?? 0)));
+
     let placed = false;
-    let y = 0;
+    let y = preferredY;
 
     while (!placed && y < 200) {
-      for (let x = 0; x <= columns - w; x += 1) {
+      for (let x = preferredX; x <= normalizedColumns - w; x += 1) {
         if (!canPlace(x, y, w, h)) continue;
         markPlaced(x, y, w, h);
         items.push({ id, x, y, w, h });
         placed = true;
         break;
       }
+      if (!placed) {
+        for (let x = 0; x < preferredX; x += 1) {
+          if (!canPlace(x, y, w, h)) continue;
+          markPlaced(x, y, w, h);
+          items.push({ id, x, y, w, h });
+          placed = true;
+          break;
+        }
+      }
       if (!placed) y += 1;
     }
   }
 
-  return items;
+  return compactDashboardLayoutItems(items, normalizedColumns);
 }
 
-function getDashboardLayoutSnapshot(userId: string): PersistedDashboardLayout {
+function normalizeDashboardLayoutItems(
+  itemsValue: unknown,
+  order: DashboardWidgetId[],
+  columns = DASHBOARD_LAYOUT_COLUMNS_MAX,
+): DashboardWidgetLayoutItem[] {
+  const source = Array.isArray(itemsValue) ? itemsValue : [];
+  const allowed = new Set<DashboardWidgetId>(defaultDashboardWidgetOrder);
+  const preferred: Partial<Record<DashboardWidgetId, Partial<DashboardWidgetLayoutItem>>> = {};
+
+  for (const candidate of source) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const row = candidate as Record<string, unknown>;
+    const id = String(row.id || "").trim() as DashboardWidgetId;
+    if (!allowed.has(id)) continue;
+    preferred[id] = {
+      id,
+      x: Math.round(Number(row.x ?? 0)),
+      y: Math.round(Number(row.y ?? 0)),
+      w: Math.round(Number(row.w ?? dashboardWidgetDimensions[id].w)),
+      h: Math.round(Number(row.h ?? dashboardWidgetDimensions[id].h)),
+    };
+  }
+
+  return buildDashboardLayoutItems(order, columns, preferred);
+}
+
+function extractDashboardLayout(
+  rawLayout: unknown,
+  columns = DASHBOARD_LAYOUT_COLUMNS_MAX,
+): PersistedDashboardLayout {
+  if (Array.isArray(rawLayout)) {
+    const order = normalizeDashboardWidgetOrder(rawLayout);
+    return {
+      order,
+      items: buildDashboardLayoutItems(order, columns),
+    };
+  }
+
+  const source = rawLayout && typeof rawLayout === "object" ? (rawLayout as Record<string, unknown>) : null;
+  if (!source) {
+    return {
+      order: defaultDashboardWidgetOrder,
+      items: buildDashboardLayoutItems(defaultDashboardWidgetOrder, columns),
+    };
+  }
+
+  const legacyOrder = [
+    ...(Array.isArray(source.top) ? source.top : []),
+    ...(Array.isArray(source.operational) ? source.operational : []),
+    ...(Array.isArray(source.main) ? source.main : []),
+    ...(Array.isArray(source.base) ? source.base : []),
+  ];
+  const orderSource = Array.isArray(source.order) ? source.order : legacyOrder;
+  const order = normalizeDashboardWidgetOrder(orderSource);
+
+  return {
+    order,
+    items: normalizeDashboardLayoutItems(source.items, order, columns),
+  };
+}
+
+function normalizeDashboardLayoutSnapshot(
+  layout: PersistedDashboardLayout,
+  columns = DASHBOARD_LAYOUT_COLUMNS_MAX,
+): PersistedDashboardLayout {
+  const order = normalizeDashboardWidgetOrder(layout.order);
+  const items = normalizeDashboardLayoutItems(layout.items, order, columns);
+  return { order, items };
+}
+
+function getDashboardLayoutSnapshot(
+  userId: string,
+  columns = DASHBOARD_LAYOUT_COLUMNS_MAX,
+): PersistedDashboardLayout {
   if (typeof window === "undefined") {
     return {
       order: defaultDashboardWidgetOrder,
-      items: buildDashboardLayoutItems(defaultDashboardWidgetOrder),
+      items: buildDashboardLayoutItems(defaultDashboardWidgetOrder, columns),
     };
   }
 
@@ -340,59 +506,68 @@ function getDashboardLayoutSnapshot(userId: string): PersistedDashboardLayout {
     if (!raw) {
       return {
         order: defaultDashboardWidgetOrder,
-        items: buildDashboardLayoutItems(defaultDashboardWidgetOrder),
+        items: buildDashboardLayoutItems(defaultDashboardWidgetOrder, columns),
       };
     }
     const parsed = JSON.parse(raw);
     const byUser = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
-    const order = extractDashboardOrder(byUser[userId] || byUser[DASHBOARD_GUEST_USER_KEY] || defaultDashboardWidgetOrder);
-    return {
-      order,
-      items: buildDashboardLayoutItems(order),
-    };
+    return extractDashboardLayout(byUser[userId] || byUser[DASHBOARD_GUEST_USER_KEY] || defaultDashboardWidgetOrder, columns);
   } catch {
     return {
       order: defaultDashboardWidgetOrder,
-      items: buildDashboardLayoutItems(defaultDashboardWidgetOrder),
+      items: buildDashboardLayoutItems(defaultDashboardWidgetOrder, columns),
     };
   }
 }
 
-function setDashboardLayoutSnapshot(userId: string, layout: PersistedDashboardLayout) {
+function setDashboardLayoutSnapshot(
+  userId: string,
+  layout: PersistedDashboardLayout,
+  columns = DASHBOARD_LAYOUT_COLUMNS_MAX,
+) {
   if (typeof window === "undefined") return;
+  const normalizedLayout = normalizeDashboardLayoutSnapshot(layout, columns);
 
   try {
     const raw = window.localStorage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
     const byUser = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
-    byUser[userId] = layout;
+    byUser[userId] = normalizedLayout;
     window.localStorage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify(byUser));
   } catch {
-    window.localStorage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify({ [userId]: layout }));
+    window.localStorage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify({ [userId]: normalizedLayout }));
   }
 }
 
-function moveWidgetOrder(
-  currentOrder: DashboardWidgetId[],
-  draggedWidgetId: DashboardWidgetId,
-  targetWidgetId: DashboardWidgetId,
-  position: "before" | "after",
-): DashboardWidgetId[] {
-  if (draggedWidgetId === targetWidgetId) return currentOrder;
+function mapGridLayoutToDashboardItems(layout: ReactGridLayoutItem[]): DashboardWidgetLayoutItem[] {
+  const allowed = new Set<DashboardWidgetId>(defaultDashboardWidgetOrder);
+  const converted: DashboardWidgetLayoutItem[] = [];
 
-  const filtered = currentOrder.filter((id) => id !== draggedWidgetId);
-  const targetIndex = filtered.indexOf(targetWidgetId);
-  if (targetIndex < 0) return currentOrder;
+  for (const row of layout) {
+    const id = String(row.i || "").trim() as DashboardWidgetId;
+    if (!allowed.has(id)) continue;
+    converted.push({
+      id,
+      x: Math.round(Number(row.x ?? 0)),
+      y: Math.round(Number(row.y ?? 0)),
+      w: Math.round(Number(row.w ?? dashboardWidgetDimensions[id].w)),
+      h: Math.round(Number(row.h ?? dashboardWidgetDimensions[id].h)),
+    });
+  }
 
-  const insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
-  filtered.splice(insertIndex, 0, draggedWidgetId);
-  return filtered;
+  return converted;
 }
 
-function isSameWidgetOrder(a: DashboardWidgetId[], b: DashboardWidgetId[]): boolean {
+function isSameDashboardLayoutItems(a: DashboardWidgetLayoutItem[], b: DashboardWidgetLayoutItem[]): boolean {
   if (a.length !== b.length) return false;
-  for (let index = 0; index < a.length; index += 1) {
-    if (a[index] !== b[index]) return false;
+  const sortedA = [...a].sort((left, right) => left.id.localeCompare(right.id));
+  const sortedB = [...b].sort((left, right) => left.id.localeCompare(right.id));
+  for (let index = 0; index < sortedA.length; index += 1) {
+    const left = sortedA[index];
+    const right = sortedB[index];
+    if (!left || !right) return false;
+    if (left.id !== right.id) return false;
+    if (left.x !== right.x || left.y !== right.y || left.w !== right.w || left.h !== right.h) return false;
   }
   return true;
 }
@@ -707,15 +882,14 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardAnimateIn, setDashboardAnimateIn] = useState(false);
-  const [dashboardWidgetOrder, setDashboardWidgetOrder] = useState<DashboardWidgetId[]>(defaultDashboardWidgetOrder);
+  const [dashboardLayoutItems, setDashboardLayoutItems] = useState<DashboardWidgetLayoutItem[]>(() =>
+    buildDashboardLayoutItems(defaultDashboardWidgetOrder),
+  );
   const [dashboardViewportWidth, setDashboardViewportWidth] = useState<number>(() =>
     typeof window === "undefined" ? 1440 : window.innerWidth,
   );
-  const [draggingWidgetId, setDraggingWidgetId] = useState<DashboardWidgetId | null>(null);
-  const [dropTarget, setDropTarget] = useState<{
-    widgetId: DashboardWidgetId;
-    position: "before" | "after";
-  } | null>(null);
+  const [dashboardActiveWidgetId, setDashboardActiveWidgetId] = useState<DashboardWidgetId | null>(null);
+  const [dashboardIsInteracting, setDashboardIsInteracting] = useState(false);
   const [draftLead, setDraftLead] = useState<Lead | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
@@ -933,22 +1107,29 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   useEffect(() => {
     if (!isDashboardMode) return;
-    setDashboardWidgetOrder(getDashboardLayoutSnapshot(dashboardLayoutUserId).order);
+    setDashboardLayoutItems(getDashboardLayoutSnapshot(dashboardLayoutUserId, DASHBOARD_LAYOUT_COLUMNS_MAX).items);
   }, [dashboardLayoutUserId, isDashboardMode]);
 
   useEffect(() => {
     if (!isDashboardMode) return;
-    const normalizedOrder = normalizeDashboardWidgetOrder(dashboardWidgetOrder);
+    const normalizedItems = normalizeDashboardLayoutItems(
+      dashboardLayoutItems,
+      normalizeDashboardWidgetOrder(dashboardLayoutItems.map((item) => item.id)),
+      DASHBOARD_LAYOUT_COLUMNS_MAX,
+    );
+    const normalizedOrder = normalizeDashboardWidgetOrder(
+      [...normalizedItems].sort((a, b) => a.y - b.y || a.x - b.x).map((item) => item.id),
+    );
     setDashboardLayoutSnapshot(dashboardLayoutUserId, {
       order: normalizedOrder,
-      items: buildDashboardLayoutItems(normalizedOrder),
+      items: normalizedItems,
     });
-  }, [dashboardLayoutUserId, dashboardWidgetOrder, isDashboardMode]);
+  }, [dashboardLayoutItems, dashboardLayoutUserId, isDashboardMode]);
 
   useEffect(() => {
     if (isDashboardMode) return;
-    setDraggingWidgetId(null);
-    setDropTarget(null);
+    setDashboardActiveWidgetId(null);
+    setDashboardIsInteracting(false);
   }, [isDashboardMode]);
 
   const visibleLeads = useMemo(() => {
@@ -1076,163 +1257,151 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     return resolveDashboardGridColumns(dashboardViewportWidth);
   }, [dashboardViewportWidth]);
 
-  const dashboardResponsiveDimensions = useMemo(() => {
-    return getDashboardResponsiveDimensions(dashboardGridColumns);
-  }, [dashboardGridColumns]);
+  const dashboardLayoutForViewport = useMemo(() => {
+    return scaleDashboardLayoutItems(dashboardLayoutItems, DASHBOARD_LAYOUT_COLUMNS_MAX, dashboardGridColumns);
+  }, [dashboardGridColumns, dashboardLayoutItems]);
+
+  const dashboardLayoutById = useMemo(() => {
+    return toLayoutRecord(dashboardLayoutForViewport);
+  }, [dashboardLayoutForViewport]);
+
+  const dashboardGridLayout = useMemo<ReactGridLayoutItem[]>(() => {
+    const order = normalizeDashboardWidgetOrder(
+      [...dashboardLayoutForViewport].sort((a, b) => a.y - b.y || a.x - b.x).map((item) => item.id),
+    );
+    const preferredById = toLayoutRecord(dashboardLayoutForViewport);
+    const normalized = buildDashboardLayoutItems(order, dashboardGridColumns, preferredById);
+    return normalized.map((item) => {
+      const bounds = getWidgetBounds(item.id, dashboardGridColumns);
+      return {
+        i: item.id,
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
+        minW: bounds.minW,
+        minH: bounds.minH,
+        maxW: bounds.maxW,
+        maxH: bounds.maxH,
+      };
+    });
+  }, [dashboardGridColumns, dashboardLayoutForViewport]);
 
   const dashboardCardBaseClass =
     "group relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_16px_34px_rgba(2,6,23,0.35)] backdrop-blur transition-all duration-200 hover:-translate-y-[2px] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.3)]";
 
   const dashboardLabelClass = "text-xs uppercase tracking-[0.08em] text-slate-400";
 
-  const handleWidgetDragStart = (event: DragEvent<HTMLElement>, widgetId: DashboardWidgetId) => {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", widgetId);
-    setDraggingWidgetId(widgetId);
+  const syncDashboardLayoutFromGrid = (layout: ReactGridLayoutItem[]) => {
+    const currentItems = mapGridLayoutToDashboardItems(layout);
+    if (currentItems.length === 0) return;
+
+    const currentOrder = normalizeDashboardWidgetOrder(
+      [...currentItems].sort((a, b) => a.y - b.y || a.x - b.x).map((item) => item.id),
+    );
+    const normalizedCurrent = normalizeDashboardLayoutItems(currentItems, currentOrder, dashboardGridColumns);
+    const baseItems = scaleDashboardLayoutItems(normalizedCurrent, dashboardGridColumns, DASHBOARD_LAYOUT_COLUMNS_MAX);
+    setDashboardLayoutItems((prev) => (isSameDashboardLayoutItems(prev, baseItems) ? prev : baseItems));
   };
 
-  const handleWidgetDragOver = (event: DragEvent<HTMLElement>, targetWidgetId: DashboardWidgetId) => {
-    if (!draggingWidgetId || draggingWidgetId === targetWidgetId) return;
-    event.preventDefault();
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    const isVerticalTarget = rect.height >= rect.width;
-    const position: "before" | "after" = isVerticalTarget
-      ? event.clientY < rect.top + rect.height / 2
-        ? "before"
-        : "after"
-      : event.clientX < rect.left + rect.width / 2
-        ? "before"
-        : "after";
-    setDropTarget({ widgetId: targetWidgetId, position });
-    setDashboardWidgetOrder((prev) => {
-      const next = moveWidgetOrder(prev, draggingWidgetId, targetWidgetId, position);
-      return isSameWidgetOrder(prev, next) ? prev : next;
-    });
-  };
-
-  const handleWidgetDrop = (event: DragEvent<HTMLElement>, targetWidgetId: DashboardWidgetId) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!draggingWidgetId || draggingWidgetId === targetWidgetId) {
-      setDropTarget(null);
-      return;
-    }
-
-    setDropTarget(null);
-    setDraggingWidgetId(null);
-  };
-
-  const handleWidgetGridDragOver = (event: DragEvent<HTMLElement>) => {
-    if (!draggingWidgetId) return;
-    event.preventDefault();
-  };
-
-  const handleWidgetGridDrop = (event: DragEvent<HTMLElement>) => {
-    if (!draggingWidgetId) return;
-    event.preventDefault();
-    setDashboardWidgetOrder((prev) => {
-      const filtered = prev.filter((id) => id !== draggingWidgetId);
-      filtered.push(draggingWidgetId);
-      return filtered;
-    });
-    setDropTarget(null);
-    setDraggingWidgetId(null);
-  };
-
-  const handleWidgetDragEnd = () => {
-    setDropTarget(null);
-    setDraggingWidgetId(null);
+  const getWidgetDisplayMode = (widgetId: DashboardWidgetId): "compact" | "balanced" | "expanded" => {
+    const layoutItem = dashboardLayoutById[widgetId];
+    const width = layoutItem?.w ?? dashboardWidgetDimensions[widgetId].w;
+    const height = layoutItem?.h ?? dashboardWidgetDimensions[widgetId].h;
+    const area = width * height;
+    if (area <= 4 || width <= 2 || height <= 1) return "compact";
+    if (area >= 14 || width >= 6 || height >= 4) return "expanded";
+    return "balanced";
   };
 
   const renderDashboardWidget = (widgetId: DashboardWidgetId) => {
-    const isDragging = draggingWidgetId === widgetId;
-    const isDropTarget = dropTarget?.widgetId === widgetId && !isDragging;
-    const widgetDimensions = dashboardResponsiveDimensions[widgetId];
-    const widgetPlacementStyle = {
-      gridColumn: `span ${widgetDimensions.w} / span ${widgetDimensions.w}`,
-      gridRow: `span ${widgetDimensions.h} / span ${widgetDimensions.h}`,
-    };
+    const displayMode = getWidgetDisplayMode(widgetId);
+    const isCompact = displayMode === "compact";
+    const isExpanded = displayMode === "expanded";
+    const titleClass = isCompact ? "text-[10px]" : "text-xs";
+    const valueClass = isCompact ? "mt-2 text-[24px]" : isExpanded ? "mt-4 text-[36px]" : "mt-3 text-[30px]";
+    const helperClass = isCompact ? "mt-1 text-[11px]" : "mt-2 text-xs";
 
     const content =
       widgetId === "taxa_conversao" ? (
         <>
-          <p className={dashboardLabelClass}>Taxa de Conversao</p>
-          <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
-          <p className="mt-2 text-xs text-slate-300">Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})</p>
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Taxa de Conversao</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.03em] text-[#22C55E]`}>{dashboardConversionRateLabel}</p>
+          <p className={`${helperClass} text-slate-300`}>Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})</p>
         </>
       ) : widgetId === "cobertura_base" ? (
         <>
-          <p className={dashboardLabelClass}>Cobertura da Base</p>
-          <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#3B82F6]">{dashboardCoveragePercentLabel}</p>
-          <p className="mt-2 text-xs text-slate-300">
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Cobertura da Base</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.03em] text-[#3B82F6]`}>{dashboardCoveragePercentLabel}</p>
+          <p className={`${helperClass} text-slate-300`}>
             {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
           </p>
-          <p className="mt-2 text-[11px] uppercase tracking-[0.08em] text-slate-500">{dashboardCoverageLabel}</p>
+          <p className={`${isCompact ? "mt-1" : "mt-2"} text-[11px] uppercase tracking-[0.08em] text-slate-500`}>{dashboardCoverageLabel}</p>
         </>
       ) : widgetId === "leads_finalizados" ? (
         <>
-          <p className={dashboardLabelClass}>Leads Finalizados</p>
-          <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-white">
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Leads Finalizados</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.03em] text-white`}>
             {Math.max(0, Math.round(animatedTotalLeadsFinalizados))}
           </p>
-          <p className="mt-2 text-xs text-slate-400">Finalizacao oficial via visao personalizada</p>
+          <p className={`${helperClass} text-slate-400`}>Finalizacao oficial via visao personalizada</p>
         </>
       ) : widgetId === "compras_efetuadas" ? (
         <>
-          <p className={dashboardLabelClass}>Compras Efetuadas</p>
-          <p className="mt-4 text-[32px] font-semibold tracking-[-0.03em] text-[#22C55E]">
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Compras Efetuadas</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.03em] text-[#22C55E]`}>
             {Math.max(0, Math.round(animatedTotalComprasEfetuadas))}
           </p>
-          <p className="mt-2 text-xs text-slate-400">Leads convertidos em clientes</p>
+          <p className={`${helperClass} text-slate-400`}>Leads convertidos em clientes</p>
         </>
       ) : widgetId === "valor_total_feito" ? (
         <>
-          <p className={dashboardLabelClass}>Valor Total Feito</p>
-          <p className="mt-4 text-[30px] font-semibold tracking-[-0.03em] text-[#22C55E]">{dashboardValorTotalFeitoLabel}</p>
-          <p className="mt-2 text-xs text-slate-400">Soma oficial das vendas por Compra efetuada</p>
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Valor Total Feito</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.03em] text-[#22C55E]`}>{dashboardValorTotalFeitoLabel}</p>
+          <p className={`${helperClass} text-slate-400`}>Soma oficial das vendas por Compra efetuada</p>
         </>
       ) : widgetId === "leads_prospectados" ? (
         <>
-          <p className={dashboardLabelClass}>Leads Prospectados</p>
-          <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Leads Prospectados</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.02em] text-[#3B82F6]`}>
             {Math.max(0, Math.round(animatedTotalLeadsProspectados))}
           </p>
         </>
       ) : widgetId === "calls_agendadas" ? (
         <>
-          <p className={dashboardLabelClass}>Calls Agendadas</p>
-          <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#22C55E]">
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Calls Agendadas</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.02em] text-[#22C55E]`}>
             {Math.max(0, Math.round(animatedTotalCallsAgendadas))}
           </p>
         </>
       ) : widgetId === "ligacoes_feitas" ? (
         <>
-          <p className={dashboardLabelClass}>Ligacoes Feitas</p>
-          <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#8B5CF6]">
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Ligacoes Feitas</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.02em] text-[#8B5CF6]`}>
             {Math.max(0, Math.round(animatedTotalLigacoesFeitas))}
           </p>
         </>
       ) : widgetId === "emails_enviados" ? (
         <>
-          <p className={dashboardLabelClass}>Emails Enviados</p>
-          <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Emails Enviados</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.02em] text-[#3B82F6]`}>
             {Math.max(0, Math.round(animatedTotalEmailsEnviados))}
           </p>
         </>
       ) : widgetId === "funil_vendas" ? (
-        <>
-          <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex h-full flex-col">
+          <div className={`${isCompact ? "mb-2" : "mb-3"} flex items-center justify-between gap-2`}>
             <p className={dashboardLabelClass}>Funil de Vendas Outbound</p>
-            <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Etapas consolidadas da operacao</p>
+            {!isCompact ? <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Etapas consolidadas da operacao</p> : null}
           </div>
-          <div className="pt-1">
+          <div className={`${isCompact ? "pt-0.5" : "pt-1"} flex-1`}>
             {dashboardFunnelSteps.map((step, index) => {
               const width =
                 step.value <= 0 ? 36 : Math.max(38, Math.min(100, Math.round((step.value / dashboardFunnelMaxValue) * 100)));
               return (
-                <div key={step.label} className={index === 0 ? "" : "-mt-2"}>
+                <div key={step.label} className={index === 0 ? "" : isCompact ? "-mt-1" : "-mt-2"}>
                   <div
-                    className="relative h-9 overflow-hidden rounded-full shadow-[0_14px_22px_rgba(2,6,23,0.34)]"
+                    className={`relative overflow-hidden rounded-full shadow-[0_14px_22px_rgba(2,6,23,0.34)] ${isCompact ? "h-7" : isExpanded ? "h-10" : "h-9"}`}
                     style={{
                       width: dashboardAnimateIn ? `${width}%` : "0%",
                       transitionDelay: `${index * 90}ms`,
@@ -1244,33 +1413,40 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                   >
                     <div className={`absolute inset-0 bg-gradient-to-r ${step.gradientClass}`} />
                     <div className={`absolute inset-0 border ${step.borderClass}`} />
-                    <div className="relative flex h-full items-center justify-between px-4">
-                      <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-100">{step.label}</span>
-                      <span className="text-sm font-semibold text-white">{step.value}</span>
+                    <div className={`relative flex h-full items-center justify-between ${isCompact ? "px-2.5" : "px-4"}`}>
+                      <span className={`${isCompact ? "text-[10px]" : "text-[11px]"} font-medium uppercase tracking-[0.08em] text-slate-100`}>
+                        {step.label}
+                      </span>
+                      <span className={`${isCompact ? "text-xs" : "text-sm"} font-semibold text-white`}>{step.value}</span>
                     </div>
                   </div>
                 </div>
               );
             })}
           </div>
-        </>
+        </div>
       ) : widgetId === "atividades_bdr" ? (
-        <>
-          <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex h-full flex-col">
+          <div className={`${isCompact ? "mb-2" : "mb-4"} flex items-center justify-between gap-2`}>
             <p className={dashboardLabelClass}>Atividades (BDR)</p>
-            <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Email + ligacoes</p>
+            {!isCompact ? <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Email + ligacoes</p> : null}
           </div>
-          <div className="space-y-4">
+          <div className={`${isCompact ? "space-y-2" : "space-y-4"} flex-1`}>
             {dashboardActivities.map((activity, index) => {
               const width =
                 activity.value <= 0 ? 8 : Math.max(14, Math.min(100, Math.round((activity.value / dashboardActivitiesMaxValue) * 100)));
               return (
-                <div key={activity.label} className="rounded-xl bg-[#111827]/80 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]">
-                  <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
+                <div
+                  key={activity.label}
+                  className={`rounded-xl bg-[#111827]/80 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)] ${isCompact ? "p-2.5" : "p-4"}`}
+                >
+                  <div className={`flex items-center justify-between gap-2 ${isCompact ? "text-[11px]" : "text-xs"} text-slate-300`}>
                     <span>{activity.label}</span>
-                    <span className={`text-2xl font-semibold tracking-[-0.02em] ${activity.metricClass}`}>{activity.animatedValue}</span>
+                    <span className={`${isCompact ? "text-lg" : "text-2xl"} font-semibold tracking-[-0.02em] ${activity.metricClass}`}>
+                      {activity.animatedValue}
+                    </span>
                   </div>
-                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-900/80">
+                  <div className={`${isCompact ? "mt-2 h-2" : "mt-3 h-2.5"} overflow-hidden rounded-full bg-slate-900/80`}>
                     <div
                       className={`h-full rounded-full transition-[width] duration-[600ms] ease-out ${activity.barClass}`}
                       style={{
@@ -1283,20 +1459,20 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               );
             })}
           </div>
-        </>
+        </div>
       ) : widgetId === "followups_pendentes" ? (
         <>
-          <p className={dashboardLabelClass}>Follow-ups Pendentes</p>
-          <p className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-[#F59E0B]">
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Follow-ups Pendentes</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.02em] text-[#F59E0B]`}>
             {Math.max(0, Math.round(animatedTotalFollowupsPendentes))}
           </p>
-          <p className="mt-2 text-xs text-slate-400">Follow-ups futuros com status ativo</p>
+          <p className={`${helperClass} text-slate-400`}>Follow-ups futuros com status ativo</p>
         </>
       ) : (
         <>
-          <p className={dashboardLabelClass}>Taxa de Conversao (Indicador)</p>
-          <p className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Taxa de Conversao (Indicador)</p>
+          <p className={`${valueClass} font-semibold tracking-[-0.02em] text-[#22C55E]`}>{dashboardConversionRateLabel}</p>
+          <p className={`${helperClass} text-slate-400`}>
             {dashboardMetrics.totalCallsAgendadas} calls agendadas para {dashboardMetrics.totalContatosDecisor} contatos com decisor
           </p>
         </>
@@ -1305,22 +1481,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     return (
       <article
         key={widgetId}
-        draggable
-        onDragStart={(event) => handleWidgetDragStart(event, widgetId)}
-        onDragOver={(event) => handleWidgetDragOver(event, widgetId)}
-        onDrop={(event) => handleWidgetDrop(event, widgetId)}
-        onDragEnd={handleWidgetDragEnd}
-        style={widgetPlacementStyle}
-        className={`${dashboardCardBaseClass} h-full min-w-0 cursor-grab active:cursor-grabbing ${isDragging ? "scale-[0.995] opacity-60" : ""} ${isDropTarget ? "ring-2 ring-sky-400/70" : ""}`}
+        className={`${dashboardCardBaseClass} h-full min-w-0 ${dashboardActiveWidgetId === widgetId && dashboardIsInteracting ? "ring-2 ring-sky-400/70" : ""}`}
       >
-        <span className="absolute right-3 top-3 select-none text-xs tracking-[0.12em] text-slate-500">::</span>
-        {isDropTarget ? (
-          <span
-            className={`pointer-events-none absolute left-3 right-3 h-[2px] rounded-full bg-sky-400/80 ${
-              dropTarget?.position === "before" ? "top-1.5" : "bottom-1.5"
-            }`}
-          />
-        ) : null}
+        <span className="crm-widget-drag-handle absolute right-3 top-3 select-none text-xs tracking-[0.12em] text-slate-500 cursor-move">::</span>
         {content}
       </article>
     );
@@ -1924,51 +2087,71 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
       {isDashboardMode ? (
         <section className="rounded-2xl bg-[#0B1220] p-3 md:p-4">
-          <div
-            className="grid gap-3"
-            style={{
-              gridTemplateColumns: `repeat(${dashboardGridColumns}, minmax(0, 1fr))`,
-              gridAutoRows: "68px",
-              gridAutoFlow: "dense",
-            }}
-            onDragOver={handleWidgetGridDragOver}
-            onDrop={handleWidgetGridDrop}
-          >
-            <div
-              className="relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_22px_46px_rgba(2,6,23,0.42)] backdrop-blur md:p-5"
-              style={{
-                gridColumn: `1 / span ${dashboardGridColumns}`,
-                gridRow: "span 2 / span 2",
-              }}
-            >
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.14),transparent_44%)]" />
-              <div className="relative flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className={dashboardLabelClass}>Painel de acompanhamento - Outbound</p>
-                  <p className="mt-1.5 max-w-3xl text-sm text-slate-300">
-                    Visao consolidada da operacao outbound com funil, atividades e indicadores de conversao.
-                  </p>
-                </div>
-                <p className="rounded-lg bg-[#111827] px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-slate-400 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
-                  Atualizado em {dashboardReferenceDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+          <div className="relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_22px_46px_rgba(2,6,23,0.42)] backdrop-blur md:p-5">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.14),transparent_44%)]" />
+            <div className="relative flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className={dashboardLabelClass}>Painel de acompanhamento - Outbound</p>
+                <p className="mt-1.5 max-w-3xl text-sm text-slate-300">
+                  Visao consolidada da operacao outbound com funil, atividades e indicadores de conversao.
                 </p>
               </div>
-
-              {dashboardLoading ? (
-                <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                  {[0, 1, 2].map((item) => (
-                    <div key={item} className="dashboard-skeleton-shimmer h-12 rounded-xl" />
-                  ))}
-                </div>
-              ) : dashboardError ? (
-                <p className="mt-3 rounded-lg border border-amber-400/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                  {dashboardError}
-                </p>
-              ) : null}
+              <p className="rounded-lg bg-[#111827] px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-slate-400 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
+                Atualizado em {dashboardReferenceDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+              </p>
             </div>
 
-            {dashboardWidgetOrder.map((widgetId) => renderDashboardWidget(widgetId))}
+            {dashboardLoading ? (
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                {[0, 1, 2].map((item) => (
+                  <div key={item} className="dashboard-skeleton-shimmer h-12 rounded-xl" />
+                ))}
+              </div>
+            ) : dashboardError ? (
+              <p className="mt-3 rounded-lg border border-amber-400/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                {dashboardError}
+              </p>
+            ) : null}
           </div>
+
+          <DashboardGridLayout
+            className="crm-dashboard-grid mt-3"
+            layout={dashboardGridLayout}
+            cols={dashboardGridColumns}
+            rowHeight={DASHBOARD_LAYOUT_ROW_HEIGHT}
+            margin={[DASHBOARD_LAYOUT_GAP, DASHBOARD_LAYOUT_GAP]}
+            containerPadding={[0, 0]}
+            compactType="vertical"
+            preventCollision={false}
+            autoSize
+            isDraggable
+            isResizable
+            resizeHandles={["s", "e", "se"]}
+            draggableHandle=".crm-widget-drag-handle"
+            onLayoutChange={syncDashboardLayoutFromGrid}
+            onDragStart={(_, item) => {
+              setDashboardIsInteracting(true);
+              setDashboardActiveWidgetId(String(item.i || "") as DashboardWidgetId);
+            }}
+            onResizeStart={(_, item) => {
+              setDashboardIsInteracting(true);
+              setDashboardActiveWidgetId(String(item.i || "") as DashboardWidgetId);
+            }}
+            onDragStop={(layout) => {
+              syncDashboardLayoutFromGrid(layout);
+              setDashboardIsInteracting(false);
+              setDashboardActiveWidgetId(null);
+            }}
+            onResizeStop={(layout) => {
+              syncDashboardLayoutFromGrid(layout);
+              setDashboardIsInteracting(false);
+              setDashboardActiveWidgetId(null);
+            }}
+          >
+            {defaultDashboardWidgetOrder.map((widgetId) => (
+              <div key={widgetId}>{renderDashboardWidget(widgetId)}</div>
+            ))}
+          </DashboardGridLayout>
 
           <style jsx>{`
             @keyframes dashboard-shimmer {
@@ -1989,6 +2172,73 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               );
               background-size: 200% 100%;
               animation: dashboard-shimmer 1.4s linear infinite;
+            }
+          `}</style>
+          <style jsx global>{`
+            .crm-dashboard-grid .react-grid-item {
+              transition: transform 190ms ease, width 190ms ease, height 190ms ease;
+            }
+
+            .crm-dashboard-grid .react-grid-item.react-grid-placeholder {
+              border-radius: 16px;
+              background: rgba(56, 189, 248, 0.18);
+              border: 1px dashed rgba(56, 189, 248, 0.5);
+            }
+
+            .crm-dashboard-grid .react-grid-item > div {
+              height: 100%;
+            }
+
+            .crm-dashboard-grid .react-resizable-handle {
+              position: absolute;
+              z-index: 20;
+            }
+
+            .crm-dashboard-grid .react-resizable-handle-se {
+              right: 6px;
+              bottom: 6px;
+              width: 12px;
+              height: 12px;
+              border-right: 2px solid rgba(148, 163, 184, 0.7);
+              border-bottom: 2px solid rgba(148, 163, 184, 0.7);
+              cursor: se-resize;
+            }
+
+            .crm-dashboard-grid .react-resizable-handle-s {
+              left: 50%;
+              bottom: 4px;
+              width: 26px;
+              height: 7px;
+              transform: translateX(-50%);
+              cursor: s-resize;
+            }
+
+            .crm-dashboard-grid .react-resizable-handle-s::before {
+              content: "";
+              display: block;
+              width: 100%;
+              height: 2px;
+              border-radius: 999px;
+              background: rgba(148, 163, 184, 0.62);
+            }
+
+            .crm-dashboard-grid .react-resizable-handle-e {
+              right: 4px;
+              top: 50%;
+              width: 7px;
+              height: 26px;
+              transform: translateY(-50%);
+              cursor: e-resize;
+            }
+
+            .crm-dashboard-grid .react-resizable-handle-e::before {
+              content: "";
+              display: block;
+              width: 2px;
+              height: 100%;
+              border-radius: 999px;
+              background: rgba(148, 163, 184, 0.62);
+              margin-left: auto;
             }
           `}</style>
         </section>
