@@ -865,9 +865,13 @@ function buildRowIdentity(row: Pick<ImportedLeadRow, "email" | "phone">): string
 }
 
 export function LeadsView({ title, filter }: LeadsViewProps) {
-  const isDashboardMode = filter === "all";
   const router = useRouter();
   const searchParams = useSearchParams();
+  const forceLeadDetailsMode = useMemo(() => {
+    const leadId = String(searchParams.get("leadId") || "").trim();
+    return Boolean(leadId);
+  }, [searchParams]);
+  const isDashboardMode = filter === "all" && !forceLeadDetailsMode;
   const { currentUser } = useAuth();
   const responsaveis = useResponsaveis();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
