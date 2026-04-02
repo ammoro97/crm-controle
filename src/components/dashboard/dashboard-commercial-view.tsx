@@ -115,12 +115,12 @@ function iconCalendar() {
 const metricGroups: MetricGroup[] = [
   {
     id: "ativacao_contato",
-    title: "Ativação e contato inicial",
+    title: "Ativacao e contato inicial",
     cards: [
       {
         key: "acionamentoBase",
         title: "Acionamento Base",
-        description: "Cobertura média de acionamento na base outbound.",
+        description: "Formula: (ligacoes feitas / leads outbound ativos) x 100.",
         accentFrom: "#3B82F6",
         accentTo: "#1D4ED8",
         icon: iconPhone(),
@@ -130,7 +130,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "percentualAtendimento",
         title: "% Atendimento",
-        description: "Percentual de ligações que foram efetivamente atendidas.",
+        description: "Formula: (ligacoes atendidas / ligacoes feitas) x 100.",
         accentFrom: "#8B5CF6",
         accentTo: "#6D28D9",
         icon: iconUsers(),
@@ -139,8 +139,8 @@ const metricGroups: MetricGroup[] = [
       },
       {
         key: "conversaoLigacao",
-        title: "Conversão Ligação",
-        description: "Conversão entre contato com decisor e agendamento.",
+        title: "Conversao Ligacao",
+        description: "Formula: (calls agendadas / contatos com decisor) x 100.",
         accentFrom: "#22C55E",
         accentTo: "#15803D",
         icon: iconArrowUp(),
@@ -151,12 +151,12 @@ const metricGroups: MetricGroup[] = [
   },
   {
     id: "qualificacao_andamento",
-    title: "Qualificação e andamento",
+    title: "Qualificacao e andamento",
     cards: [
       {
         key: "followUpsPendentes",
         title: "Follow ups Pendentes",
-        description: "Quantidade de retornos pendentes para os próximos ciclos.",
+        description: "Follow-ups ativos com data/hora futura no outbound.",
         accentFrom: "#F59E0B",
         accentTo: "#D97706",
         icon: iconClock(),
@@ -165,7 +165,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "leadDesqualificado",
         title: "Lead Desqualificado",
-        description: "Leads outbound desqualificados durante a cadência ativa.",
+        description: "Total de leads outbound com status Perdido.",
         accentFrom: "#EF4444",
         accentTo: "#B91C1C",
         icon: iconWarning(),
@@ -174,7 +174,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "noShow",
         title: "No Show",
-        description: "Agendamentos sem comparecimento dentro do funil comercial.",
+        description: "Eventos outbound com marcacao de nao comparecimento.",
         accentFrom: "#F97316",
         accentTo: "#C2410C",
         icon: iconCalendar(),
@@ -189,7 +189,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "percentualCpc",
         title: "% CPC",
-        description: "Percentual de calls convertidas em compra concluída.",
+        description: "Formula: (compras efetuadas / calls agendadas) x 100.",
         accentFrom: "#06B6D4",
         accentTo: "#0E7490",
         icon: iconChart(),
@@ -199,7 +199,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "vendasRealizadas",
         title: "Vendas Realizadas",
-        description: "Total de vendas efetivadas no fluxo comercial oficial.",
+        description: "Finalizacoes oficiais com motivo Compra efetuada.",
         accentFrom: "#22C55E",
         accentTo: "#15803D",
         icon: iconCheck(),
@@ -208,7 +208,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "faturamento",
         title: "Faturamento",
-        description: "Receita total gerada pelas vendas registradas no CRM.",
+        description: "Soma dos valores de venda das compras efetuadas.",
         accentFrom: "#14B8A6",
         accentTo: "#0F766E",
         icon: iconMoney(),
@@ -265,7 +265,7 @@ export function DashboardCommercialView() {
   return (
     <div className="space-y-4">
       <PageTopbar
-        title="Dashboard"
+        title="Leads"
         showSearch={false}
         actionsSlot={
           <button type="button" className="btn-ghost h-10 px-4 text-sm" onClick={refresh}>
@@ -274,9 +274,9 @@ export function DashboardCommercialView() {
         }
       />
 
-      <p className="-mt-2 mb-1 px-1 text-sm text-slate-300">Visao comercial consolidada da operacao outbound.</p>
+      <p className="-mt-2 mb-1 px-1 text-sm text-slate-300">Painel comercial outbound com formulas operacionais e dados consolidados.</p>
 
-      <section className="rounded-2xl border border-slate-800/80 bg-[#0B1220]/90 p-3 shadow-[0_28px_80px_rgba(2,6,23,0.45)] md:p-4">
+      <section className="rounded-3xl border border-slate-800/80 bg-[#0B1220]/95 p-3 shadow-[0_36px_90px_rgba(2,6,23,0.5)] md:p-4">
         {error ? (
           <div className="rounded-xl border border-rose-400/35 bg-rose-500/10 p-4 text-sm text-rose-100">
             <p className="font-semibold">Erro ao carregar dashboard</p>
@@ -287,7 +287,7 @@ export function DashboardCommercialView() {
           </div>
         ) : null}
 
-        <div className="grid gap-3 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
           <DashboardFunnel
             ligacoes={metrics.funnel.ligacoes}
             atendidas={metrics.funnel.atendidas}
@@ -299,7 +299,7 @@ export function DashboardCommercialView() {
             {metricGroups.map((group) => (
               <section
                 key={group.id}
-                className="rounded-xl border border-slate-800/80 bg-gradient-to-br from-slate-900/70 to-slate-950/40 p-3"
+                className="rounded-2xl border border-slate-800/80 bg-gradient-to-br from-slate-900/78 to-slate-950/40 p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)]"
               >
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-300">{group.title}</h3>
