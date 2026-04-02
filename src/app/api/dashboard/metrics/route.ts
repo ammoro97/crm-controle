@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCallLogs } from "@/lib/calls-store";
 import { isAgendaEventLinkedToLead, normalizeAgendaEventStatus, normalizeText } from "@/lib/agenda-events";
+import { readLeadsCollection } from "@/lib/leads-customers-store";
 import { readDataFile } from "@/lib/storage-paths";
 import { requireAuth } from "@/lib/require-auth";
 import type { DashboardMetrics } from "@/types/dashboard";
@@ -14,7 +15,6 @@ type DashboardMetricsInput = {
   wrapups?: PostCallWrapup[];
 };
 
-const LEADS_FILE = "crm.leads.v1.json";
 const MEETINGS_FILE = "crm.agenda.meetings.v1.json";
 const LEAD_FINALIZATIONS_FILE = "crm.leads.finalizations.v1.json";
 const WRAPUPS_FILE = "crm.calls.wrapups.v1.json";
@@ -190,7 +190,7 @@ function sumFaturamento(finalizations: LeadFinalizationRecord[]): number {
 
 async function readServerSnapshot() {
   const [leads, meetings, finalizations, wrapups] = await Promise.all([
-    readDataFile<Lead[]>(LEADS_FILE, []),
+    readLeadsCollection(),
     readDataFile<Meeting[]>(MEETINGS_FILE, []),
     readDataFile<LeadFinalizationRecord[]>(LEAD_FINALIZATIONS_FILE, []),
     readDataFile<PostCallWrapup[]>(WRAPUPS_FILE, []),

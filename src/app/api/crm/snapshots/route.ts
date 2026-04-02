@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readDataFile, writeDataFile } from "@/lib/storage-paths";
+import { readCustomersCollection, readLeadsCollection, writeCustomersCollection, writeLeadsCollection } from "@/lib/leads-customers-store";
 import { requireAuth } from "@/lib/require-auth";
 import type { Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
 
@@ -10,9 +11,7 @@ type SnapshotPayload = {
   leadFinalizations?: LeadFinalizationRecord[];
 };
 
-const LEADS_FILE = "crm.leads.v1.json";
 const MEETINGS_FILE = "crm.agenda.meetings.v1.json";
-const CUSTOMERS_FILE = "crm.customers.v1.json";
 const LEAD_FINALIZATIONS_FILE = "crm.leads.finalizations.v1.json";
 
 function asArray<T>(value: unknown): T[] | null {
@@ -25,9 +24,9 @@ export async function GET() {
 
   try {
     const [leads, meetings, customers, leadFinalizations] = await Promise.all([
-      readDataFile<Lead[]>(LEADS_FILE, []),
+      readLeadsCollection(),
       readDataFile<Meeting[]>(MEETINGS_FILE, []),
-      readDataFile<Lead[]>(CUSTOMERS_FILE, []),
+      readCustomersCollection(),
       readDataFile<LeadFinalizationRecord[]>(LEAD_FINALIZATIONS_FILE, []),
     ]);
 
@@ -58,7 +57,7 @@ export async function POST(request: NextRequest) {
 
     const leads = asArray<Lead>(body?.leads);
     if (leads) {
-      writes.push(writeDataFile(LEADS_FILE, leads));
+      writes.push(writeLeadsCollection(leads));
     }
 
     const meetings = asArray<Meeting>(body?.meetings);
@@ -68,7 +67,7 @@ export async function POST(request: NextRequest) {
 
     const customers = asArray<Lead>(body?.customers);
     if (customers) {
-      writes.push(writeDataFile(CUSTOMERS_FILE, customers));
+      writes.push(writeCustomersCollection(customers));
     }
 
     const leadFinalizations = asArray<LeadFinalizationRecord>(body?.leadFinalizations);
@@ -92,4 +91,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
