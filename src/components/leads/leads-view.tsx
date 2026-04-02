@@ -664,10 +664,30 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   const dashboardFunnelSteps = useMemo(
     () => [
-      { label: "Leads Prospectados", value: dashboardMetrics.funnel.leadsProspectados, color: "bg-sky-500/60" },
-      { label: "Ligacoes Atendidas", value: dashboardMetrics.funnel.ligacoesAtendidas, color: "bg-indigo-500/60" },
-      { label: "Contato com Decisor", value: dashboardMetrics.funnel.contatosComDecisor, color: "bg-amber-500/60" },
-      { label: "Calls Agendadas", value: dashboardMetrics.funnel.callsAgendadas, color: "bg-emerald-500/60" },
+      {
+        label: "Leads Prospectados",
+        value: dashboardMetrics.funnel.leadsProspectados,
+        borderClass: "border-[#3B82F6]/40",
+        gradientClass: "from-[#3B82F6]/40 via-[#2563EB]/30 to-[#1E40AF]/15",
+      },
+      {
+        label: "Ligacoes Atendidas",
+        value: dashboardMetrics.funnel.ligacoesAtendidas,
+        borderClass: "border-[#8B5CF6]/40",
+        gradientClass: "from-[#8B5CF6]/40 via-[#7C3AED]/28 to-[#5B21B6]/12",
+      },
+      {
+        label: "Contato com Decisor",
+        value: dashboardMetrics.funnel.contatosComDecisor,
+        borderClass: "border-[#F59E0B]/45",
+        gradientClass: "from-[#F59E0B]/38 via-[#D97706]/28 to-[#92400E]/14",
+      },
+      {
+        label: "Calls Agendadas",
+        value: dashboardMetrics.funnel.callsAgendadas,
+        borderClass: "border-[#22C55E]/40",
+        gradientClass: "from-[#22C55E]/38 via-[#16A34A]/25 to-[#166534]/12",
+      },
     ],
     [dashboardMetrics.funnel.callsAgendadas, dashboardMetrics.funnel.contatosComDecisor, dashboardMetrics.funnel.leadsProspectados, dashboardMetrics.funnel.ligacoesAtendidas],
   );
@@ -678,8 +698,18 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   const dashboardActivities = useMemo(
     () => [
-      { label: "Emails Enviados", value: dashboardMetrics.totalEmailsEnviados, color: "bg-cyan-500/65" },
-      { label: "Ligacoes Feitas", value: dashboardMetrics.totalLigacoesFeitas, color: "bg-violet-500/65" },
+      {
+        label: "Emails Enviados",
+        value: dashboardMetrics.totalEmailsEnviados,
+        barClass: "bg-gradient-to-r from-[#3B82F6] to-[#60A5FA]",
+        metricClass: "text-[#93C5FD]",
+      },
+      {
+        label: "Ligacoes Feitas",
+        value: dashboardMetrics.totalLigacoesFeitas,
+        barClass: "bg-gradient-to-r from-[#8B5CF6] to-[#A78BFA]",
+        metricClass: "text-[#C4B5FD]",
+      },
     ],
     [dashboardMetrics.totalEmailsEnviados, dashboardMetrics.totalLigacoesFeitas],
   );
@@ -687,6 +717,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const dashboardActivitiesMaxValue = useMemo(() => {
     return Math.max(1, ...dashboardActivities.map((activity) => activity.value));
   }, [dashboardActivities]);
+
+  const dashboardCardBaseClass =
+    "group relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.03),0_24px_50px_rgba(2,6,23,0.42)] backdrop-blur transition-all duration-200 hover:-translate-y-0.5";
+
+  const dashboardLabelClass = "text-xs uppercase tracking-[0.08em] text-slate-400";
 
   const detailLead = useMemo(() => leads.find((lead) => lead.id === detailLeadId) ?? null, [detailLeadId, leads]);
 
@@ -1241,92 +1276,102 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       />
 
       {isDashboardMode ? (
-        <section className="space-y-3">
-          <div className="panel p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+        <section className="space-y-6 rounded-2xl bg-[#0B1220] p-4 md:p-6">
+          <div className="relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.03),0_20px_48px_rgba(2,6,23,0.45)] backdrop-blur">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.12),transparent_42%)]" />
+            <div className="relative flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.08em] text-muted">Painel de acompanhamento - Outbound</p>
-                <p className="mt-1 text-sm text-slate-300">
+                <p className={dashboardLabelClass}>Painel de acompanhamento - Outbound</p>
+                <p className="mt-1.5 max-w-3xl text-sm text-slate-300">
                   Visao consolidada da operacao outbound com funil, atividades e indicadores de conversao.
                 </p>
               </div>
-              <p className="rounded-md border border-border bg-slate-900/60 px-2 py-1 text-[11px] text-slate-400">
+              <p className="rounded-lg bg-[#111827] px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-slate-400 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
                 Atualizado em {dashboardReferenceDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
               </p>
             </div>
+
             {dashboardLoading ? (
-              <p className="mt-2 text-xs text-slate-400">Carregando metricas do painel...</p>
+              <div className="relative mt-5 grid gap-3 sm:grid-cols-3">
+                {[0, 1, 2].map((item) => (
+                  <div
+                    key={item}
+                    className="h-14 animate-pulse rounded-xl bg-gradient-to-r from-slate-800/70 via-slate-700/40 to-slate-800/70"
+                  />
+                ))}
+              </div>
             ) : dashboardError ? (
-              <p className="mt-2 rounded-md border border-amber-400/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-200">
+              <p className="mt-4 rounded-lg border border-amber-400/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                 {dashboardError}
               </p>
             ) : null}
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-3">
-            <article className="panel p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Total de Leads Prospectados</p>
-              <p className="mt-2 text-3xl font-semibold text-slate-100">{dashboardMetrics.totalLeadsProspectados}</p>
-              <p className="mt-1 text-xs text-slate-400">Base outbound considerada no painel</p>
+          <div className="grid gap-6 lg:grid-cols-3">
+            <article className={dashboardCardBaseClass}>
+              <p className={dashboardLabelClass}>Total de Leads Prospectados</p>
+              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-slate-100">{dashboardMetrics.totalLeadsProspectados}</p>
+              <p className="mt-2 text-xs text-slate-400">Base outbound considerada no painel</p>
             </article>
 
-            <article className="panel p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Calls Agendadas</p>
-              <p className="mt-2 text-3xl font-semibold text-slate-100">{dashboardMetrics.totalCallsAgendadas}</p>
-              <p className="mt-1 text-xs text-slate-400">Leads com call futura agendada</p>
+            <article className={dashboardCardBaseClass}>
+              <p className={dashboardLabelClass}>Calls Agendadas</p>
+              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#34D399]">{dashboardMetrics.totalCallsAgendadas}</p>
+              <p className="mt-2 text-xs text-slate-400">Leads com call futura agendada</p>
             </article>
 
-            <article className="panel p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Taxa de Conversao</p>
-              <p className="mt-2 text-3xl font-semibold text-emerald-300">{dashboardConversionRateLabel}</p>
-              <p className="mt-1 text-xs text-slate-400">
+            <article className={dashboardCardBaseClass}>
+              <p className={dashboardLabelClass}>Taxa de Conversao</p>
+              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
+              <p className="mt-2 text-xs text-slate-400">
                 Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})
               </p>
             </article>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-3">
-            <article className="panel p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Cobertura da Base</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-100">{dashboardCoverageLabel}</p>
-              <p className="mt-1 text-xs text-slate-400">
+          <div className="grid gap-6 lg:grid-cols-3">
+            <article className={dashboardCardBaseClass}>
+              <p className={dashboardLabelClass}>Cobertura da Base</p>
+              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#3B82F6]">{dashboardCoveragePercentLabel}</p>
+              <p className="mt-2 text-xs text-slate-300">
                 {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
               </p>
-              <p className="mt-1 text-[11px] text-slate-500">Equivalente percentual: {dashboardCoveragePercentLabel}</p>
+              <p className="mt-2 text-[11px] uppercase tracking-[0.08em] text-slate-500">{dashboardCoverageLabel}</p>
             </article>
 
-            <article className="panel p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Total de Leads Finalizados</p>
-              <p className="mt-2 text-3xl font-semibold text-slate-100">{dashboardMetrics.totalLeadsFinalizados}</p>
-              <p className="mt-1 text-xs text-slate-400">Conta apenas finalizacao oficial via visao personalizada</p>
+            <article className={dashboardCardBaseClass}>
+              <p className={dashboardLabelClass}>Total de Leads Finalizados</p>
+              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-slate-100">{dashboardMetrics.totalLeadsFinalizados}</p>
+              <p className="mt-2 text-xs text-slate-400">Conta apenas finalizacao oficial via visao personalizada</p>
             </article>
 
-            <article className="panel p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Compras Efetuadas</p>
-              <p className="mt-2 text-3xl font-semibold text-emerald-300">{dashboardMetrics.totalComprasEfetuadas}</p>
-              <p className="mt-1 text-xs text-slate-400">Leads finalizados com motivo compra efetuada</p>
+            <article className={dashboardCardBaseClass}>
+              <p className={dashboardLabelClass}>Compras Efetuadas</p>
+              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#22C55E]">{dashboardMetrics.totalComprasEfetuadas}</p>
+              <p className="mt-2 text-xs text-slate-400">Leads finalizados com motivo compra efetuada</p>
             </article>
           </div>
 
-          <div className="grid gap-3 xl:grid-cols-[1.4fr_1fr]">
-            <article className="panel p-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Funil de Vendas Outbound</p>
-                <p className="text-[11px] text-slate-500">Etapas consolidadas da operacao</p>
+          <div className="grid gap-6 xl:grid-cols-[1.45fr_1fr]">
+            <article className={dashboardCardBaseClass}>
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <p className={dashboardLabelClass}>Funil de Vendas Outbound</p>
+                <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Etapas consolidadas da operacao</p>
               </div>
-              <div className="space-y-2.5">
-                {dashboardFunnelSteps.map((step) => {
-                  const width = step.value <= 0
-                    ? 8
-                    : Math.max(14, Math.min(100, Math.round((step.value / dashboardFunnelMaxValue) * 100)));
+              <div className="space-y-3">
+                {dashboardFunnelSteps.map((step, index) => {
+                  const width =
+                    step.value <= 0 ? 36 : Math.max(38, Math.min(100, Math.round((step.value / dashboardFunnelMaxValue) * 100)));
                   return (
                     <div key={step.label} className="space-y-1.5">
                       <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
                         <span>{step.label}</span>
                         <span className="font-semibold text-slate-100">{step.value}</span>
                       </div>
-                      <div className="h-2.5 overflow-hidden rounded-full bg-slate-800/90">
-                        <div className={`h-full rounded-full ${step.color}`} style={{ width: `${width}%` }} />
+                      <div className="mx-auto transition-all duration-700 ease-out" style={{ width: `${width}%`, transitionDelay: `${index * 70}ms` }}>
+                        <div className={`rounded-xl border px-4 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] ${step.borderClass} bg-gradient-to-r ${step.gradientClass}`}>
+                          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-200">{step.label}</p>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1334,24 +1379,26 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               </div>
             </article>
 
-            <article className="panel p-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Atividades (BDR)</p>
-                <p className="text-[11px] text-slate-500">Email + ligacoes</p>
+            <article className={dashboardCardBaseClass}>
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <p className={dashboardLabelClass}>Atividades (BDR)</p>
+                <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Email + ligacoes</p>
               </div>
-              <div className="space-y-3">
-                {dashboardActivities.map((activity) => {
-                  const width = activity.value <= 0
-                    ? 8
-                    : Math.max(14, Math.min(100, Math.round((activity.value / dashboardActivitiesMaxValue) * 100)));
+              <div className="space-y-4">
+                {dashboardActivities.map((activity, index) => {
+                  const width =
+                    activity.value <= 0 ? 8 : Math.max(14, Math.min(100, Math.round((activity.value / dashboardActivitiesMaxValue) * 100)));
                   return (
-                    <div key={activity.label} className="space-y-1.5">
+                    <div key={activity.label} className="rounded-xl bg-[#111827]/80 p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
                       <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
                         <span>{activity.label}</span>
-                        <span className="font-semibold text-slate-100">{activity.value}</span>
+                        <span className={`text-xl font-semibold tracking-[-0.01em] ${activity.metricClass}`}>{activity.value}</span>
                       </div>
-                      <div className="h-2.5 overflow-hidden rounded-full bg-slate-800/90">
-                        <div className={`h-full rounded-full ${activity.color}`} style={{ width: `${width}%` }} />
+                      <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-900/80">
+                        <div
+                          className={`h-full rounded-full transition-[width] duration-700 ease-out ${activity.barClass}`}
+                          style={{ width: `${width}%`, transitionDelay: `${index * 80}ms` }}
+                        />
                       </div>
                     </div>
                   );
@@ -1360,16 +1407,16 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             </article>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-2">
-            <article className="panel p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Follow-ups Pendentes</p>
-              <p className="mt-2 text-3xl font-semibold text-slate-100">{dashboardMetrics.totalFollowupsPendentes}</p>
-              <p className="mt-1 text-xs text-slate-400">Follow-ups futuros com status ativo</p>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <article className={dashboardCardBaseClass}>
+              <p className={dashboardLabelClass}>Follow-ups Pendentes</p>
+              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#F59E0B]">{dashboardMetrics.totalFollowupsPendentes}</p>
+              <p className="mt-2 text-xs text-slate-400">Follow-ups futuros com status ativo</p>
             </article>
-            <article className="panel p-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Taxa de Conversao (Indicador)</p>
-              <p className="mt-2 text-3xl font-semibold text-emerald-300">{dashboardConversionRateLabel}</p>
-              <p className="mt-1 text-xs text-slate-400">
+            <article className={dashboardCardBaseClass}>
+              <p className={dashboardLabelClass}>Taxa de Conversao (Indicador)</p>
+              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
+              <p className="mt-2 text-xs text-slate-400">
                 {dashboardMetrics.totalCallsAgendadas} calls agendadas para {dashboardMetrics.totalContatosDecisor} contatos com decisor
               </p>
             </article>
