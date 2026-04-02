@@ -199,6 +199,43 @@ function nowStamp() {
   };
 }
 
+function useCountUp(target: number, duration = 800): number {
+  const [displayValue, setDisplayValue] = useState(target);
+  const previousValueRef = useRef(target);
+
+  useEffect(() => {
+    const startValue = previousValueRef.current;
+    const endValue = target;
+    previousValueRef.current = target;
+
+    if (!Number.isFinite(startValue) || !Number.isFinite(endValue) || startValue === endValue) {
+      setDisplayValue(endValue);
+      return;
+    }
+
+    let animationFrame = 0;
+    const startAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+    const step = (timestamp: number) => {
+      const elapsed = timestamp - startAt;
+      const progress = Math.min(1, elapsed / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const next = startValue + (endValue - startValue) * eased;
+      setDisplayValue(next);
+      if (progress < 1) {
+        animationFrame = window.requestAnimationFrame(step);
+      }
+    };
+
+    animationFrame = window.requestAnimationFrame(step);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [duration, target]);
+
+  return displayValue;
+}
+
 function historyEvent(owner: string, eventType: string, description: string): LeadHistoryEvent {
   const stamp = nowStamp();
   return {
@@ -418,6 +455,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [dashboardReferenceDate, setDashboardReferenceDate] = useState<Date>(() => new Date());
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [dashboardAnimateIn, setDashboardAnimateIn] = useState(false);
   const [draftLead, setDraftLead] = useState<Lead | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
@@ -650,43 +688,54 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     });
   }, [dashboardCallLogs, dashboardReferenceDate, dashboardWrapups, leadFinalizations, leads, meetings]);
 
+  const animatedConversionRate = useCountUp(dashboardMetrics.taxaConversao, 860);
+  const animatedCoverageRatio = useCountUp(dashboardMetrics.coberturaBaseRatio, 860);
+  const animatedCoveragePercent = useCountUp(dashboardMetrics.coberturaBasePercent, 860);
+  const animatedTotalLeadsProspectados = useCountUp(dashboardMetrics.totalLeadsProspectados, 760);
+  const animatedTotalCallsAgendadas = useCountUp(dashboardMetrics.totalCallsAgendadas, 760);
+  const animatedTotalLeadsFinalizados = useCountUp(dashboardMetrics.totalLeadsFinalizados, 760);
+  const animatedTotalComprasEfetuadas = useCountUp(dashboardMetrics.totalComprasEfetuadas, 760);
+  const animatedTotalFollowupsPendentes = useCountUp(dashboardMetrics.totalFollowupsPendentes, 760);
+  const animatedTotalEmailsEnviados = useCountUp(dashboardMetrics.totalEmailsEnviados, 760);
+  const animatedTotalLigacoesFeitas = useCountUp(dashboardMetrics.totalLigacoesFeitas, 760);
+
   const dashboardConversionRateLabel = useMemo(() => {
-    return `${dashboardMetrics.taxaConversao.toFixed(1).replace(".", ",")}%`;
-  }, [dashboardMetrics.taxaConversao]);
+    return `${animatedConversionRate.toFixed(1).replace(".", ",")}%`;
+  }, [animatedConversionRate]);
 
   const dashboardCoverageLabel = useMemo(() => {
-    return `${dashboardMetrics.coberturaBaseRatio.toFixed(2).replace(".", ",")} ligacoes/lead`;
-  }, [dashboardMetrics.coberturaBaseRatio]);
+    return `${animatedCoverageRatio.toFixed(2).replace(".", ",")} ligacoes/lead`;
+  }, [animatedCoverageRatio]);
 
   const dashboardCoveragePercentLabel = useMemo(() => {
-    return `${dashboardMetrics.coberturaBasePercent.toFixed(1).replace(".", ",")}%`;
-  }, [dashboardMetrics.coberturaBasePercent]);
+    return `${animatedCoveragePercent.toFixed(1).replace(".", ",")}%`;
+  }, [animatedCoveragePercent]);
 
   const dashboardFunnelSteps = useMemo(
     () => [
       {
         label: "Leads Prospectados",
         value: dashboardMetrics.funnel.leadsProspectados,
-        borderClass: "border-[#3B82F6]/40",
-        gradientClass: "from-[#3B82F6]/40 via-[#2563EB]/30 to-[#1E40AF]/15",
+        borderClass: "border-[#3B82F6]/45",
+        gradientClass: "from-[#3B82F6] to-[#1D4ED8]",
       },
       {
         label: "Ligacoes Atendidas",
         value: dashboardMetrics.funnel.ligacoesAtendidas,
-        borderClass: "border-[#8B5CF6]/40",
-        gradientClass: "from-[#8B5CF6]/40 via-[#7C3AED]/28 to-[#5B21B6]/12",
+        borderClass: "border-[#8B5CF6]/45",
+        gradientClass: "from-[#8B5CF6] to-[#6D28D9]",
       },
       {
         label: "Contato com Decisor",
         value: dashboardMetrics.funnel.contatosComDecisor,
-        borderClass: "border-[#F59E0B]/45",
-        gradientClass: "from-[#F59E0B]/38 via-[#D97706]/28 to-[#92400E]/14",
+        borderClass: "border-[#F59E0B]/50",
+        gradientClass: "from-[#F59E0B] to-[#B45309]",
       },
       {
         label: "Calls Agendadas",
         value: dashboardMetrics.funnel.callsAgendadas,
-        borderClass: "border-[#22C55E]/40",
-        gradientClass: "from-[#22C55E]/38 via-[#16A34A]/25 to-[#166534]/12",
+        borderClass: "border-[#22C55E]/45",
+        gradientClass: "from-[#22C55E] to-[#15803D]",
       },
     ],
     [dashboardMetrics.funnel.callsAgendadas, dashboardMetrics.funnel.contatosComDecisor, dashboardMetrics.funnel.leadsProspectados, dashboardMetrics.funnel.ligacoesAtendidas],
@@ -701,17 +750,19 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       {
         label: "Emails Enviados",
         value: dashboardMetrics.totalEmailsEnviados,
+        animatedValue: Math.max(0, Math.round(animatedTotalEmailsEnviados)),
         barClass: "bg-gradient-to-r from-[#3B82F6] to-[#60A5FA]",
         metricClass: "text-[#93C5FD]",
       },
       {
         label: "Ligacoes Feitas",
         value: dashboardMetrics.totalLigacoesFeitas,
+        animatedValue: Math.max(0, Math.round(animatedTotalLigacoesFeitas)),
         barClass: "bg-gradient-to-r from-[#8B5CF6] to-[#A78BFA]",
         metricClass: "text-[#C4B5FD]",
       },
     ],
-    [dashboardMetrics.totalEmailsEnviados, dashboardMetrics.totalLigacoesFeitas],
+    [animatedTotalEmailsEnviados, animatedTotalLigacoesFeitas, dashboardMetrics.totalEmailsEnviados, dashboardMetrics.totalLigacoesFeitas],
   );
 
   const dashboardActivitiesMaxValue = useMemo(() => {
@@ -719,9 +770,38 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   }, [dashboardActivities]);
 
   const dashboardCardBaseClass =
-    "group relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.03),0_24px_50px_rgba(2,6,23,0.42)] backdrop-blur transition-all duration-200 hover:-translate-y-0.5";
+    "group relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-6 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_16px_34px_rgba(2,6,23,0.35)] backdrop-blur transition-all duration-200 hover:-translate-y-[2px] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.3)]";
 
   const dashboardLabelClass = "text-xs uppercase tracking-[0.08em] text-slate-400";
+
+  const dashboardAnimationSeed = useMemo(() => {
+    return [
+      dashboardMetrics.totalLeadsProspectados,
+      dashboardMetrics.totalCallsAgendadas,
+      dashboardMetrics.taxaConversao.toFixed(3),
+      dashboardMetrics.totalEmailsEnviados,
+      dashboardMetrics.totalLigacoesFeitas,
+      dashboardMetrics.totalFollowupsPendentes,
+    ].join("|");
+  }, [
+    dashboardMetrics.taxaConversao,
+    dashboardMetrics.totalCallsAgendadas,
+    dashboardMetrics.totalEmailsEnviados,
+    dashboardMetrics.totalFollowupsPendentes,
+    dashboardMetrics.totalLeadsProspectados,
+    dashboardMetrics.totalLigacoesFeitas,
+  ]);
+
+  useEffect(() => {
+    if (!isDashboardMode) return;
+    setDashboardAnimateIn(false);
+    const timeoutId = window.setTimeout(() => {
+      setDashboardAnimateIn(true);
+    }, 70);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [dashboardAnimationSeed, isDashboardMode]);
 
   const detailLead = useMemo(() => leads.find((lead) => lead.id === detailLeadId) ?? null, [detailLeadId, leads]);
 
@@ -1277,27 +1357,24 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
       {isDashboardMode ? (
         <section className="space-y-6 rounded-2xl bg-[#0B1220] p-4 md:p-6">
-          <div className="relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.03),0_20px_48px_rgba(2,6,23,0.45)] backdrop-blur">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.12),transparent_42%)]" />
+          <div className="relative overflow-hidden rounded-2xl bg-[#0F172A]/95 p-6 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_22px_46px_rgba(2,6,23,0.42)] backdrop-blur">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.14),transparent_44%)]" />
             <div className="relative flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className={dashboardLabelClass}>Painel de acompanhamento - Outbound</p>
-                <p className="mt-1.5 max-w-3xl text-sm text-slate-300">
+                <p className="mt-2 max-w-3xl text-sm text-slate-300">
                   Visao consolidada da operacao outbound com funil, atividades e indicadores de conversao.
                 </p>
               </div>
-              <p className="rounded-lg bg-[#111827] px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-slate-400 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+              <p className="rounded-lg bg-[#111827] px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-slate-400 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
                 Atualizado em {dashboardReferenceDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
               </p>
             </div>
 
             {dashboardLoading ? (
-              <div className="relative mt-5 grid gap-3 sm:grid-cols-3">
+              <div className="mt-6 grid gap-3 sm:grid-cols-3">
                 {[0, 1, 2].map((item) => (
-                  <div
-                    key={item}
-                    className="h-14 animate-pulse rounded-xl bg-gradient-to-r from-slate-800/70 via-slate-700/40 to-slate-800/70"
-                  />
+                  <div key={item} className="dashboard-skeleton-shimmer h-16 rounded-xl" />
                 ))}
               </div>
             ) : dashboardError ? (
@@ -1307,70 +1384,80 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             ) : null}
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-3">
-            <article className={dashboardCardBaseClass}>
-              <p className={dashboardLabelClass}>Total de Leads Prospectados</p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-slate-100">{dashboardMetrics.totalLeadsProspectados}</p>
-              <p className="mt-2 text-xs text-slate-400">Base outbound considerada no painel</p>
+          <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr_1fr]">
+            <article className={`${dashboardCardBaseClass} min-h-[220px]`}>
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_35%,rgba(34,197,94,0.18),transparent_55%)]" />
+              <div className="relative">
+                <p className={dashboardLabelClass}>Taxa de Conversao</p>
+                <p className="mt-4 text-[40px] font-semibold leading-none tracking-[-0.03em] text-[#22C55E] drop-shadow-[0_0_16px_rgba(34,197,94,0.22)]">
+                  {dashboardConversionRateLabel}
+                </p>
+                <p className="mt-3 text-xs text-slate-300">
+                  Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})
+                </p>
+                <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl bg-[#111827]/80 p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
+                    <p className={dashboardLabelClass}>Leads Prospectados</p>
+                    <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-[#3B82F6]">
+                      {Math.max(0, Math.round(animatedTotalLeadsProspectados))}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-[#111827]/80 p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
+                    <p className={dashboardLabelClass}>Calls Agendadas</p>
+                    <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-[#22C55E]">
+                      {Math.max(0, Math.round(animatedTotalCallsAgendadas))}
+                    </p>
+                  </div>
+                </div>
+              </div>
             </article>
 
-            <article className={dashboardCardBaseClass}>
-              <p className={dashboardLabelClass}>Calls Agendadas</p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#34D399]">{dashboardMetrics.totalCallsAgendadas}</p>
-              <p className="mt-2 text-xs text-slate-400">Leads com call futura agendada</p>
-            </article>
-
-            <article className={dashboardCardBaseClass}>
-              <p className={dashboardLabelClass}>Taxa de Conversao</p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
-              <p className="mt-2 text-xs text-slate-400">
-                Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})
-              </p>
-            </article>
-          </div>
-
-          <div className="grid gap-6 lg:grid-cols-3">
-            <article className={dashboardCardBaseClass}>
+            <article className={`${dashboardCardBaseClass} min-h-[220px]`}>
               <p className={dashboardLabelClass}>Cobertura da Base</p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#3B82F6]">{dashboardCoveragePercentLabel}</p>
+              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-[#3B82F6]">{dashboardCoveragePercentLabel}</p>
               <p className="mt-2 text-xs text-slate-300">
                 {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
               </p>
-              <p className="mt-2 text-[11px] uppercase tracking-[0.08em] text-slate-500">{dashboardCoverageLabel}</p>
+              <p className="mt-3 text-[11px] uppercase tracking-[0.08em] text-slate-500">{dashboardCoverageLabel}</p>
             </article>
 
-            <article className={dashboardCardBaseClass}>
+            <article className={`${dashboardCardBaseClass} min-h-[220px]`}>
               <p className={dashboardLabelClass}>Total de Leads Finalizados</p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-slate-100">{dashboardMetrics.totalLeadsFinalizados}</p>
+              <p className="mt-4 text-[28px] font-semibold tracking-[-0.02em] text-white">
+                {Math.max(0, Math.round(animatedTotalLeadsFinalizados))}
+              </p>
               <p className="mt-2 text-xs text-slate-400">Conta apenas finalizacao oficial via visao personalizada</p>
-            </article>
-
-            <article className={dashboardCardBaseClass}>
-              <p className={dashboardLabelClass}>Compras Efetuadas</p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#22C55E]">{dashboardMetrics.totalComprasEfetuadas}</p>
-              <p className="mt-2 text-xs text-slate-400">Leads finalizados com motivo compra efetuada</p>
+              <p className={`${dashboardLabelClass} mt-6`}>Compras Efetuadas</p>
+              <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-[#22C55E]">
+                {Math.max(0, Math.round(animatedTotalComprasEfetuadas))}
+              </p>
             </article>
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[1.45fr_1fr]">
-            <article className={dashboardCardBaseClass}>
+          <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
+            <article className={`${dashboardCardBaseClass} min-h-[310px]`}>
               <div className="mb-4 flex items-center justify-between gap-2">
                 <p className={dashboardLabelClass}>Funil de Vendas Outbound</p>
                 <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Etapas consolidadas da operacao</p>
               </div>
-              <div className="space-y-3">
+              <div className="pt-2">
                 {dashboardFunnelSteps.map((step, index) => {
                   const width =
                     step.value <= 0 ? 36 : Math.max(38, Math.min(100, Math.round((step.value / dashboardFunnelMaxValue) * 100)));
                   return (
-                    <div key={step.label} className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
-                        <span>{step.label}</span>
-                        <span className="font-semibold text-slate-100">{step.value}</span>
-                      </div>
-                      <div className="mx-auto transition-all duration-700 ease-out" style={{ width: `${width}%`, transitionDelay: `${index * 70}ms` }}>
-                        <div className={`rounded-xl border px-4 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] ${step.borderClass} bg-gradient-to-r ${step.gradientClass}`}>
-                          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-200">{step.label}</p>
+                    <div key={step.label} className={index === 0 ? "" : "-mt-2"}>
+                      <div
+                        className="relative h-10 overflow-hidden rounded-full shadow-[0_14px_22px_rgba(2,6,23,0.34)] transition-[width] duration-700 ease-out"
+                        style={{
+                          width: dashboardAnimateIn ? `${width}%` : "0%",
+                          transitionDelay: `${index * 90}ms`,
+                        }}
+                      >
+                        <div className={`absolute inset-0 bg-gradient-to-r ${step.gradientClass}`} />
+                        <div className={`absolute inset-0 border ${step.borderClass}`} />
+                        <div className="relative flex h-full items-center justify-between px-4">
+                          <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-100">{step.label}</span>
+                          <span className="text-sm font-semibold text-white">{step.value}</span>
                         </div>
                       </div>
                     </div>
@@ -1379,7 +1466,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               </div>
             </article>
 
-            <article className={dashboardCardBaseClass}>
+            <article className={`${dashboardCardBaseClass} min-h-[310px]`}>
               <div className="mb-4 flex items-center justify-between gap-2">
                 <p className={dashboardLabelClass}>Atividades (BDR)</p>
                 <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Email + ligacoes</p>
@@ -1389,15 +1476,18 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                   const width =
                     activity.value <= 0 ? 8 : Math.max(14, Math.min(100, Math.round((activity.value / dashboardActivitiesMaxValue) * 100)));
                   return (
-                    <div key={activity.label} className="rounded-xl bg-[#111827]/80 p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+                    <div key={activity.label} className="rounded-xl bg-[#111827]/80 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]">
                       <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
                         <span>{activity.label}</span>
-                        <span className={`text-xl font-semibold tracking-[-0.01em] ${activity.metricClass}`}>{activity.value}</span>
+                        <span className={`text-2xl font-semibold tracking-[-0.02em] ${activity.metricClass}`}>{activity.animatedValue}</span>
                       </div>
-                      <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-900/80">
+                      <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-900/80">
                         <div
-                          className={`h-full rounded-full transition-[width] duration-700 ease-out ${activity.barClass}`}
-                          style={{ width: `${width}%`, transitionDelay: `${index * 80}ms` }}
+                          className={`h-full rounded-full transition-[width] duration-[600ms] ease-out ${activity.barClass}`}
+                          style={{
+                            width: dashboardAnimateIn ? `${width}%` : "0%",
+                            transitionDelay: `${index * 90}ms`,
+                          }}
                         />
                       </div>
                     </div>
@@ -1410,17 +1500,41 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           <div className="grid gap-6 lg:grid-cols-2">
             <article className={dashboardCardBaseClass}>
               <p className={dashboardLabelClass}>Follow-ups Pendentes</p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#F59E0B]">{dashboardMetrics.totalFollowupsPendentes}</p>
+              <p className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-[#F59E0B]">
+                {Math.max(0, Math.round(animatedTotalFollowupsPendentes))}
+              </p>
               <p className="mt-2 text-xs text-slate-400">Follow-ups futuros com status ativo</p>
             </article>
             <article className={dashboardCardBaseClass}>
               <p className={dashboardLabelClass}>Taxa de Conversao (Indicador)</p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.02em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
+              <p className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-[#22C55E]">{dashboardConversionRateLabel}</p>
               <p className="mt-2 text-xs text-slate-400">
                 {dashboardMetrics.totalCallsAgendadas} calls agendadas para {dashboardMetrics.totalContatosDecisor} contatos com decisor
               </p>
             </article>
           </div>
+
+          <style jsx>{`
+            @keyframes dashboard-shimmer {
+              0% {
+                background-position: 200% 0;
+              }
+              100% {
+                background-position: -200% 0;
+              }
+            }
+
+            .dashboard-skeleton-shimmer {
+              background-image: linear-gradient(
+                90deg,
+                rgba(30, 41, 59, 0.75) 20%,
+                rgba(71, 85, 105, 0.36) 50%,
+                rgba(30, 41, 59, 0.75) 80%
+              );
+              background-size: 200% 100%;
+              animation: dashboard-shimmer 1.4s linear infinite;
+            }
+          `}</style>
         </section>
       ) : (
         <>
