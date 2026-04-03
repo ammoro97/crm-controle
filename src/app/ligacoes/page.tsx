@@ -1173,7 +1173,7 @@ function normalizeFinalizacaoKey(value: string) {
 }
 
 const CPC_POSITIVE_FINALIZACOES = new Set(["falou com cliente"]);
-const CPC_NEGATIVE_FINALIZACOES = new Set(["cliente sem interesse"]);
+const CPC_NEGATIVE_FINALIZACOES = ["cliente sem interesse", "cliente nao tem interesse"];
 const IMPRODUTIVE_FINALIZACOES = new Set([
   "nao atendeu",
   "caixa postal",
@@ -1187,6 +1187,10 @@ const FOLLOWUP_VALID_SUBFINALIZACOES = new Set([
   "agendar whatsapp",
 ]);
 const FOLLOWUP_VALID_FINALIZACOES = new Set(["falou com cliente", "falou com secretaria"]);
+
+function hasFinalizacaoKeyword(value: string, keywords: string[]) {
+  return keywords.some((keyword) => value.includes(keyword));
+}
 
 type FinalizacaoTipo =
   | "falou_com_cliente"
@@ -1361,6 +1365,11 @@ export default function LigacoesPage() {
   const hiddenCallIdsRef = useRef<Set<string>>(new Set());
   const wrapupPhoneInputRef = useRef<HTMLInputElement | null>(null);
   const wrapupEmailInputRef = useRef<HTMLInputElement | null>(null);
+  const callsTableScrollRef = useRef<HTMLDivElement | null>(null);
+  const callsTableDragStartXRef = useRef(0);
+  const callsTableDragStartScrollLeftRef = useRef(0);
+  const callsTableIsDraggingRef = useRef(false);
+  const [isCallsTableDragging, setIsCallsTableDragging] = useState(false);
 
   const [activeSession, setActiveSession] = useState<ActiveCallSession | null>(null);
   const [wrapupOpen, setWrapupOpen] = useState(false);
@@ -2126,6 +2135,45 @@ export default function LigacoesPage() {
     setSelectedIds([]);
   };
 
+  const isInteractiveTableTarget = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(target.closest("button, input, select, textarea, a, label"));
+  };
+
+  const handleCallsTableMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    if (!callsTableScrollRef.current) return;
+    if (isInteractiveTableTarget(event.target)) return;
+
+    callsTableIsDraggingRef.current = true;
+    setIsCallsTableDragging(true);
+    callsTableDragStartXRef.current = event.clientX;
+    callsTableDragStartScrollLeftRef.current = callsTableScrollRef.current.scrollLeft;
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!callsTableIsDraggingRef.current || !callsTableScrollRef.current) return;
+      const deltaX = event.clientX - callsTableDragStartXRef.current;
+      event.preventDefault();
+      callsTableScrollRef.current.scrollLeft = callsTableDragStartScrollLeftRef.current - deltaX;
+    };
+
+    const stopDragging = () => {
+      if (!callsTableIsDraggingRef.current) return;
+      callsTableIsDraggingRef.current = false;
+      setIsCallsTableDragging(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove, { passive: false });
+    window.addEventListener("mouseup", stopDragging);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", stopDragging);
+    };
+  }, []);
+
   const handleViewAnaliseIa = async (call: MappedCall) => {
     if (viewAnalysisLoadingCallId === call.id) return;
 
@@ -2855,32 +2903,30 @@ export default function LigacoesPage() {
   }, [filteredCalls]);
 
   const contactQuality = useMemo(() => {
-    const isAnsweredCall = (call: MappedCall) => isTechnicalAnswered(call.status, Number(call.durationSeconds || 0));
+    let cpcPositive = 0;
+    let cpcNegative = 0;
+    let improdutivas = 0;
 
-    const cpc = filteredCalls.filter((call) => {
-      if (!isAnsweredCall(call)) return false;
+    for (const call of filteredCalls) {
       const normalized = normalizeFinalizacaoKey(call.finalizacao);
-      return normalized === "falou com cliente";
-    }).length;
-
-    const cpcPositive = filteredCalls.filter((call) => {
-      if (!isAnsweredCall(call)) return false;
-      const normalized = normalizeFinalizacaoKey(call.finalizacao);
-      return CPC_POSITIVE_FINALIZACOES.has(normalized);
-    }).length;
-
-    const cpcNegative = filteredCalls.filter((call) => {
-      if (!isAnsweredCall(call)) return false;
-      const normalized = normalizeFinalizacaoKey(call.finalizacao);
-      return CPC_NEGATIVE_FINALIZACOES.has(normalized);
-    }).length;
-
-    const improdutivas = filteredCalls.filter((call) => {
-      const normalized = normalizeFinalizacaoKey(call.finalizacao);
-      if (IMPRODUTIVE_FINALIZACOES.has(normalized)) return true;
+      const isPositive = CPC_POSITIVE_FINALIZACOES.has(normalized);
+      const isNegative = hasFinalizacaoKeyword(normalized, CPC_NEGATIVE_FINALIZACOES);
       const classification = getFinalizacaoClassification(call.finalizacao);
-      return Boolean(classification && !classification.conectado);
-    }).length;
+      const isImprodutiva =
+        !isPositive &&
+        !isNegative &&
+        (IMPRODUTIVE_FINALIZACOES.has(normalized) || Boolean(classification && !classification.conectado));
+
+      if (isPositive) {
+        cpcPositive += 1;
+      } else if (isNegative) {
+        cpcNegative += 1;
+      } else if (isImprodutiva) {
+        improdutivas += 1;
+      }
+    }
+
+    const cpc = cpcPositive + cpcNegative;
 
     const total = filteredCalls.length;
     const cpcRate = total > 0 ? Math.round((cpc / total) * 100) : 0;
@@ -3754,7 +3800,11 @@ export default function LigacoesPage() {
         {error ? <p className="px-4 py-4 text-sm text-rose-300">{error}</p> : null}
 
         {!loading && !error ? (
-          <div className="overflow-x-auto">
+          <div
+            ref={callsTableScrollRef}
+            onMouseDown={handleCallsTableMouseDown}
+            className={`overflow-x-auto ${isCallsTableDragging ? "cursor-grabbing select-none" : "cursor-grab"}`}
+          >
             <table className="min-w-[1260px] w-full text-left">
               <thead className="border-b border-slate-800/90 bg-slate-950/90 text-[11px] uppercase tracking-[0.08em] text-slate-400">
                 <tr>
@@ -3767,6 +3817,7 @@ export default function LigacoesPage() {
                       onChange={toggleSelectAllFiltered}
                     />
                   </th>
+                  <th className="whitespace-nowrap px-3 py-2.5">Ação</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Nome</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Empresa</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Telefone</th>
@@ -3779,7 +3830,6 @@ export default function LigacoesPage() {
                   <th className="whitespace-nowrap px-3 py-2.5">Finalização</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Subfinalização</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Origem</th>
-                  <th className="whitespace-nowrap px-3 py-2.5">Ação</th>
                 </tr>
               </thead>
               <tbody>
@@ -3810,6 +3860,15 @@ export default function LigacoesPage() {
                               onChange={() => toggleSelectOne(call.id)}
                             />
                           </td>
+                          <td className="whitespace-nowrap px-3 py-3">
+                            <button
+                              type="button"
+                              className="rounded-md border border-border px-2.5 py-1.5 text-xs text-slate-200 transition hover:bg-slate-800"
+                              onClick={() => setSelectedCallId((prev) => (prev === call.id ? null : call.id))}
+                            >
+                              {isOpen ? "Ocultar detalhes" : "Ver detalhes"}
+                            </button>
+                          </td>
                           <td className="whitespace-nowrap px-3 py-3">{call.nome}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.empresa}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.telefone}</td>
@@ -3834,15 +3893,6 @@ export default function LigacoesPage() {
                             </span>
                           </td>
                           <td className="whitespace-nowrap px-3 py-3">{call.origem}</td>
-                          <td className="whitespace-nowrap px-3 py-3">
-                            <button
-                              type="button"
-                              className="rounded-md border border-border px-2.5 py-1.5 text-xs text-slate-200 transition hover:bg-slate-800"
-                              onClick={() => setSelectedCallId((prev) => (prev === call.id ? null : call.id))}
-                            >
-                              {isOpen ? "Ocultar detalhes" : "Ver detalhes"}
-                            </button>
-                          </td>
                         </tr>
                         {isOpen ? (
                           <tr className="border-b border-border/70 bg-slate-950/40">
