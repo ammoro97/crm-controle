@@ -2964,9 +2964,9 @@ export default function LigacoesPage() {
       const percent = total > 0 ? (segment.count / total) * 100 : 0;
       const sweepAngle = total > 0 ? (segment.count / total) * 360 : 0;
       const endAngle = startAngle + sweepAngle;
-      const path = sweepAngle > 0 ? buildPieSlicePath(70, 70, 62, startAngle, endAngle) : "";
+      const path = sweepAngle > 0 ? buildPieSlicePath(60, 60, 50, startAngle, endAngle) : "";
       const midAngle = startAngle + sweepAngle / 2;
-      const labelPos = polarToCartesian(70, 70, 36, midAngle);
+      const labelPos = polarToCartesian(60, 60, 30, midAngle);
       const normalized = {
         ...segment,
         total,
@@ -3473,19 +3473,19 @@ export default function LigacoesPage() {
   };
 
   return (
-    <section className="space-y-5">
-      <div className="panel border-slate-800/90 bg-slate-950/80 p-5">
+    <section className="space-y-6 bg-[#0A0A0B]">
+      <div className="panel rounded-xl border border-white/[0.06] bg-[#111827] p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Painel de Ligações</p>
-            <h1 className="mt-1 text-xl font-semibold text-slate-100">Ligações</h1>
-            <p className="mt-1 text-sm text-slate-400">Acompanhe o histórico de chamadas realizadas no CRM.</p>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-[#6B7280]">Painel de Ligações</p>
+            <h1 className="mt-1 text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">Ligações</h1>
+            <p className="mt-1 text-[13px] text-[#6B7280]">Acompanhe o histórico de chamadas realizadas no CRM.</p>
           </div>
-          <div className="flex w-full flex-wrap items-end justify-start gap-2 rounded-xl border border-slate-800/90 bg-slate-950/70 p-2 lg:w-auto lg:justify-end">
+          <div className="flex w-full flex-wrap items-end justify-start gap-2 rounded-xl border border-white/[0.06] bg-[#111827] p-2 lg:w-auto lg:justify-end">
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
               Atendente
               <select
-                className="field mt-1 h-9 min-w-[190px] border-slate-700 bg-slate-900/80 px-2.5 py-1.5 text-xs"
+                className="field mt-1 h-9 min-w-[190px] border-white/[0.06] bg-[#0A0A0B] px-2.5 py-1.5 text-xs"
                 value={atendenteFilter}
                 onChange={(event) => setAtendenteFilter(event.target.value)}
               >
@@ -3499,7 +3499,7 @@ export default function LigacoesPage() {
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
               Finalização
               <select
-                className="field mt-1 h-9 min-w-[190px] border-slate-700 bg-slate-900/80 px-2.5 py-1.5 text-xs"
+                className="field mt-1 h-9 min-w-[190px] border-white/[0.06] bg-[#0A0A0B] px-2.5 py-1.5 text-xs"
                 value={finalizacaoFilter}
                 onChange={(event) => setFinalizacaoFilter(event.target.value)}
               >
@@ -3512,7 +3512,7 @@ export default function LigacoesPage() {
             </label>
             <button
               type="button"
-              className="btn-ghost h-9 border-slate-700 bg-slate-900/70 px-3 py-1.5 text-xs"
+              className="btn-ghost h-9 border-white/[0.06] bg-[#0A0A0B] px-3 py-1.5 text-xs transition-all duration-200 ease-out hover:-translate-y-[2px]"
               onClick={() => {
                 void loadCallsWithRetry("manual-refresh", 1);
               }}
@@ -3546,76 +3546,90 @@ export default function LigacoesPage() {
         </div>
       ) : null}
 
-      <div className="space-y-2">
-        <div className="panel border-slate-800/90 bg-slate-950/70 p-3">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold text-slate-200">Volume e Eficiência</p>
-              <p className="text-[11px] text-slate-400">Tempo médio por tipo de atendimento</p>
-            </div>
+      <div className="space-y-6">
+        <div className="panel rounded-xl border border-white/[0.06] bg-[#111827] p-5">
+          <div className="mb-4">
+            <p className="text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">Volume e Eficiência</p>
+            <p className="mt-1 text-[13px] text-[#6B7280]">Tempo médio por tipo de atendimento</p>
           </div>
           {loading ? (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
               {[0, 1, 2].map((item) => (
                 <div
                   key={`tma-loading-${item}`}
-                  className="h-[118px] animate-pulse rounded-lg border border-slate-800/80 bg-slate-900/50"
+                  className={`animate-pulse rounded-xl border border-white/[0.06] bg-[#0A0A0B] ${item === 0 ? "h-[154px] lg:col-span-2" : "h-[154px]"}`}
                 />
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
-                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Cliente</p>
-                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.cliente.tma}</p>
-                <p className="mt-1.5 text-[12px] text-slate-400">
-                  {tmaSegmentado.cliente.count} ligação{tmaSegmentado.cliente.count === 1 ? "" : "ões"} com cliente
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+              <article className="h-full rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px] lg:col-span-2">
+                <p className="text-[11px] uppercase tracking-[0.08em] text-[#6B7280]">TMA Geral</p>
+                <p className="mt-2 text-[28px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{tmaSegmentado.geral.tma}</p>
+                <p className="mt-2 text-[13px] text-[#6B7280]">
+                  {tmaSegmentado.geral.count} ligação{tmaSegmentado.geral.count === 1 ? "" : "ões"} no período filtrado
                 </p>
               </article>
 
-              <article className="h-full rounded-lg border border-slate-800/80 bg-slate-950/85 p-4">
-                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">TMA Secretaria</p>
-                <p className="mt-1.5 text-3xl font-semibold leading-none text-slate-100">{tmaSegmentado.secretaria.tma}</p>
-                <p className="mt-1.5 text-[12px] text-slate-400">
-                  {tmaSegmentado.secretaria.count} ligação{tmaSegmentado.secretaria.count === 1 ? "" : "ões"} com secretária
+              <article className="h-full rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
+                <p className="text-[11px] uppercase tracking-[0.08em] text-[#6B7280]">TMA Cliente</p>
+                <p className="mt-2 text-[28px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{tmaSegmentado.cliente.tma}</p>
+                <p className="mt-2 text-[13px] text-[#6B7280]">
+                  {tmaSegmentado.cliente.count} ligação{tmaSegmentado.cliente.count === 1 ? "" : "ões"}
                 </p>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                  <div
+                    className="h-full rounded-full bg-[#22C55E]"
+                    style={{
+                      width: `${tmaSegmentado.geral.count > 0 ? (tmaSegmentado.cliente.count / tmaSegmentado.geral.count) * 100 : 0}%`,
+                      boxShadow: "0 0 8px rgba(34,197,94,0.45)",
+                    }}
+                  />
+                </div>
               </article>
 
-              <article className="h-full rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-4">
-                <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-cyan-200">TMA Geral</p>
-                <p className="mt-1.5 text-3xl font-semibold leading-none text-cyan-100">{tmaSegmentado.geral.tma}</p>
-                <p className="mt-1.5 text-[12px] text-cyan-100/80">
-                  {tmaSegmentado.geral.count} ligação{tmaSegmentado.geral.count === 1 ? "" : "ões"} no total
+              <article className="h-full rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
+                <p className="text-[11px] uppercase tracking-[0.08em] text-[#6B7280]">TMA Secretaria</p>
+                <p className="mt-2 text-[28px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{tmaSegmentado.secretaria.tma}</p>
+                <p className="mt-2 text-[13px] text-[#6B7280]">
+                  {tmaSegmentado.secretaria.count} ligação{tmaSegmentado.secretaria.count === 1 ? "" : "ões"}
                 </p>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                  <div
+                    className="h-full rounded-full bg-[#64748B]"
+                    style={{
+                      width: `${tmaSegmentado.geral.count > 0 ? (tmaSegmentado.secretaria.count / tmaSegmentado.geral.count) * 100 : 0}%`,
+                      boxShadow: "0 0 8px rgba(100,116,139,0.45)",
+                    }}
+                  />
+                </div>
               </article>
             </div>
           )}
         </div>
 
-        <div className="panel border-slate-800/90 bg-slate-950/70 p-3">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold text-slate-200">Qualidade (CPC)</p>
-              <p className="text-[11px] text-slate-400">Distribuição entre positivos, negativos e improdutivos</p>
-            </div>
+        <div className="panel rounded-xl border border-white/[0.06] bg-[#111827] p-5">
+          <div className="mb-4">
+            <p className="text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">Qualidade (CPC)</p>
+            <p className="mt-1 text-[13px] text-[#6B7280]">Distribuição entre positivos, negativos e improdutivos</p>
           </div>
           {loading ? (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[260px_1fr]">
-              <div className="h-[250px] animate-pulse rounded-lg border border-slate-800/80 bg-slate-900/50" />
-              <div className="h-[250px] animate-pulse rounded-lg border border-slate-800/80 bg-slate-900/50" />
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[200px_1fr]">
+              <div className="h-[170px] animate-pulse rounded-xl border border-white/[0.06] bg-[#0A0A0B]" />
+              <div className="h-[170px] animate-pulse rounded-xl border border-white/[0.06] bg-[#0A0A0B]" />
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[260px_1fr]">
-              <div className="rounded-lg border border-slate-800/85 bg-slate-950/85 p-3">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[200px_1fr]">
+              <div className="rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
                 <div className="flex items-center justify-center">
-                  <div className="relative h-44 w-44">
-                    <svg viewBox="0 0 140 140" className="h-full w-full -rotate-90">
-                      <circle cx="70" cy="70" r="62" fill="none" stroke="#1e293b" strokeWidth="16" />
+                  <div className="relative h-[120px] w-[120px]">
+                    <svg viewBox="0 0 120 120" className="h-[120px] w-[120px] -rotate-90">
+                      <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
                       {cpcPieSegments.map((segment) =>
                         segment.path ? <path key={segment.id} d={segment.path} fill={segment.color} /> : null,
                       )}
                       {cpcPieSegments.map((segment) =>
-                        segment.percent >= 7 ? (
+                        segment.percent >= 8 ? (
                           <text
                             key={`pie-label-${segment.id}`}
                             x={segment.labelX}
@@ -3623,70 +3637,78 @@ export default function LigacoesPage() {
                             transform={`rotate(90 ${segment.labelX} ${segment.labelY})`}
                             textAnchor="middle"
                             dominantBaseline="middle"
-                            className="fill-slate-950 text-[8px] font-semibold"
+                            className="fill-[#0A0A0B] text-[8px] font-semibold"
                           >
                             {Math.round(segment.percent)}%
                           </text>
                         ) : null,
                       )}
                     </svg>
-                    <div className="absolute inset-[38px] flex flex-col items-center justify-center rounded-full border border-slate-800 bg-slate-950/95 text-center">
-                      <p className="text-[10px] uppercase tracking-[0.1em] text-slate-500">Total</p>
-                      <p className="mt-1 text-2xl font-semibold leading-none text-slate-100">
-                        {cpcPieSegments[0]?.total || 0}
-                      </p>
+                    <div className="absolute inset-[34px] flex flex-col items-center justify-center rounded-full border border-white/[0.06] bg-[#111827] text-center">
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-[#6B7280]">Total</p>
+                      <p className="mt-1 text-lg font-semibold tracking-[-0.02em] text-[#E6EAF2]">{cpcPieSegments[0]?.total || 0}</p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="rounded-lg border border-slate-800/85 bg-slate-950/85 p-3">
-                <div className="space-y-2.5">
-                  {cpcPieSegments.map((segment) => (
-                    <div
-                      key={`legend-${segment.id}`}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2.5"
-                    >
+              <div className="space-y-3">
+                {cpcPieSegments.map((segment) => (
+                  <div
+                    key={`legend-${segment.id}`}
+                    className="rounded-xl border border-white/[0.06] bg-[#111827] p-4 transition-all duration-200 ease-out hover:-translate-y-[2px]"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2.5">
                         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
                         <div>
-                          <p className="text-[12px] font-medium text-slate-100">{segment.label}</p>
-                          <p className="text-[11px] text-slate-400">
+                          <p className="text-[13px] font-medium text-[#E6EAF2]">{segment.label}</p>
+                          <p className="text-[13px] text-[#6B7280]">
                             {segment.count} ligação{segment.count === 1 ? "" : "ões"}
                           </p>
                         </div>
                       </div>
-                      <p className="text-sm font-semibold text-slate-100">{Math.round(segment.percent)}%</p>
+                      <p className="text-[28px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{Math.round(segment.percent)}%</p>
                     </div>
-                  ))}
-                </div>
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${segment.percent}%`,
+                          backgroundColor: segment.color,
+                          boxShadow: `0 0 8px ${segment.color}66`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
         </div>
 
-        <article className="panel border-slate-800/90 bg-slate-950/70 p-3">
-          <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
+        <article className="panel rounded-xl border border-white/[0.06] bg-[#111827] p-5">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold text-slate-200">Distribuição de Finalizações</p>
-              <p className="text-[11px] text-slate-400">Participação percentual e comparação entre resultados</p>
+              <p className="text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">Distribuição de Finalizações</p>
+              <p className="mt-1 text-[13px] text-[#6B7280]">Participação percentual e comparação entre resultados</p>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-300">
+              <span className="rounded-md border border-white/[0.06] bg-[#111827] px-2 py-1 text-[11px] text-[#6B7280]">
                 {filteredCalls.length} ligações
               </span>
             </div>
           </div>
 
           {finalizacaoChart.length === 0 ? (
-            <p className="text-sm text-slate-500">Sem dados para exibir.</p>
+            <p className="text-sm text-[#6B7280]">Sem dados para exibir.</p>
           ) : (
-            <div className="grid gap-3 xl:grid-cols-[260px_1fr]">
-              <div className="rounded-lg border border-slate-800/90 bg-slate-950/85 p-3">
+            <div className="grid gap-4 xl:grid-cols-[220px_1fr]">
+              <div className="rounded-xl border border-white/[0.06] bg-[#111827] p-4 transition-all duration-200 ease-out hover:-translate-y-[2px]">
                 <div className="flex items-center justify-center">
-                  <div className="relative h-40 w-40 rounded-full border border-slate-800/90 p-3">
+                  <div className="relative h-36 w-36 rounded-full border border-white/[0.06] p-3">
                     <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
-                      <circle cx="60" cy="60" r="52" fill="none" stroke="#1e293b" strokeWidth="14" />
+                      <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="14" />
                       {finalizacaoDonutSlices.map((item) => {
                         const isHighlighted = hoveredFinalizacaoLabel === item.label;
                         const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
@@ -3698,87 +3720,89 @@ export default function LigacoesPage() {
                             r="52"
                             fill="none"
                             stroke={finalizacaoColorHex(item.label)}
-                            strokeWidth={isHighlighted ? 18 : 14}
+                            strokeWidth={isHighlighted ? 16 : 14}
                             strokeDasharray={item.dasharray}
                             strokeDashoffset={item.dashoffset}
                             strokeLinecap="butt"
-                            className={`cursor-pointer transition-all duration-150 ${isDimmed ? "opacity-35" : "opacity-100"}`}
+                            className={`cursor-pointer transition-all duration-200 ease-out ${isDimmed ? "opacity-35" : "opacity-100"}`}
                             onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
                             onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
                           />
                         );
                       })}
                     </svg>
-                    <div className="absolute inset-6 flex flex-col items-center justify-center rounded-full border border-slate-800 bg-slate-950/95 text-center">
-                      <p className="text-[10px] uppercase tracking-[0.1em] text-slate-500">Total</p>
-                      <p className="mt-1 text-2xl font-semibold leading-none text-slate-100">{filteredCalls.length}</p>
+                    <div className="absolute inset-6 flex flex-col items-center justify-center rounded-full border border-white/[0.06] bg-[#111827] text-center">
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-[#6B7280]">Total</p>
+                      <p className="mt-1 text-lg font-semibold tracking-[-0.02em] text-[#E6EAF2]">{filteredCalls.length}</p>
                     </div>
                   </div>
                 </div>
-                <div className="mt-3 space-y-1.5">
+                <div className="mt-3 space-y-2">
                   {finalizacaoChartWithUi.slice(0, 3).map((item) => {
                     const isHighlighted = hoveredFinalizacaoLabel === item.label;
                     const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
                     return (
                       <div
                         key={`top-${item.label}`}
-                        className={`flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 transition ${
-                          isHighlighted
-                            ? "border-slate-500 bg-slate-800/90"
-                            : "border-slate-800/90 bg-slate-900/70"
+                        className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 transition-all duration-200 ease-out ${
+                          isHighlighted ? "border-white/20 bg-[#0A0A0B]" : "border-white/[0.06] bg-[#111827]"
                         } ${isDimmed ? "opacity-45" : "opacity-100"}`}
                         onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
                         onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
                       >
                         <div className="flex min-w-0 items-center gap-2">
                           <span className={`h-2 w-2 shrink-0 rounded-full ${item.ui.barClass}`} />
-                          <span className="truncate text-[11px] text-slate-300">{item.label}</span>
+                          <span className="truncate text-[12px] text-[#E6EAF2]">{item.label}</span>
                         </div>
-                        <span className="text-[11px] font-medium text-slate-200">{item.percent}%</span>
+                        <span className="text-[12px] font-semibold text-[#E6EAF2]">{item.percent}%</span>
                       </div>
                     );
                   })}
                 </div>
               </div>
 
-              <div className="rounded-lg border border-slate-800/90 bg-slate-950/85 p-2">
-                <div className="space-y-1.5">
-                  {finalizacaoChartWithUi.map((item) => {
-                    const isOthers = normalizeFinalizacaoKey(item.label) === "outros";
-                    const isHighlighted = hoveredFinalizacaoLabel === item.label;
-                    const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
-                    return (
-                      <div
-                        key={item.label}
-                        className={`cursor-pointer rounded-md border px-2.5 py-2 transition ${
-                          isHighlighted
-                            ? "border-slate-500 bg-slate-800/90"
-                            : isOthers
-                              ? "border-slate-700/80 bg-slate-900/55"
-                              : "border-slate-800/90 bg-slate-900/75"
-                        } ${isDimmed ? "opacity-45" : "opacity-100"}`}
-                        onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
-                        onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
-                      >
-                        <div className="mb-1.5 flex items-center justify-between gap-2">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${item.ui.barClass}`} />
-                            <span className="truncate text-[12px] font-medium text-slate-200">{item.label}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px]">
-                            <span className="text-slate-400">{item.count}</span>
-                            <span className={`rounded px-1.5 py-0.5 font-medium ${item.ui.badgeClass}`}>
-                              {item.percent}%
-                            </span>
-                          </div>
+              <div className="space-y-2">
+                {finalizacaoChartWithUi.map((item) => {
+                  const isOthers = normalizeFinalizacaoKey(item.label) === "outros";
+                  const isHighlighted = hoveredFinalizacaoLabel === item.label;
+                  const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
+                  return (
+                    <div
+                      key={item.label}
+                      className={`cursor-pointer rounded-xl border p-3 transition-all duration-200 ease-out hover:-translate-y-[2px] ${
+                        isHighlighted
+                          ? "border-white/20 bg-[#0A0A0B]"
+                          : isOthers
+                            ? "border-white/[0.06] bg-[#111827]"
+                            : "border-white/[0.06] bg-[#111827]"
+                      } ${isDimmed ? "opacity-45" : "opacity-100"}`}
+                      onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
+                      onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${item.ui.barClass}`} />
+                          <span className="truncate text-[13px] font-medium text-[#E6EAF2]">{item.label}</span>
                         </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-slate-800/90">
-                          <div className={`h-full ${finalizacaoBarColor(item.label)}`} style={{ width: `${item.percent}%` }} />
+                        <div className="flex items-center gap-2 text-[12px]">
+                          <span className="text-[#6B7280]">{item.count}</span>
+                          <span className={`rounded px-1.5 py-0.5 font-medium ${item.ui.badgeClass}`}>
+                            {item.percent}%
+                          </span>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                        <div
+                          className={`h-full rounded-full ${finalizacaoBarColor(item.label)}`}
+                          style={{
+                            width: `${item.percent}%`,
+                            boxShadow: "0 0 8px rgba(255,255,255,0.25)",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
