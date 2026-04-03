@@ -210,16 +210,8 @@ function isAnsweredCall(status?: string | null): boolean {
 function isCallScheduledEvent(meeting: Meeting): boolean {
   const eventType = normalizeAgendaText(meeting.eventType);
   const reason = normalizeAgendaText(meeting.reason);
-
-  if (eventType === "call_agendada" || eventType === "call_conversao" || eventType === "follow_up_ligacao") {
-    return true;
-  }
-  if (eventType === "follow_up_whatsapp" || eventType === "follow_up_email") {
-    return false;
-  }
-  if (reason === "apresentacao" || reason === "acompanhamento" || reason === "fechamento") return true;
-  if ((reason === "follow-up" || reason === "follow up") && (!eventType || eventType === "outro")) return true;
-  return false;
+  if (reason === "fechamento") return true;
+  return eventType === "call_conversao";
 }
 
 function isFollowupEvent(meeting: Meeting): boolean {

@@ -140,7 +140,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "conversaoLigacao",
         title: "Conversao Ligacao",
-        description: "Formula: (calls agendadas / contatos com decisor) x 100.",
+        description: "Formula: (calls de fechamento agendadas / contatos com decisor) x 100.",
         accentFrom: "#22C55E",
         accentTo: "#15803D",
         icon: iconArrowUp(),

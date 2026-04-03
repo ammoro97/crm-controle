@@ -1229,7 +1229,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         glowShadow: "0 0 20px rgba(245,158,11,0.16)",
       },
       {
-        label: "Calls Agendadas",
+        label: "Calls de Fechamento",
         value: dashboardMetrics.funnel.callsAgendadas,
         borderClass: "border-[#22C55E]/45",
         gradientClass: "from-[#22C55E] to-[#15803D]",
@@ -1341,7 +1341,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         <>
           <p className={`${dashboardLabelClass} ${titleClass}`}>Taxa de Conversao</p>
           <p className={`${valueClass} font-semibold tracking-[-0.03em] text-[#22C55E]`}>{dashboardConversionRateLabel}</p>
-          <p className={`${helperClass} text-slate-300`}>Calls agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})</p>
+          <p className={`${helperClass} text-slate-300`}>
+            Calls de fechamento agendadas / contatos com decisor ({dashboardMetrics.totalContatosDecisor})
+          </p>
         </>
       ) : widgetId === "cobertura_base" ? (
         <>
@@ -1385,7 +1387,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         </>
       ) : widgetId === "calls_agendadas" ? (
         <>
-          <p className={`${dashboardLabelClass} ${titleClass}`}>Calls Agendadas</p>
+          <p className={`${dashboardLabelClass} ${titleClass}`}>Calls de Fechamento</p>
           <p className={`${valueClass} font-semibold tracking-[-0.02em] text-[#22C55E]`}>
             {Math.max(0, Math.round(animatedTotalCallsAgendadas))}
           </p>
@@ -1489,7 +1491,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           <p className={`${dashboardLabelClass} ${titleClass}`}>Taxa de Conversao (Indicador)</p>
           <p className={`${valueClass} font-semibold tracking-[-0.02em] text-[#22C55E]`}>{dashboardConversionRateLabel}</p>
           <p className={`${helperClass} text-slate-400`}>
-            {dashboardMetrics.totalCallsAgendadas} calls agendadas para {dashboardMetrics.totalContatosDecisor} contatos com decisor
+            {dashboardMetrics.totalCallsAgendadas} calls de fechamento para {dashboardMetrics.totalContatosDecisor} contatos com decisor
           </p>
         </>
       );

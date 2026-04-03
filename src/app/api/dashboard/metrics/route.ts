@@ -159,21 +159,8 @@ function isNoShowMeeting(meeting: Meeting): boolean {
 function isCallSchedulingMeeting(meeting: Meeting): boolean {
   const normalizedType = normalizeText(meeting.eventType);
   const normalizedReason = normalizeText(meeting.reason);
-
-  if (normalizedType === "call_agendada" || normalizedType === "call_conversao" || normalizedType === "follow_up_ligacao") {
-    return true;
-  }
-  if (normalizedType === "follow_up_whatsapp" || normalizedType === "follow_up_email") {
-    return false;
-  }
-
-  return (
-    normalizedReason === "apresentacao" ||
-    normalizedReason === "acompanhamento" ||
-    normalizedReason === "fechamento" ||
-    normalizedReason === "follow-up" ||
-    normalizedReason === "follow up"
-  );
+  if (normalizedReason === "fechamento") return true;
+  return normalizedType === "call_conversao";
 }
 
 function isAgendaScheduledCall(meeting: Meeting): boolean {

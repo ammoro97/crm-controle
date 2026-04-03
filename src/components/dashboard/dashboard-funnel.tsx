@@ -97,7 +97,7 @@ export function DashboardFunnel({
       },
       {
         id: "abs_agendamentos",
-        label: "Agendamentos",
+        label: "Fechamento",
         value: formatMetricNumber(agendamentos),
         widthPercent: 42,
         variant: "orange",
@@ -127,7 +127,7 @@ export function DashboardFunnel({
       },
       {
         id: "pct_agendamentos",
-        label: "Agendamentos",
+        label: "Fechamento",
         value: formatMetricPercent(agendamentosPercentual),
         widthPercent: 48,
         variant: "orange",
@@ -144,13 +144,13 @@ export function DashboardFunnel({
       <div className="relative space-y-4">
         <FunnelChart
           title="Funil Principal (Valores Absolutos)"
-          subtitle="Fonte real da tela de Ligacoes: Ligacoes -> Atendidas -> Decisor -> Agendamentos."
+          subtitle="Fonte real da tela de Ligacoes: Ligacoes -> Atendidas -> Decisor -> Fechamento (agenda)."
           steps={absoluteSteps}
         />
 
         <FunnelChart
           title="Funil de Conversao (%)"
-          subtitle="Atendidas = atendidas/ligacoes, Decisor = decisor/atendidas, Agendamentos = agendamentos/decisor."
+          subtitle="Atendidas = atendidas/ligacoes, Decisor = decisor/atendidas, Fechamento = agendamentos de fechamento/decisor."
           steps={percentSteps}
         />
       </div>
