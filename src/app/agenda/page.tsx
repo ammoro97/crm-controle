@@ -124,6 +124,39 @@ function isTimelineRelevantStatus(status: AgendaEventStatus) {
   return status === "remarcado" || status === "cancelado" || status === "apagado_logico";
 }
 
+function getManualActionConfirmationCopy(action: AppointmentManualAction) {
+  if (action === "done") {
+    return {
+      title: "Confirmar acao realizada",
+      message: "Deseja marcar este agendamento como acao realizada?",
+      confirmLabel: "Confirmar acao realizada",
+      confirmClassName: "rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500",
+    };
+  }
+  if (action === "cancel") {
+    return {
+      title: "Confirmar cancelamento",
+      message: "Deseja cancelar este agendamento?",
+      confirmLabel: "Confirmar cancelamento",
+      confirmClassName: "rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-500",
+    };
+  }
+  if (action === "reschedule") {
+    return {
+      title: "Confirmar reagendamento",
+      message: "Deseja iniciar o reagendamento deste agendamento?",
+      confirmLabel: "Confirmar reagendamento",
+      confirmClassName: "rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500",
+    };
+  }
+  return {
+    title: "Confirmar No-Show",
+    message: "Deseja marcar este agendamento como No-Show?",
+    confirmLabel: "Confirmar No-Show",
+    confirmClassName: "rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-500",
+  };
+}
+
 export default function AgendaPage() {
   const searchParams = useSearchParams();
   const { currentUser } = useAuth();
@@ -138,6 +171,7 @@ export default function AgendaPage() {
   const [isNew, setIsNew] = useState(false);
   const [blocksOpen, setBlocksOpen] = useState(false);
   const [pendingDeleteMeeting, setPendingDeleteMeeting] = useState<Meeting | null>(null);
+  const [pendingManualAction, setPendingManualAction] = useState<AppointmentManualAction | null>(null);
   const [blockingAlert, setBlockingAlert] = useState<{
     message: string;
     category: string;
@@ -357,6 +391,7 @@ export default function AgendaPage() {
     setOpen(false);
     setSelected(null);
     setIsNew(false);
+    setPendingManualAction(null);
   };
 
   const persistMeeting = (inputMeeting: Meeting, options?: { requireDateTimeChange?: boolean }): boolean => {
@@ -526,6 +561,18 @@ export default function AgendaPage() {
       ),
     );
     closeEditor();
+  };
+
+  const requestManualActionConfirmation = (action: AppointmentManualAction) => {
+    if (!selected || isNew) return;
+    setPendingManualAction(action);
+  };
+
+  const confirmPendingManualAction = () => {
+    if (!pendingManualAction) return;
+    const action = pendingManualAction;
+    setPendingManualAction(null);
+    applyManualActionToSelected(action);
   };
 
   const deleteMeeting = (meetingId: string) => {
@@ -736,7 +783,7 @@ export default function AgendaPage() {
         onClose={closeEditor}
         onChange={setSelected}
         onSubmit={saveMeeting}
-        onManualAction={applyManualActionToSelected}
+        onManualAction={requestManualActionConfirmation}
       />
 
       <AgendaBlocksModal open={blocksOpen} blocks={blocks} onClose={() => setBlocksOpen(false)} onChange={updateBlocks} />
@@ -767,6 +814,38 @@ export default function AgendaPage() {
                 onClick={() => deleteMeeting(pendingDeleteMeeting.id)}
               >
                 Excluir
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        title={pendingManualAction ? getManualActionConfirmationCopy(pendingManualAction).title : "Confirmar finalizacao"}
+        open={Boolean(open && selected && !isNew && pendingManualAction)}
+        onClose={() => setPendingManualAction(null)}
+      >
+        {pendingManualAction && selected ? (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-200">{getManualActionConfirmationCopy(pendingManualAction).message}</p>
+            <div className="rounded-lg border border-border bg-slate-900/50 p-3 text-sm text-slate-100">
+              <p className="font-semibold">{selected.personName}</p>
+              <p className="mt-1 text-slate-300">
+                {formatIsoDateBr(selected.date)} - {selected.callTime}
+              </p>
+              <p className="text-slate-300">Responsavel: {selected.owner}</p>
+              <p className="text-slate-300">Motivo: {selected.reason}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" className="btn-ghost" onClick={() => setPendingManualAction(null)}>
+                Voltar
+              </button>
+              <button
+                type="button"
+                className={getManualActionConfirmationCopy(pendingManualAction).confirmClassName}
+                onClick={confirmPendingManualAction}
+              >
+                {getManualActionConfirmationCopy(pendingManualAction).confirmLabel}
               </button>
             </div>
           </div>
