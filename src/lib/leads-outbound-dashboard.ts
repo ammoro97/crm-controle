@@ -13,6 +13,8 @@ export type OutboundDashboardFunnel = {
 export type OutboundDashboardMetrics = {
   totalLeadsProspectados: number;
   totalLeadsAtivos: number;
+  totalLeadsAcionados: number;
+  totalLeadsNaoAcionados: number;
   totalCallsAgendadas: number;
   totalContatosDecisor: number;
   taxaConversao: number;
@@ -41,6 +43,7 @@ type OutboundAggregationContext = {
   outboundLeads: Lead[];
   outboundLeadIds: Set<string>;
   phoneIndex: Map<string, Set<string>>;
+  leadsWithAnyCall: Set<string>;
   leadsWithAnsweredCall: Set<string>;
   leadsWithDecisionContact: Set<string>;
   leadsWithScheduledCall: Set<string>;
@@ -54,6 +57,8 @@ const EMPTY_OUTBOUND_DASHBOARD_METRICS: OutboundDashboardMetrics = {
   totalLeadsProspectados: 0,
   totalCallsAgendadas: 0,
   totalLeadsAtivos: 0,
+  totalLeadsAcionados: 0,
+  totalLeadsNaoAcionados: 0,
   totalContatosDecisor: 0,
   taxaConversao: 0,
   coberturaBaseRatio: 0,
@@ -250,6 +255,7 @@ function createOutboundAggregationContext(input: OutboundMetricsInput): Outbound
   const outboundLeadIds = new Set(outboundLeads.map((lead) => lead.id));
   const phoneIndex = buildLeadPhoneIndex(outboundLeads);
 
+  const leadsWithAnyCall = new Set<string>();
   const leadsWithAnsweredCall = new Set<string>();
   let totalLigacoesFeitas = 0;
   let totalLigacoesAtendidas = 0;
@@ -258,6 +264,7 @@ function createOutboundAggregationContext(input: OutboundMetricsInput): Outbound
     const leadId = resolveOutboundLeadIdByCall(call, outboundLeadIds, phoneIndex);
     if (!leadId) continue;
     totalLigacoesFeitas += 1;
+    leadsWithAnyCall.add(leadId);
     if (!isAnsweredCall(call.status)) continue;
     totalLigacoesAtendidas += 1;
     leadsWithAnsweredCall.add(leadId);
@@ -311,6 +318,7 @@ function createOutboundAggregationContext(input: OutboundMetricsInput): Outbound
     outboundLeads,
     outboundLeadIds,
     phoneIndex,
+    leadsWithAnyCall,
     leadsWithAnsweredCall,
     leadsWithDecisionContact,
     leadsWithScheduledCall,
@@ -361,9 +369,9 @@ export function getFollowupsPendentes(input: OutboundMetricsInput): number {
   return createOutboundAggregationContext(input).totalFollowupsPendentes;
 }
 
-export function getCoberturaDaBase(totalLigacoes: number, leadsAtivos: number): number {
+export function getCoberturaDaBase(totalLeadsAcionados: number, leadsAtivos: number): number {
   if (leadsAtivos <= 0) return 0;
-  return totalLigacoes / leadsAtivos;
+  return totalLeadsAcionados / leadsAtivos;
 }
 
 export function getTotalLeadsFinalizados(finalizations: LeadFinalizationRecord[]): number {
@@ -402,15 +410,19 @@ export function buildOutboundDashboardMetrics(input: OutboundMetricsInput): Outb
   const finalizations = input.finalizations || [];
 
   const totalLeadsAtivos = context.outboundLeads.length;
+  const totalLeadsAcionados = context.leadsWithAnyCall.size;
+  const totalLeadsNaoAcionados = Math.max(0, totalLeadsAtivos - totalLeadsAcionados);
   const totalLeadsFinalizados = getTotalLeadsFinalizados(finalizations);
   const totalComprasEfetuadas = getTotalComprasEfetuadas(finalizations);
   const valorTotalFeitoCents = getValorTotalFeitoCents(finalizations);
-  const coberturaBaseRatio = getCoberturaDaBase(context.totalLigacoesFeitas, totalLeadsAtivos);
+  const coberturaBaseRatio = getCoberturaDaBase(totalLeadsAcionados, totalLeadsAtivos);
   const coberturaBasePercent = coberturaBaseRatio * 100;
 
   if (context.outboundLeads.length === 0) {
     return {
       ...EMPTY_OUTBOUND_DASHBOARD_METRICS,
+      totalLeadsAcionados,
+      totalLeadsNaoAcionados,
       totalLeadsFinalizados,
       totalComprasEfetuadas,
       valorTotalFeitoCents,
@@ -425,6 +437,8 @@ export function buildOutboundDashboardMetrics(input: OutboundMetricsInput): Outb
   return {
     totalLeadsProspectados,
     totalLeadsAtivos,
+    totalLeadsAcionados,
+    totalLeadsNaoAcionados,
     totalCallsAgendadas,
     totalContatosDecisor,
     taxaConversao,

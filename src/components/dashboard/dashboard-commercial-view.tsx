@@ -120,7 +120,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "acionamentoBase",
         title: "Acionamento Base",
-        description: "Formula: (ligacoes feitas / leads outbound ativos) x 100.",
+        description: "Formula: (leads unicos acionados / leads outbound ativos) x 100.",
         accentFrom: "#3B82F6",
         accentTo: "#1D4ED8",
         icon: iconPhone(),

@@ -747,7 +747,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
         onMouseDown={handleMouseDown}
         className={`overflow-x-auto ${isDragging ? "cursor-grabbing select-none" : "cursor-grab"}`}
       >
-        <table ref={tableRef} className="w-full min-w-[2750px] text-left">
+        <table ref={tableRef} className="w-full min-w-[2860px] text-left">
           <thead className="border-b border-border bg-slate-900/60 text-[11px] uppercase tracking-[0.08em] text-muted">
             <tr>
               <th className="w-9 px-3 py-2.5 xl:px-3.5 2xl:py-2">
@@ -768,6 +768,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Expediente</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Data Cadastro</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">1o Contato</th>
+              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Acionado Base</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Ultimo Contato</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nota</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Avaliacoes</th>
@@ -783,6 +784,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
           <tbody>
             {tableRows.map(({ lead, location, expediente, metrics }) => {
               const phones = getLeadPhones(lead);
+              const hasBaseActivation = metrics.totalCalls > 0 || Boolean(String(lead.firstContactDate || "").trim());
               return (
                 <tr
                 key={lead.id}
@@ -877,6 +879,17 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                   {formatDateBR(lead.firstContactDate || null)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  <span
+                    className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                      hasBaseActivation
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                        : "border-slate-600/80 bg-slate-700/40 text-slate-300"
+                    }`}
+                  >
+                    {hasBaseActivation ? "Sim" : "Nao"}
+                  </span>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                   <TruncatedCellText

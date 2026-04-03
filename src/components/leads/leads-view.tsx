@@ -1178,8 +1178,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   }, [dashboardCallLogs, dashboardReferenceDate, dashboardWrapups, leadFinalizations, leads, meetings]);
 
   const animatedConversionRate = useCountUp(dashboardMetrics.taxaConversao, 860);
-  const animatedCoverageRatio = useCountUp(dashboardMetrics.coberturaBaseRatio, 860);
   const animatedCoveragePercent = useCountUp(dashboardMetrics.coberturaBasePercent, 860);
+  const animatedTotalLeadsAcionados = useCountUp(dashboardMetrics.totalLeadsAcionados, 760);
   const animatedTotalLeadsProspectados = useCountUp(dashboardMetrics.totalLeadsProspectados, 760);
   const animatedTotalCallsAgendadas = useCountUp(dashboardMetrics.totalCallsAgendadas, 760);
   const animatedTotalLeadsFinalizados = useCountUp(dashboardMetrics.totalLeadsFinalizados, 760);
@@ -1194,8 +1194,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   }, [animatedConversionRate]);
 
   const dashboardCoverageLabel = useMemo(() => {
-    return `${animatedCoverageRatio.toFixed(2).replace(".", ",")} ligacoes/lead`;
-  }, [animatedCoverageRatio]);
+    return `${Math.max(0, Math.round(animatedTotalLeadsAcionados))} de ${dashboardMetrics.totalLeadsAtivos} leads unicos acionados`;
+  }, [animatedTotalLeadsAcionados, dashboardMetrics.totalLeadsAtivos]);
 
   const dashboardCoveragePercentLabel = useMemo(() => {
     return `${animatedCoveragePercent.toFixed(1).replace(".", ",")}%`;
@@ -1348,9 +1348,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           <p className={`${dashboardLabelClass} ${titleClass}`}>Cobertura da Base</p>
           <p className={`${valueClass} font-semibold tracking-[-0.03em] text-[#3B82F6]`}>{dashboardCoveragePercentLabel}</p>
           <p className={`${helperClass} text-slate-300`}>
-            {dashboardMetrics.totalLigacoesFeitas} ligacoes / {dashboardMetrics.totalLeadsAtivos} leads ativos
+            {dashboardCoverageLabel}
           </p>
-          <p className={`${isCompact ? "mt-1" : "mt-2"} text-[11px] uppercase tracking-[0.08em] text-slate-500`}>{dashboardCoverageLabel}</p>
+          <p className={`${isCompact ? "mt-1" : "mt-2"} text-[11px] uppercase tracking-[0.08em] text-slate-500`}>
+            {dashboardMetrics.totalLigacoesFeitas} ligacoes registradas na base
+          </p>
         </>
       ) : widgetId === "leads_finalizados" ? (
         <>

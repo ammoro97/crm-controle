@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCallLogs } from "@/lib/calls-store";
 import { isAgendaEventLinkedToLead, normalizeAgendaEventStatus, normalizeText } from "@/lib/agenda-events";
+import { getLeadPhones } from "@/lib/lead-contact-utils";
 import { readLeadsCollection } from "@/lib/leads-customers-store";
 import { readDataFile } from "@/lib/storage-paths";
 import { requireAuth } from "@/lib/require-auth";
@@ -18,6 +19,10 @@ function asArray<T>(value: unknown): T[] {
 
 function normalizeLeadId(value?: string | null): string {
   return String(value || "").trim();
+}
+
+function normalizeDigits(value?: string | null): string {
+  return String(value || "").replace(/\D/g, "");
 }
 
 function safePercent(numerator: number, denominator: number): number {
@@ -80,6 +85,61 @@ function isInOutboundScopeByLeadId(
   const normalizedLeadId = normalizeLeadId(leadId);
   if (!normalizedLeadId) return true;
   return outboundLeadIds.has(normalizedLeadId);
+}
+
+function buildLeadPhoneIndex(leads: Lead[]): Map<string, Set<string>> {
+  const byDigits = new Map<string, Set<string>>();
+  for (const lead of leads) {
+    const leadId = normalizeLeadId(lead.id);
+    if (!leadId) continue;
+    for (const phone of getLeadPhones(lead)) {
+      const digits = normalizeDigits(phone);
+      if (!digits) continue;
+      const current = byDigits.get(digits) || new Set<string>();
+      current.add(leadId);
+      byDigits.set(digits, current);
+    }
+  }
+  return byDigits;
+}
+
+function resolveLeadIdByPhone(
+  values: Array<string | null | undefined>,
+  leadPhoneIndex: Map<string, Set<string>>,
+): string | null {
+  const phones = values.map((value) => normalizeDigits(value)).filter(Boolean);
+  if (phones.length === 0) return null;
+
+  const exactMatches = new Set<string>();
+  for (const phone of phones) {
+    const leadIds = leadPhoneIndex.get(phone);
+    if (!leadIds || leadIds.size !== 1) continue;
+    exactMatches.add(Array.from(leadIds)[0]);
+  }
+  if (exactMatches.size === 1) return Array.from(exactMatches)[0];
+
+  const fuzzyMatches = new Set<string>();
+  for (const phone of phones) {
+    for (const [leadPhone, leadIds] of leadPhoneIndex.entries()) {
+      if (!(leadPhone.endsWith(phone) || phone.endsWith(leadPhone))) continue;
+      for (const leadId of leadIds) fuzzyMatches.add(leadId);
+    }
+  }
+  if (fuzzyMatches.size === 1) return Array.from(fuzzyMatches)[0];
+
+  return null;
+}
+
+function resolveScopedLeadIdByCall(
+  call: CallLog,
+  scopedLeadIds: Set<string>,
+  leadPhoneIndex: Map<string, Set<string>>,
+): string | null {
+  const directLeadId = normalizeLeadId(call.leadId);
+  if (directLeadId && scopedLeadIds.has(directLeadId)) return directLeadId;
+  const byPhone = resolveLeadIdByPhone([call.telefone, call.called, call.caller], leadPhoneIndex);
+  if (byPhone && scopedLeadIds.has(byPhone)) return byPhone;
+  return null;
 }
 
 function isNoShowMeeting(meeting: Meeting): boolean {
@@ -231,9 +291,18 @@ function buildPayload(params: {
   const meetingsInScope = useOutboundScope
     ? meetings.filter((meeting) => isOutboundMeeting(meeting, outboundLeads, outboundLeadIds))
     : meetings;
+  const leadsInScope = useOutboundScope ? outboundLeads : leads;
+  const scopedLeadIds = new Set(leadsInScope.map((lead) => normalizeLeadId(lead.id)).filter(Boolean));
+  const leadPhoneIndex = buildLeadPhoneIndex(leadsInScope);
 
   const ligacoes = callsInScope.length;
   const atendidas = callsInScope.filter((call) => isAnsweredCallStatus(call.status)).length;
+  const leadsUnicosAcionados = new Set<string>();
+  for (const call of callLogs) {
+    const leadId = resolveScopedLeadIdByCall(call, scopedLeadIds, leadPhoneIndex);
+    if (!leadId) continue;
+    leadsUnicosAcionados.add(leadId);
+  }
 
   const decisorFromWrapups = wrapsInScope.filter((wrapup) => isDecisionMakerWrapup(wrapup)).length;
   const agendamentosFromWrapups = wrapsInScope.filter((wrapup) => isCallSchedulingWrapup(wrapup)).length;
@@ -274,7 +343,7 @@ function buildPayload(params: {
       },
     },
     cards: {
-      acionamentoBase: safePercent(ligacoes, totalLeadsCadastrados),
+      acionamentoBase: safePercent(leadsUnicosAcionados.size, totalLeadsCadastrados),
       faturamento,
       vendasRealizadas,
       leadDesqualificado,
