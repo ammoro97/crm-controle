@@ -1350,7 +1350,6 @@ export default function LigacoesPage() {
   const [wrapups, setWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
   const [finalizacaoFilter, setFinalizacaoFilter] = useState("Todas");
   const [atendenteFilter, setAtendenteFilter] = useState("Todos");
-  const [hoveredFinalizacaoLabel, setHoveredFinalizacaoLabel] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [webhookOutConfigured, setWebhookOutConfigured] = useState(false);
   const [webhookOutLoading, setWebhookOutLoading] = useState(true);
@@ -2989,6 +2988,11 @@ export default function LigacoesPage() {
     return sorted;
   }, [filteredCalls]);
 
+  const maxFinalizacaoPercent = useMemo(
+    () => finalizacaoChart.reduce((max, item) => Math.max(max, item.percent), 0),
+    [finalizacaoChart],
+  );
+
   const applyWrapupToLead = (
     session: ActiveCallSession,
     formState: PostCallFormState,
@@ -3636,37 +3640,33 @@ export default function LigacoesPage() {
           {finalizacaoChart.length === 0 ? (
             <p className="text-sm text-[#6B7280]">Sem dados para exibir.</p>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2 rounded-xl border border-white/[0.06] bg-[#111827] p-2">
               {finalizacaoChart.map((item) => {
-                const isOthers = normalizeFinalizacaoKey(item.label) === "outros";
-                const isHighlighted = hoveredFinalizacaoLabel === item.label;
-                const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
+                const isDominant = maxFinalizacaoPercent > 0 && item.percent === maxFinalizacaoPercent;
                 return (
                   <div
                     key={item.label}
-                    className={`cursor-pointer rounded-xl border p-4 transition-all duration-200 ease-out hover:-translate-y-[2px] ${
-                      isHighlighted
-                        ? "border-white/20 bg-[#0A0A0B]"
-                        : isOthers
-                          ? "border-white/[0.06] bg-[#111827]"
-                          : "border-white/[0.06] bg-[#111827]"
-                    } ${isDimmed ? "opacity-45" : "opacity-100"}`}
-                    onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
-                    onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
+                    className={`grid h-12 grid-cols-[180px_minmax(0,1fr)_40px] items-center gap-3 rounded-lg border px-4 transition-all duration-200 ease-out ${
+                      isDominant
+                        ? "border-white/20 bg-white/[0.04]"
+                        : "border-white/[0.06] bg-[#111827] hover:border-white/15 hover:bg-white/[0.02]"
+                    }`}
                   >
-                    <div className="grid grid-cols-[minmax(140px,1fr)_1fr_auto] items-center gap-3">
-                      <span className="truncate text-[13px] font-medium text-[#E6EAF2]">{item.label}</span>
-                      <div className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
-                        <div
-                          className={`h-full rounded-full ${finalizacaoBarColor(item.label)}`}
-                          style={{
-                            width: `${item.percent}%`,
-                            boxShadow: "0 0 8px rgba(255,255,255,0.25)",
-                          }}
-                        />
-                      </div>
-                      <span className="text-[13px] font-medium text-[#E6EAF2]">{item.percent}%</span>
+                    <span className={`truncate text-[13px] ${isDominant ? "font-semibold text-[#E6EAF2]" : "font-medium text-[#E6EAF2]"}`}>
+                      {item.label}
+                    </span>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-[rgba(255,255,255,0.08)]">
+                      <div
+                        className={`h-full rounded-full ${finalizacaoBarColor(item.label)}`}
+                        style={{
+                          width: `${item.percent}%`,
+                          boxShadow: isDominant ? "0 0 10px rgba(255,255,255,0.3)" : "none",
+                        }}
+                      />
                     </div>
+                    <span className={`text-right text-[13px] ${isDominant ? "font-semibold text-[#E6EAF2]" : "font-medium text-[#E6EAF2]"}`}>
+                      {item.percent}%
+                    </span>
                   </div>
                 );
               })}
