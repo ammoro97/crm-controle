@@ -3521,36 +3521,36 @@ export default function LigacoesPage() {
             <p className="mt-1 text-[13px] text-[#6B7280]">Tempo médio por tipo de atendimento</p>
           </div>
           {loading ? (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr_1fr]">
               {[0, 1, 2].map((item) => (
                 <div
                   key={`tma-loading-${item}`}
-                  className={`animate-pulse rounded-xl border border-white/[0.06] bg-[#0A0A0B] ${item === 0 ? "h-[154px] lg:col-span-2" : "h-[154px]"}`}
+                  className="min-h-[148px] max-h-[164px] animate-pulse rounded-[14px] border border-white/[0.06] bg-[#0F172A] px-6 py-5"
                 />
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-              <article className="h-full rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px] lg:col-span-2">
-                <p className="text-[11px] uppercase tracking-[0.08em] text-[#6B7280]">TMA Geral</p>
-                <p className="mt-2 text-[28px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{tmaSegmentado.geral.tma}</p>
-                <p className="mt-2 text-[13px] text-[#6B7280]">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr_1fr]">
+              <article className="flex min-h-[148px] max-h-[164px] flex-col items-start justify-center gap-[14px] rounded-[14px] border border-white/[0.06] bg-[#0F172A] px-6 py-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
+                <p className="text-[12px] font-medium uppercase tracking-[0.08em] text-[#7C89A0]">TMA Geral</p>
+                <p className="text-[44px] font-semibold leading-none text-[#F3F7FF]">{tmaSegmentado.geral.tma}</p>
+                <p className="text-[15px] font-normal text-[#8A94A6]">
                   {tmaSegmentado.geral.count} ligação{tmaSegmentado.geral.count === 1 ? "" : "ões"} no período filtrado
                 </p>
               </article>
 
-              <article className="h-full rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
-                <p className="text-[11px] uppercase tracking-[0.08em] text-[#6B7280]">TMA Cliente</p>
-                <p className="mt-2 text-[28px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{tmaSegmentado.cliente.tma}</p>
-                <p className="mt-2 text-[13px] text-[#6B7280]">
+              <article className="flex min-h-[148px] max-h-[164px] flex-col items-start justify-center gap-[14px] rounded-[14px] border border-white/[0.06] bg-[#0F172A] px-6 py-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
+                <p className="text-[12px] font-medium uppercase tracking-[0.08em] text-[#7C89A0]">TMA Cliente</p>
+                <p className="text-[44px] font-semibold leading-none text-[#F3F7FF]">{tmaSegmentado.cliente.tma}</p>
+                <p className="text-[15px] font-normal text-[#8A94A6]">
                   {tmaSegmentado.cliente.count} ligação{tmaSegmentado.cliente.count === 1 ? "" : "ões"}
                 </p>
               </article>
 
-              <article className="h-full rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
-                <p className="text-[11px] uppercase tracking-[0.08em] text-[#6B7280]">TMA Secretaria</p>
-                <p className="mt-2 text-[28px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{tmaSegmentado.secretaria.tma}</p>
-                <p className="mt-2 text-[13px] text-[#6B7280]">
+              <article className="flex min-h-[148px] max-h-[164px] flex-col items-start justify-center gap-[14px] rounded-[14px] border border-white/[0.06] bg-[#0F172A] px-6 py-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
+                <p className="text-[12px] font-medium uppercase tracking-[0.08em] text-[#7C89A0]">TMA Secretaria</p>
+                <p className="text-[44px] font-semibold leading-none text-[#F3F7FF]">{tmaSegmentado.secretaria.tma}</p>
+                <p className="text-[15px] font-normal text-[#8A94A6]">
                   {tmaSegmentado.secretaria.count} ligação{tmaSegmentado.secretaria.count === 1 ? "" : "ões"}
                 </p>
               </article>
