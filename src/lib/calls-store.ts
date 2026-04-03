@@ -1,5 +1,6 @@
-﻿import { initialLeads } from "@/lib/mock-data";
 import { CallAnalysisStatus, CallLog } from "@/types/crm";
+import { getLeadPhones } from "./lead-contact-utils";
+import { readLeadsCollection } from "./leads-customers-store";
 import { readCallLogsCollection, writeCallLogsCollection } from "./calls-collection-store";
 import { readDataFile, writeDataFile } from "./storage-paths";
 
@@ -132,11 +133,6 @@ async function flushCallLogsToDisk() {
   await writeCallLogsCollection(callLogsCache);
 }
 
-// Flush imediato — em Vercel serverless setTimeout pode ser morto antes de disparar
-function scheduleCallLogsFlush() {
-  void flushCallLogsToDisk();
-}
-
 async function ensureCallLogsCache(): Promise<CallLog[]> {
   if (callLogsCache) return callLogsCache;
   if (!callLogsLoadPromise) {
@@ -157,36 +153,65 @@ export async function getCallLogs(): Promise<CallLog[]> {
 export async function upsertCallLog(
   input: Partial<CallLog> & Pick<CallLog, "id">,
 ): Promise<{ record: CallLog; isNew: boolean }> {
-  const logs = await ensureCallLogsCache();
-  const now = new Date().toISOString();
-  const index = logs.findIndex((entry) => entry.id === input.id);
+  const result = await upsertCallLogs([input]);
+  if (result.records.length === 0) {
+    throw new Error("CALL_LOG_UPSERT_EMPTY");
+  }
+  return { record: result.records[0], isNew: result.createdCount > 0 };
+}
 
-  if (index === -1) {
-    const created = normalizeCallLog({
-      ...input,
-      createdAt: now,
-      updatedAt: now,
-    });
-    logs.unshift(created);
-    sortCallLogsInPlace(logs);
-    scheduleCallLogsFlush();
-    return { record: created, isNew: true };
+export async function upsertCallLogs(
+  inputs: Array<Partial<CallLog> & Pick<CallLog, "id">>,
+): Promise<{ records: CallLog[]; createdCount: number; updatedCount: number }> {
+  const logs = await ensureCallLogsCache();
+  if (inputs.length === 0) {
+    return { records: [], createdCount: 0, updatedCount: 0 };
   }
 
-  const current = logs[index];
-  const merged = normalizeCallLog({
-    ...current,
-    ...input,
-    id: current.id,
-    externalCallId: input.externalCallId ?? current.externalCallId ?? null,
-    sessionId: input.sessionId ?? current.sessionId ?? null,
-    createdAt: current.createdAt,
-    updatedAt: now,
-  });
-  logs[index] = merged;
-  sortCallLogsInPlace(logs);
-  scheduleCallLogsFlush();
-  return { record: merged, isNew: false };
+  const records: CallLog[] = [];
+  let createdCount = 0;
+  let updatedCount = 0;
+  let changed = false;
+
+  for (const input of inputs) {
+    const now = new Date().toISOString();
+    const index = logs.findIndex((entry) => entry.id === input.id);
+
+    if (index === -1) {
+      const created = normalizeCallLog({
+        ...input,
+        createdAt: now,
+        updatedAt: now,
+      });
+      logs.unshift(created);
+      records.push(created);
+      createdCount += 1;
+      changed = true;
+      continue;
+    }
+
+    const current = logs[index];
+    const merged = normalizeCallLog({
+      ...current,
+      ...input,
+      id: current.id,
+      externalCallId: input.externalCallId ?? current.externalCallId ?? null,
+      sessionId: input.sessionId ?? current.sessionId ?? null,
+      createdAt: current.createdAt,
+      updatedAt: now,
+    });
+    logs[index] = merged;
+    records.push(merged);
+    updatedCount += 1;
+    changed = true;
+  }
+
+  if (changed) {
+    sortCallLogsInPlace(logs);
+    await flushCallLogsToDisk();
+  }
+
+  return { records, createdCount, updatedCount };
 }
 
 export async function updateCall(
@@ -218,7 +243,7 @@ export async function updateCall(
 
   logs[index] = merged;
   sortCallLogsInPlace(logs);
-  scheduleCallLogsFlush();
+  await flushCallLogsToDisk();
   return merged;
 }
 
@@ -226,8 +251,12 @@ export async function findLeadByPhone(phone?: string | null) {
   const normalized = normalizePhone(phone);
   if (!normalized) return null;
 
-  const match = initialLeads.find(
-    (lead) => normalizePhone(lead.phone).endsWith(normalized) || normalized.endsWith(normalizePhone(lead.phone)),
+  const leads = await readLeadsCollection();
+  const match = leads.find((lead) =>
+    getLeadPhones(lead)
+      .map((value) => normalizePhone(value))
+      .filter(Boolean)
+      .some((digits) => digits.endsWith(normalized) || normalized.endsWith(digits)),
   );
   if (!match) return null;
 
