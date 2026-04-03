@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const leadChildren = [
-  { href: "/leads/inbound", label: "Inbound" },
   { href: "/leads/outbound", label: "Outbound" },
 ];
 

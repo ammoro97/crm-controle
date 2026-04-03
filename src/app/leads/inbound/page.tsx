@@ -1,6 +1,5 @@
-import { LeadsView } from "@/components/leads/leads-view";
+import { redirect } from "next/navigation";
 
 export default function InboundLeadsPage() {
-  return <LeadsView title="Inbound" filter="inbound" />;
+  redirect("/leads/outbound");
 }
-
