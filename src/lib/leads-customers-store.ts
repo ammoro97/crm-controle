@@ -1,7 +1,6 @@
 import { createHash } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Lead } from "@/types/crm";
-import { readDataFile, writeDataFile } from "./storage-paths";
 import { getSupabaseAdmin } from "./supabase-admin";
 
 type LeadTableName = "crm_leads" | "crm_customers";
@@ -13,8 +12,6 @@ type LeadTableRow = {
 
 const LEADS_TABLE: LeadTableName = "crm_leads";
 const CUSTOMERS_TABLE: LeadTableName = "crm_customers";
-const LEADS_LEGACY_FILE = "crm.leads.v1.json";
-const CUSTOMERS_LEGACY_FILE = "crm.customers.v1.json";
 const DELETE_BATCH_SIZE = 500;
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -175,56 +172,32 @@ async function writeToTable(tableName: LeadTableName, leads: Lead[]): Promise<bo
   return upsertLeadsIntoTable(admin, tableName, leads);
 }
 
-async function readCollectionWithFallback(tableName: LeadTableName, legacyFile: string): Promise<Lead[]> {
+async function readCollection(tableName: LeadTableName): Promise<Lead[]> {
   const tableLeads = await readFromTable(tableName);
-  if (tableLeads && tableLeads.length > 0) {
-    return tableLeads;
-  }
-
-  const legacyLeads = dedupeByLeadId(asLeadArray(await readDataFile<Lead[]>(legacyFile, [])));
-  if (legacyLeads.length > 0) {
-    if (tableLeads !== null) {
-      const migrated = await writeToTable(tableName, legacyLeads);
-      if (migrated) {
-        console.log(`[LEAD_TABLE] legacy migration completed table=${tableName} count=${legacyLeads.length}`);
-      }
-    }
-    return legacyLeads;
-  }
-
   return tableLeads ?? [];
 }
 
-async function writeCollection(tableName: LeadTableName, legacyFile: string, leads: Lead[]) {
+async function writeCollection(tableName: LeadTableName, leads: Lead[]) {
   const normalized = dedupeByLeadId(asLeadArray(leads));
   const tableWriteOk = await writeToTable(tableName, normalized);
 
-  try {
-    await writeDataFile(legacyFile, normalized);
-  } catch (error) {
-    console.error(
-      `[LEAD_TABLE] legacy snapshot write error file=${legacyFile}`,
-      error instanceof Error ? error.message : error,
-    );
-  }
-
   if (!tableWriteOk) {
-    console.warn(`[LEAD_TABLE] write fallback-only table=${tableName}`);
+    throw new Error(`SUPABASE_REQUIRED_FOR_${tableName.toUpperCase()}_PERSISTENCE`);
   }
 }
 
 export async function readLeadsCollection() {
-  return readCollectionWithFallback(LEADS_TABLE, LEADS_LEGACY_FILE);
+  return readCollection(LEADS_TABLE);
 }
 
 export async function writeLeadsCollection(leads: Lead[]) {
-  return writeCollection(LEADS_TABLE, LEADS_LEGACY_FILE, leads);
+  return writeCollection(LEADS_TABLE, leads);
 }
 
 export async function readCustomersCollection() {
-  return readCollectionWithFallback(CUSTOMERS_TABLE, CUSTOMERS_LEGACY_FILE);
+  return readCollection(CUSTOMERS_TABLE);
 }
 
 export async function writeCustomersCollection(customers: Lead[]) {
-  return writeCollection(CUSTOMERS_TABLE, CUSTOMERS_LEGACY_FILE, customers);
+  return writeCollection(CUSTOMERS_TABLE, customers);
 }

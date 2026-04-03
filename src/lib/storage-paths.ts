@@ -2,14 +2,21 @@ import { promises as fs } from "fs";
 import path from "path";
 import { getSupabaseAdmin } from "./supabase-admin";
 
-// Estrategia de persistencia (ordem de prioridade):
-// 1. Supabase (persistente entre instancias e deploys) — requer SUPABASE_SERVICE_ROLE_KEY
-// 2. /tmp (efemero, perdido em cold starts — fallback local/dev)
-// 3. data/ bundlado (somente leitura, valor inicial de fabrica)
+// Storage priority:
+// 1. Supabase (persistent)
+// 2. /tmp (local fallback for non-critical keys)
+// 3. bundled data/ (read-only fallback for non-critical keys)
 
 const BUNDLE_DATA_DIR = path.join(process.cwd(), "data");
 const RUNTIME_DATA_DIR = "/tmp/crm-data";
 const STORAGE_TABLE = "crm_storage";
+const SUPABASE_REQUIRED_PREFIXES = [
+  "crm.",
+  "call-logs",
+  "call-analysis-requests",
+  "lead-ai-observations",
+  "lead-last-contact-overrides",
+];
 
 export function bundlePath(filename: string) {
   return path.join(BUNDLE_DATA_DIR, filename);
@@ -27,14 +34,19 @@ function toStorageKey(filename: string): string {
   return filename.replace(/\.json$/, "");
 }
 
+function requiresSupabasePersistence(key: string): boolean {
+  return SUPABASE_REQUIRED_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
 export async function readDataFile<T>(filename: string, fallback: T): Promise<T> {
   const key = toStorageKey(filename);
+  const supabaseRequired = requiresSupabasePersistence(key);
 
-  // 1. Supabase (fonte de verdade persistente)
   try {
     const admin = getSupabaseAdmin();
     if (!admin) {
-      console.warn(`[STORAGE] read key=${key} supabase=SKIP (cliente nulo — SUPABASE_SERVICE_ROLE_KEY ausente?)`);
+      console.warn(`[STORAGE] read key=${key} supabase=SKIP (service role missing)`);
+      if (supabaseRequired) return fallback;
     } else {
       const { data, error } = await admin
         .from(STORAGE_TABLE)
@@ -44,45 +56,54 @@ export async function readDataFile<T>(filename: string, fallback: T): Promise<T>
 
       if (error) {
         console.error(`[STORAGE] read key=${key} supabase=ERROR`, error.message);
+        if (supabaseRequired) return fallback;
       } else if (data?.value !== undefined && data.value !== null) {
         console.log(`[STORAGE] read key=${key} source=supabase`);
         return data.value as T;
       } else {
-        console.log(`[STORAGE] read key=${key} supabase=EMPTY (sem registro — tabela crm_storage existe?)`);
+        console.log(`[STORAGE] read key=${key} supabase=EMPTY`);
+        if (supabaseRequired) return fallback;
       }
     }
   } catch (err) {
     console.error(`[STORAGE] read key=${key} supabase=EXCEPTION`, err instanceof Error ? err.message : err);
+    if (supabaseRequired) return fallback;
   }
 
-  // 2. /tmp (instancia atual, local dev ou cache quente)
+  if (supabaseRequired) return fallback;
+
   try {
     const raw = await fs.readFile(runtimePath(filename), "utf8");
     console.log(`[STORAGE] read key=${key} source=tmp`);
     return JSON.parse(raw) as T;
   } catch {}
 
-  // 3. Bundle (somente leitura, valor inicial)
   try {
     const raw = await fs.readFile(bundlePath(filename), "utf8");
-    console.warn(`[STORAGE] read key=${key} source=BUNDLE (valor de fabrica — supabase e tmp indisponiveis)`);
+    console.warn(`[STORAGE] read key=${key} source=bundle`);
     return JSON.parse(raw) as T;
   } catch {}
 
-  console.warn(`[STORAGE] read key=${key} source=FALLBACK_DEFAULT`);
+  console.warn(`[STORAGE] read key=${key} source=fallback_default`);
   return fallback;
 }
 
 export async function writeDataFile<T>(filename: string, value: T): Promise<void> {
+  const key = toStorageKey(filename);
+  const supabaseRequired = requiresSupabasePersistence(key);
   let supabaseOk = false;
 
-  // 1. Supabase (persistente)
   try {
     const admin = getSupabaseAdmin();
-    if (admin) {
+    if (!admin) {
+      console.warn(`[STORAGE] write key=${key} supabase=SKIP (service role missing)`);
+      if (supabaseRequired) {
+        throw new Error("SUPABASE_REQUIRED_FOR_STORAGE_WRITE");
+      }
+    } else {
       const { error } = await admin.from(STORAGE_TABLE).upsert(
         {
-          key: toStorageKey(filename),
+          key,
           value,
           updated_at: new Date().toISOString(),
         },
@@ -92,34 +113,33 @@ export async function writeDataFile<T>(filename: string, value: T): Promise<void
         supabaseOk = true;
       } else {
         console.error(
-          `[STORAGE] write key=${toStorageKey(filename)} supabase=ERROR`,
+          `[STORAGE] write key=${key} supabase=ERROR`,
           error.message,
           `| code=${error.code} | details=${error.details} | hint=${error.hint}`,
         );
+        if (supabaseRequired) {
+          throw new Error("SUPABASE_REQUIRED_FOR_STORAGE_WRITE");
+        }
       }
-    } else {
-      console.warn(`[STORAGE] write key=${toStorageKey(filename)} supabase=SKIP (client nulo)`);
     }
   } catch (err) {
-    console.error(
-      `[STORAGE] write key=${toStorageKey(filename)} supabase=EXCEPTION`,
-      err instanceof Error ? err.message : err,
-    );
-    // Supabase indisponivel — continua para /tmp
+    console.error(`[STORAGE] write key=${key} supabase=EXCEPTION`, err instanceof Error ? err.message : err);
+    if (supabaseRequired) {
+      throw err instanceof Error ? err : new Error("SUPABASE_REQUIRED_FOR_STORAGE_WRITE");
+    }
   }
 
-  // 2. /tmp (fallback local/dev)
-  // Quando Supabase esta disponivel, sincroniza /tmp com o mesmo valor para
-  // evitar que instancias serverless retornem dado stale no fallback.
+  if (supabaseRequired) return;
+
   try {
     await ensureRuntimeDir();
     await fs.writeFile(runtimePath(filename), JSON.stringify(value, null, 2), "utf8");
     if (supabaseOk) {
-      console.log(`[STORAGE] write ok — supabase=true tmp=synced key=${toStorageKey(filename)}`);
+      console.log(`[STORAGE] write ok key=${key} supabase=true tmp=synced`);
     }
   } catch {
     if (!supabaseOk) {
-      console.error(`[STORAGE] write failed — supabase=false tmp=failed key=${toStorageKey(filename)}`);
+      console.error(`[STORAGE] write failed key=${key} supabase=false tmp=failed`);
     }
   }
 }

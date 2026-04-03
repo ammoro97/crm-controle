@@ -1,11 +1,10 @@
 import { createHash } from "crypto";
 import type { CallLog } from "@/types/crm";
-import { readDataFile, writeDataFile } from "./storage-paths";
 import { getSupabaseAdmin } from "./supabase-admin";
 
 const CALLS_TABLE = "crm_calls";
-const CALLS_LEGACY_FILE = "call-logs.json";
 const UPSERT_BATCH_SIZE = 500;
+const DELETE_BATCH_SIZE = 500;
 
 type CallTableRow = {
   call_id: string;
@@ -88,38 +87,69 @@ function toCallsFromRows(rows: CallTableRow[]): CallLog[] {
   return dedupeByCallId(calls);
 }
 
-export async function readCallLogsCollection(): Promise<CallLog[]> {
+function parseCallIdRows(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      if (!isObjectRecord(entry)) return "";
+      const callId = entry.call_id;
+      return typeof callId === "string" ? callId.trim() : "";
+    })
+    .filter(Boolean);
+}
+
+async function listCallIds() {
   const admin = getSupabaseAdmin();
+  if (!admin) return null;
+  const { data, error } = await admin.from(CALLS_TABLE).select("call_id");
+  if (error) {
+    console.error("[CALLS_TABLE] list ids error", error.message);
+    return null;
+  }
+  return parseCallIdRows(data as unknown);
+}
 
-  if (admin) {
-    const { data, error } = await admin
-      .from(CALLS_TABLE)
-      .select("call_id,payload")
-      .order("updated_at", { ascending: false });
+async function deleteCallIds(ids: string[]) {
+  if (ids.length === 0) return;
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
 
-    if (!error) {
-      const rows = parseCallRows(data as unknown);
-      if (rows.length > 0) {
-        return toCallsFromRows(rows);
-      }
-    } else {
-      console.error("[CALLS_TABLE] read error", error.message);
+  for (let index = 0; index < ids.length; index += DELETE_BATCH_SIZE) {
+    const chunk = ids.slice(index, index + DELETE_BATCH_SIZE);
+    const { error } = await admin.from(CALLS_TABLE).delete().in("call_id", chunk);
+    if (error) {
+      console.error("[CALLS_TABLE] delete stale rows error", error.message);
+      return;
     }
   }
+}
 
-  const legacy = dedupeByCallId(asCallLogArray(await readDataFile<CallLog[]>(CALLS_LEGACY_FILE, [])));
-  if (legacy.length > 0 && admin) {
-    await writeCallLogsCollection(legacy);
-    console.log(`[CALLS_TABLE] legacy migration completed count=${legacy.length}`);
+export async function readCallLogsCollection(): Promise<CallLog[]> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return [];
+
+  const { data, error } = await admin
+    .from(CALLS_TABLE)
+    .select("call_id,payload")
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    console.error("[CALLS_TABLE] read error", error.message);
+    return [];
   }
-  return legacy;
+
+  const rows = parseCallRows(data as unknown);
+  return toCallsFromRows(rows);
 }
 
 export async function writeCallLogsCollection(calls: CallLog[]) {
   const normalized = dedupeByCallId(asCallLogArray(calls));
   const admin = getSupabaseAdmin();
+  if (!admin) {
+    throw new Error("SUPABASE_REQUIRED_FOR_CALLS_PERSISTENCE");
+  }
 
-  if (admin && normalized.length > 0) {
+  if (normalized.length > 0) {
     const nowIso = new Date().toISOString();
     const rows = normalized.map((call) => ({
       call_id: call.id,
@@ -137,14 +167,15 @@ export async function writeCallLogsCollection(calls: CallLog[]) {
       const { error } = await admin.from(CALLS_TABLE).upsert(chunk, { onConflict: "call_id" });
       if (error) {
         console.error("[CALLS_TABLE] upsert error", error.message);
-        break;
+        throw new Error("CALLS_TABLE_UPSERT_FAILED");
       }
     }
   }
 
-  try {
-    await writeDataFile(CALLS_LEGACY_FILE, normalized);
-  } catch (error) {
-    console.error("[CALLS_TABLE] legacy snapshot write error", error instanceof Error ? error.message : error);
+  const existingIds = await listCallIds();
+  if (existingIds) {
+    const keepIds = new Set(normalized.map((call) => call.id));
+    const staleIds = existingIds.filter((callId) => !keepIds.has(callId));
+    await deleteCallIds(staleIds);
   }
 }
