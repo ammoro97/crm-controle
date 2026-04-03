@@ -10,11 +10,14 @@ type AppShellProps = {
   children: ReactNode;
 };
 
+const SIDEBAR_PINNED_STORAGE_KEY = "crm:sidebar:pinned:v1";
+
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { currentUser, loading } = useAuth();
   const [open, setOpen] = useState(false);
+  const [sidebarPinned, setSidebarPinned] = useState(true);
   const [activeCallSession, setActiveCallSession] = useState<ActiveCallSession | null>(null);
   const normalizedPath = (pathname || "/").replace(/\/+$/, "") || "/";
   const isAuthRoute = normalizedPath === "/login" || normalizedPath === "/cadastro";
@@ -38,6 +41,23 @@ export function AppShell({ children }: AppShellProps) {
     sync();
     return subscribePostCallFlow(sync);
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SIDEBAR_PINNED_STORAGE_KEY);
+      setSidebarPinned(raw !== "0");
+    } catch {
+      setSidebarPinned(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_PINNED_STORAGE_KEY, sidebarPinned ? "1" : "0");
+    } catch {
+      // noop
+    }
+  }, [sidebarPinned]);
 
   if (loading) {
     return (
@@ -68,13 +88,13 @@ export function AppShell({ children }: AppShellProps) {
       </div>
 
       <div className="fixed inset-y-0 left-0 z-30 hidden md:block">
-        <Sidebar />
+        <Sidebar isPinned={sidebarPinned} onPinnedChange={setSidebarPinned} />
       </div>
 
       {open ? (
         <div className="fixed inset-0 z-50 flex md:hidden">
           <div className="w-64">
-            <Sidebar onNavigate={() => setOpen(false)} />
+            <Sidebar onNavigate={() => setOpen(false)} isPinned />
           </div>
           <button
             className="flex-1 bg-slate-950/70"
@@ -103,7 +123,7 @@ export function AppShell({ children }: AppShellProps) {
         </div>
       ) : null}
 
-      <main className="px-4 py-6 md:ml-64 md:px-7">{children}</main>
+      <main className={`px-4 py-6 md:px-7 ${sidebarPinned ? "md:ml-64" : "md:ml-[74px]"}`}>{children}</main>
     </div>
   );
 }
