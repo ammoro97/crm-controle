@@ -382,6 +382,10 @@ function normalizeText(value?: string | null) {
     .trim();
 }
 
+function isClosingNextAction(nextAction?: string | null) {
+  return inferAgendaEventTypeFromNextAction(nextAction) === "call_conversao";
+}
+
 function normalizeFinalizacaoLabel(value: string) {
   const normalized = normalizeText(value);
   if (!normalized) return "-";
@@ -1392,6 +1396,8 @@ export default function LigacoesPage() {
       : [];
   const secondaryFieldLabel = "Subfinalização";
   const showFollowUpFields = showNextActionField && nextActionComFollowUp.has(postCallForm.nextAction);
+  const isClosingSchedule = isClosingNextAction(postCallForm.nextAction);
+  const scheduleSectionLabel = isClosingSchedule ? "Agendamento de fechamento" : "Agendamento de follow-up";
   const wrapupLeadPrimaryEmail = postCallForm.primaryEmail;
   const availableWrapupEmailTargets = useMemo(
     () => postCallForm.emailItems.map((item) => String(item.value || "").trim()).filter(Boolean),
@@ -3145,6 +3151,7 @@ export default function LigacoesPage() {
     }
 
     const eventType = inferAgendaEventTypeFromNextAction(formState.nextAction);
+    const meetingReason: "fechamento" | "follow-up" = eventType === "call_conversao" ? "fechamento" : "follow-up";
     const channel = inferAgendaChannelFromType(eventType);
     const nowIso = new Date().toISOString();
 
@@ -3154,7 +3161,7 @@ export default function LigacoesPage() {
       personName: lead?.name || session.nome || "Lead sem nome",
       date: formState.followUpDate,
       callTime: formState.followUpTime,
-      reason: "follow-up",
+      reason: meetingReason,
       owner: ownerName,
       notes: notes.join("\n"),
       status: "ativo",
@@ -3176,7 +3183,7 @@ export default function LigacoesPage() {
 
     const agendamentoDescricao = (() => {
       const acao = String(formState.nextAction || "").trim().toLowerCase();
-      if (acao.includes("video")) return "Reuniao agendada com o lead.";
+      if (acao.includes("video")) return "Call de fechamento agendada com o lead.";
       if (acao.includes("whatsapp")) return "Retorno agendado com o lead.";
       if (acao.includes("reuniao")) return "Reuniao agendada com o lead.";
       if (acao.includes("ligar")) return "Ligação agendada com o lead.";
@@ -3232,7 +3239,11 @@ export default function LigacoesPage() {
       return;
     }
     if (showFollowUpFields && (!postCallForm.followUpDate || !postCallForm.followUpTime)) {
-      setWrapupError("Preencha data e horario do follow-up para continuar.");
+      setWrapupError(
+        isClosingSchedule
+          ? "Preencha data e horario do agendamento de fechamento para continuar."
+          : "Preencha data e horario do follow-up para continuar.",
+      );
       return;
     }
     if (!postCallForm.phoneItems.length) {
@@ -4049,7 +4060,7 @@ export default function LigacoesPage() {
               ) : null}
               {showFollowUpFields ? (
                 <div className="md:col-span-2">
-                  <p className="text-sm text-slate-200">Agendamento de follow-up</p>
+                  <p className="text-sm text-slate-200">{scheduleSectionLabel}</p>
                   <p className="mt-1 text-xs text-slate-400">
                     Selecione dia e horario disponiveis em slots de 30 minutos e confirme em Agendar.
                   </p>
