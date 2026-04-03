@@ -133,8 +133,8 @@ async function flushCallLogsToDisk() {
   await writeCallLogsCollection(callLogsCache);
 }
 
-async function ensureCallLogsCache(): Promise<CallLog[]> {
-  if (callLogsCache) return callLogsCache;
+async function ensureCallLogsCache(forceRefresh = false): Promise<CallLog[]> {
+  if (!forceRefresh && callLogsCache) return callLogsCache;
   if (!callLogsLoadPromise) {
     callLogsLoadPromise = readCallLogsFromDisk().then((logs) => {
       callLogsCache = logs;
@@ -146,7 +146,8 @@ async function ensureCallLogsCache(): Promise<CallLog[]> {
 }
 
 export async function getCallLogs(): Promise<CallLog[]> {
-  const logs = await ensureCallLogsCache();
+  // Sempre busca snapshot mais recente do Supabase para evitar divergencia entre instancias.
+  const logs = await ensureCallLogsCache(true);
   return [...logs];
 }
 
@@ -163,7 +164,7 @@ export async function upsertCallLog(
 export async function upsertCallLogs(
   inputs: Array<Partial<CallLog> & Pick<CallLog, "id">>,
 ): Promise<{ records: CallLog[]; createdCount: number; updatedCount: number }> {
-  const logs = await ensureCallLogsCache();
+  const logs = await ensureCallLogsCache(true);
   if (inputs.length === 0) {
     return { records: [], createdCount: 0, updatedCount: 0 };
   }
@@ -223,7 +224,7 @@ export async function updateCall(
     throw new Error("CALL_LOG_ID_REQUIRED");
   }
 
-  const logs = await ensureCallLogsCache();
+  const logs = await ensureCallLogsCache(true);
   const index = logs.findIndex((entry) => entry.id === normalizedId);
   if (index < 0) {
     throw new Error("CALL_LOG_NOT_FOUND");
