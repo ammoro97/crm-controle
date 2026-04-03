@@ -2964,16 +2964,12 @@ export default function LigacoesPage() {
       const percent = total > 0 ? (segment.count / total) * 100 : 0;
       const sweepAngle = total > 0 ? (segment.count / total) * 360 : 0;
       const endAngle = startAngle + sweepAngle;
-      const path = sweepAngle > 0 ? buildPieSlicePath(60, 60, 50, startAngle, endAngle) : "";
-      const midAngle = startAngle + sweepAngle / 2;
-      const labelPos = polarToCartesian(60, 60, 30, midAngle);
+      const path = sweepAngle > 0 ? buildPieSlicePath(70, 70, 56, startAngle, endAngle) : "";
       const normalized = {
         ...segment,
         total,
         percent,
         path,
-        labelX: labelPos.x,
-        labelY: labelPos.y,
       };
       startAngle = endAngle;
       return normalized;
@@ -3008,7 +3004,7 @@ export default function LigacoesPage() {
 
   const finalizacaoDonutSlices = useMemo(() => {
     const total = finalizacaoChartWithUi.reduce((acc, item) => acc + item.count, 0);
-    const circumference = 2 * Math.PI * 52;
+    const circumference = 2 * Math.PI * 56;
     let offset = 0;
 
     return finalizacaoChartWithUi.map((item) => {
@@ -3577,15 +3573,6 @@ export default function LigacoesPage() {
                 <p className="mt-2 text-[13px] text-[#6B7280]">
                   {tmaSegmentado.cliente.count} ligação{tmaSegmentado.cliente.count === 1 ? "" : "ões"}
                 </p>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
-                  <div
-                    className="h-full rounded-full bg-[#22C55E]"
-                    style={{
-                      width: `${tmaSegmentado.geral.count > 0 ? (tmaSegmentado.cliente.count / tmaSegmentado.geral.count) * 100 : 0}%`,
-                      boxShadow: "0 0 8px rgba(34,197,94,0.45)",
-                    }}
-                  />
-                </div>
               </article>
 
               <article className="h-full rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
@@ -3594,15 +3581,6 @@ export default function LigacoesPage() {
                 <p className="mt-2 text-[13px] text-[#6B7280]">
                   {tmaSegmentado.secretaria.count} ligação{tmaSegmentado.secretaria.count === 1 ? "" : "ões"}
                 </p>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
-                  <div
-                    className="h-full rounded-full bg-[#64748B]"
-                    style={{
-                      width: `${tmaSegmentado.geral.count > 0 ? (tmaSegmentado.secretaria.count / tmaSegmentado.geral.count) * 100 : 0}%`,
-                      boxShadow: "0 0 8px rgba(100,116,139,0.45)",
-                    }}
-                  />
-                </div>
               </article>
             </div>
           )}
@@ -3614,39 +3592,24 @@ export default function LigacoesPage() {
             <p className="mt-1 text-[13px] text-[#6B7280]">Distribuição entre positivos, negativos e improdutivos</p>
           </div>
           {loading ? (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[200px_1fr]">
-              <div className="h-[170px] animate-pulse rounded-xl border border-white/[0.06] bg-[#0A0A0B]" />
-              <div className="h-[170px] animate-pulse rounded-xl border border-white/[0.06] bg-[#0A0A0B]" />
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_1fr]">
+              <div className="h-[190px] animate-pulse rounded-xl border border-white/[0.06] bg-[#0A0A0B]" />
+              <div className="h-[190px] animate-pulse rounded-xl border border-white/[0.06] bg-[#0A0A0B]" />
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[200px_1fr]">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_1fr]">
               <div className="rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
                 <div className="flex items-center justify-center">
-                  <div className="relative h-[120px] w-[120px]">
-                    <svg viewBox="0 0 120 120" className="h-[120px] w-[120px] -rotate-90">
-                      <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
+                  <div className="relative h-[140px] w-[140px]">
+                    <svg viewBox="0 0 140 140" className="h-[140px] w-[140px] -rotate-90">
+                      <circle cx="70" cy="70" r="56" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="12" />
                       {cpcPieSegments.map((segment) =>
                         segment.path ? <path key={segment.id} d={segment.path} fill={segment.color} /> : null,
                       )}
-                      {cpcPieSegments.map((segment) =>
-                        segment.percent >= 8 ? (
-                          <text
-                            key={`pie-label-${segment.id}`}
-                            x={segment.labelX}
-                            y={segment.labelY}
-                            transform={`rotate(90 ${segment.labelX} ${segment.labelY})`}
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                            className="fill-[#0A0A0B] text-[8px] font-semibold"
-                          >
-                            {Math.round(segment.percent)}%
-                          </text>
-                        ) : null,
-                      )}
                     </svg>
-                    <div className="absolute inset-[34px] flex flex-col items-center justify-center rounded-full border border-white/[0.06] bg-[#111827] text-center">
-                      <p className="text-[10px] uppercase tracking-[0.08em] text-[#6B7280]">Total</p>
-                      <p className="mt-1 text-lg font-semibold tracking-[-0.02em] text-[#E6EAF2]">{cpcPieSegments[0]?.total || 0}</p>
+                    <div className="absolute inset-[40px] flex flex-col items-center justify-center rounded-full border border-white/[0.06] bg-[#111827] text-center">
+                      <p className="text-[11px] text-[#6B7280]">Total</p>
+                      <p className="mt-1 text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{cpcPieSegments[0]?.total || 0}</p>
                     </div>
                   </div>
                 </div>
@@ -3662,15 +3625,15 @@ export default function LigacoesPage() {
                       <div className="flex items-center gap-2.5">
                         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
                         <div>
-                          <p className="text-[13px] font-medium text-[#E6EAF2]">{segment.label}</p>
-                          <p className="text-[13px] text-[#6B7280]">
+                          <p className="text-[12px] font-medium text-[#E6EAF2]">{segment.label}</p>
+                          <p className="text-[12px] text-[#6B7280]">
                             {segment.count} ligação{segment.count === 1 ? "" : "ões"}
                           </p>
                         </div>
                       </div>
-                      <p className="text-[28px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{Math.round(segment.percent)}%</p>
+                      <p className="text-[13px] font-medium text-[#E6EAF2]">{Math.round(segment.percent)}%</p>
                     </div>
-                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                    <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/[0.06]">
                       <div
                         className="h-full rounded-full"
                         style={{
@@ -3706,21 +3669,21 @@ export default function LigacoesPage() {
             <div className="grid gap-4 xl:grid-cols-[220px_1fr]">
               <div className="rounded-xl border border-white/[0.06] bg-[#111827] p-4 transition-all duration-200 ease-out hover:-translate-y-[2px]">
                 <div className="flex items-center justify-center">
-                  <div className="relative h-36 w-36 rounded-full border border-white/[0.06] p-3">
-                    <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
-                      <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="14" />
+                  <div className="relative h-[140px] w-[140px] rounded-full border border-white/[0.06] p-0">
+                    <svg viewBox="0 0 140 140" className="h-[140px] w-[140px] -rotate-90">
+                      <circle cx="70" cy="70" r="56" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="12" />
                       {finalizacaoDonutSlices.map((item) => {
                         const isHighlighted = hoveredFinalizacaoLabel === item.label;
                         const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
                         return (
                           <circle
                             key={`donut-${item.label}`}
-                            cx="60"
-                            cy="60"
-                            r="52"
+                            cx="70"
+                            cy="70"
+                            r="56"
                             fill="none"
                             stroke={finalizacaoColorHex(item.label)}
-                            strokeWidth={isHighlighted ? 16 : 14}
+                            strokeWidth={isHighlighted ? 14 : 12}
                             strokeDasharray={item.dasharray}
                             strokeDashoffset={item.dashoffset}
                             strokeLinecap="butt"
@@ -3731,33 +3694,11 @@ export default function LigacoesPage() {
                         );
                       })}
                     </svg>
-                    <div className="absolute inset-6 flex flex-col items-center justify-center rounded-full border border-white/[0.06] bg-[#111827] text-center">
-                      <p className="text-[10px] uppercase tracking-[0.08em] text-[#6B7280]">Total</p>
-                      <p className="mt-1 text-lg font-semibold tracking-[-0.02em] text-[#E6EAF2]">{filteredCalls.length}</p>
+                    <div className="absolute inset-[40px] flex flex-col items-center justify-center rounded-full border border-white/[0.06] bg-[#111827] text-center">
+                      <p className="text-[11px] text-[#6B7280]">Total</p>
+                      <p className="mt-1 text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{filteredCalls.length}</p>
                     </div>
                   </div>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {finalizacaoChartWithUi.slice(0, 3).map((item) => {
-                    const isHighlighted = hoveredFinalizacaoLabel === item.label;
-                    const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
-                    return (
-                      <div
-                        key={`top-${item.label}`}
-                        className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 transition-all duration-200 ease-out ${
-                          isHighlighted ? "border-white/20 bg-[#0A0A0B]" : "border-white/[0.06] bg-[#111827]"
-                        } ${isDimmed ? "opacity-45" : "opacity-100"}`}
-                        onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
-                        onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
-                      >
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className={`h-2 w-2 shrink-0 rounded-full ${item.ui.barClass}`} />
-                          <span className="truncate text-[12px] text-[#E6EAF2]">{item.label}</span>
-                        </div>
-                        <span className="text-[12px] font-semibold text-[#E6EAF2]">{item.percent}%</span>
-                      </div>
-                    );
-                  })}
                 </div>
               </div>
 
@@ -3791,7 +3732,7 @@ export default function LigacoesPage() {
                           </span>
                         </div>
                       </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                      <div className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
                         <div
                           className={`h-full rounded-full ${finalizacaoBarColor(item.label)}`}
                           style={{
