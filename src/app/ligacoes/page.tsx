@@ -1299,10 +1299,6 @@ function finalizacaoBarColor(label: string) {
   return getFinalizacaoUi(label).barClass;
 }
 
-function finalizacaoColorHex(label: string) {
-  return getFinalizacaoUi(label).hex;
-}
-
 function normalizeMeetingPersonName(value?: string) {
   return String(value || "").trim().toLowerCase();
 }
@@ -2993,34 +2989,6 @@ export default function LigacoesPage() {
     return sorted;
   }, [filteredCalls]);
 
-  const finalizacaoChartWithUi = useMemo(
-    () =>
-      finalizacaoChart.map((item) => ({
-        ...item,
-        ui: getFinalizacaoUi(item.label),
-      })),
-    [finalizacaoChart],
-  );
-
-  const finalizacaoDonutSlices = useMemo(() => {
-    const total = finalizacaoChartWithUi.reduce((acc, item) => acc + item.count, 0);
-    const circumference = 2 * Math.PI * 56;
-    let offset = 0;
-
-    return finalizacaoChartWithUi.map((item) => {
-      const fraction = total > 0 ? item.count / total : 0;
-      const length = circumference * fraction;
-      const segment = {
-        ...item,
-        circumference,
-        dasharray: `${length} ${Math.max(circumference - length, 0)}`,
-        dashoffset: -offset,
-      };
-      offset += length;
-      return segment;
-    });
-  }, [finalizacaoChartWithUi]);
-
   const applyWrapupToLead = (
     session: ActiveCallSession,
     formState: PostCallFormState,
@@ -3598,8 +3566,8 @@ export default function LigacoesPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_1fr]">
-              <div className="rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
-                <div className="flex items-center justify-center">
+              <div className="flex h-full min-h-[190px] items-center justify-center rounded-xl border border-white/[0.06] bg-[#111827] p-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
+                <div className="flex h-full w-full items-center justify-center">
                   <div className="relative h-[140px] w-[140px]">
                     <svg viewBox="0 0 140 140" className="h-[140px] w-[140px] -rotate-90">
                       <circle cx="70" cy="70" r="56" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="12" />
@@ -3609,7 +3577,9 @@ export default function LigacoesPage() {
                     </svg>
                     <div className="absolute inset-[40px] flex flex-col items-center justify-center rounded-full border border-white/[0.06] bg-[#111827] text-center">
                       <p className="text-[11px] text-[#6B7280]">Total</p>
-                      <p className="mt-1 text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{cpcPieSegments[0]?.total || 0}</p>
+                      <p className="mt-1 text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">
+                        {cpcPieSegments[0]?.total || 0}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -3625,7 +3595,7 @@ export default function LigacoesPage() {
                       <div className="flex items-center gap-2.5">
                         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
                         <div>
-                          <p className="text-[12px] font-medium text-[#E6EAF2]">{segment.label}</p>
+                          <p className="text-[13px] font-medium text-[#E6EAF2]">{segment.label}</p>
                           <p className="text-[12px] text-[#6B7280]">
                             {segment.count} ligação{segment.count === 1 ? "" : "ões"}
                           </p>
@@ -3666,72 +3636,26 @@ export default function LigacoesPage() {
           {finalizacaoChart.length === 0 ? (
             <p className="text-sm text-[#6B7280]">Sem dados para exibir.</p>
           ) : (
-            <div className="grid gap-4 xl:grid-cols-[220px_1fr]">
-              <div className="rounded-xl border border-white/[0.06] bg-[#111827] p-4 transition-all duration-200 ease-out hover:-translate-y-[2px]">
-                <div className="flex items-center justify-center">
-                  <div className="relative h-[140px] w-[140px] rounded-full border border-white/[0.06] p-0">
-                    <svg viewBox="0 0 140 140" className="h-[140px] w-[140px] -rotate-90">
-                      <circle cx="70" cy="70" r="56" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="12" />
-                      {finalizacaoDonutSlices.map((item) => {
-                        const isHighlighted = hoveredFinalizacaoLabel === item.label;
-                        const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
-                        return (
-                          <circle
-                            key={`donut-${item.label}`}
-                            cx="70"
-                            cy="70"
-                            r="56"
-                            fill="none"
-                            stroke={finalizacaoColorHex(item.label)}
-                            strokeWidth={isHighlighted ? 14 : 12}
-                            strokeDasharray={item.dasharray}
-                            strokeDashoffset={item.dashoffset}
-                            strokeLinecap="butt"
-                            className={`cursor-pointer transition-all duration-200 ease-out ${isDimmed ? "opacity-35" : "opacity-100"}`}
-                            onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
-                            onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
-                          />
-                        );
-                      })}
-                    </svg>
-                    <div className="absolute inset-[40px] flex flex-col items-center justify-center rounded-full border border-white/[0.06] bg-[#111827] text-center">
-                      <p className="text-[11px] text-[#6B7280]">Total</p>
-                      <p className="mt-1 text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">{filteredCalls.length}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                {finalizacaoChartWithUi.map((item) => {
-                  const isOthers = normalizeFinalizacaoKey(item.label) === "outros";
-                  const isHighlighted = hoveredFinalizacaoLabel === item.label;
-                  const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
-                  return (
-                    <div
-                      key={item.label}
-                      className={`cursor-pointer rounded-xl border p-3 transition-all duration-200 ease-out hover:-translate-y-[2px] ${
-                        isHighlighted
-                          ? "border-white/20 bg-[#0A0A0B]"
-                          : isOthers
-                            ? "border-white/[0.06] bg-[#111827]"
-                            : "border-white/[0.06] bg-[#111827]"
-                      } ${isDimmed ? "opacity-45" : "opacity-100"}`}
-                      onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
-                      onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${item.ui.barClass}`} />
-                          <span className="truncate text-[13px] font-medium text-[#E6EAF2]">{item.label}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-[12px]">
-                          <span className="text-[#6B7280]">{item.count}</span>
-                          <span className={`rounded px-1.5 py-0.5 font-medium ${item.ui.badgeClass}`}>
-                            {item.percent}%
-                          </span>
-                        </div>
-                      </div>
+            <div className="space-y-3">
+              {finalizacaoChart.map((item) => {
+                const isOthers = normalizeFinalizacaoKey(item.label) === "outros";
+                const isHighlighted = hoveredFinalizacaoLabel === item.label;
+                const isDimmed = Boolean(hoveredFinalizacaoLabel && !isHighlighted);
+                return (
+                  <div
+                    key={item.label}
+                    className={`cursor-pointer rounded-xl border p-4 transition-all duration-200 ease-out hover:-translate-y-[2px] ${
+                      isHighlighted
+                        ? "border-white/20 bg-[#0A0A0B]"
+                        : isOthers
+                          ? "border-white/[0.06] bg-[#111827]"
+                          : "border-white/[0.06] bg-[#111827]"
+                    } ${isDimmed ? "opacity-45" : "opacity-100"}`}
+                    onMouseEnter={() => setHoveredFinalizacaoLabel(item.label)}
+                    onMouseLeave={() => setHoveredFinalizacaoLabel(null)}
+                  >
+                    <div className="grid grid-cols-[minmax(140px,1fr)_1fr_auto] items-center gap-3">
+                      <span className="truncate text-[13px] font-medium text-[#E6EAF2]">{item.label}</span>
                       <div className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
                         <div
                           className={`h-full rounded-full ${finalizacaoBarColor(item.label)}`}
@@ -3741,10 +3665,11 @@ export default function LigacoesPage() {
                           }}
                         />
                       </div>
+                      <span className="text-[13px] font-medium text-[#E6EAF2]">{item.percent}%</span>
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </article>
