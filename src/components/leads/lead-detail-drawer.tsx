@@ -295,6 +295,11 @@ export function LeadDetailDrawer({
   const [finalizeOpen, setFinalizeOpen] = useState(false);
   const [finalizeReason, setFinalizeReason] = useState<LeadFinalizationReason>("apagar");
   const [saleValueDigits, setSaleValueDigits] = useState("");
+  const [finalizeConfirmOpen, setFinalizeConfirmOpen] = useState(false);
+  const [pendingFinalization, setPendingFinalization] = useState<{
+    reason: LeadFinalizationReason;
+    saleValueCents?: number;
+  } | null>(null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
   const prevLeadIdRef = useRef<string | null>(null);
 
@@ -304,6 +309,8 @@ export function LeadDetailDrawer({
     setActiveTab(initialTab || "resumo");
     setTargetObservationId(initialObservationId || null);
     setFinalizeOpen(false);
+    setFinalizeConfirmOpen(false);
+    setPendingFinalization(null);
     setFinalizeReason("apagar");
     setSaleValueDigits("");
     setFinalizeError(null);
@@ -392,6 +399,8 @@ export function LeadDetailDrawer({
                 onClick={() => {
                   setFinalizeReason("apagar");
                   setSaleValueDigits("");
+                  setFinalizeConfirmOpen(false);
+                  setPendingFinalization(null);
                   setFinalizeError(null);
                   setFinalizeOpen(true);
                 }}
@@ -454,6 +463,8 @@ export function LeadDetailDrawer({
         open={showFinalizeAction && finalizeOpen}
         onClose={() => {
           setFinalizeOpen(false);
+          setFinalizeConfirmOpen(false);
+          setPendingFinalization(null);
           setFinalizeError(null);
         }}
       >
@@ -533,6 +544,8 @@ export function LeadDetailDrawer({
               className="btn-ghost h-9 px-3 py-1.5 text-xs"
               onClick={() => {
                 setFinalizeOpen(false);
+                setFinalizeConfirmOpen(false);
+                setPendingFinalization(null);
                 setFinalizeError(null);
               }}
             >
@@ -551,24 +564,87 @@ export function LeadDetailDrawer({
                   setFinalizeError("Informe um valor de venda valido (maior que zero) para concluir a compra efetuada.");
                   return;
                 }
-                const didFinalize = onFinalizeLead(
-                  draftLead,
-                  finalizeReason,
-                  finalizeReason === "compra_efetuada" ? saleValueCents : undefined,
-                );
-                if (!didFinalize) {
-                  setFinalizeError("Nao foi possivel finalizar o lead com os dados informados.");
-                  return;
-                }
-                setFinalizeOpen(false);
                 setFinalizeError(null);
-                onClose();
+                setPendingFinalization({
+                  reason: finalizeReason,
+                  saleValueCents: finalizeReason === "compra_efetuada" ? saleValueCents : undefined,
+                });
+                setFinalizeConfirmOpen(true);
               }}
             >
               Confirmar: {finalizeLabel}
             </button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        title="Confirmar finalizacao do lead"
+        open={showFinalizeAction && finalizeOpen && finalizeConfirmOpen && Boolean(pendingFinalization)}
+        onClose={() => setFinalizeConfirmOpen(false)}
+      >
+        {pendingFinalization ? (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-300">
+              Esta prestes a finalizar <span className="font-semibold text-slate-100">{lead.company || lead.name}</span>.
+            </p>
+            <div className="rounded-lg border border-border bg-slate-900/50 p-3 text-xs text-slate-200">
+              <p>
+                <span className="font-semibold text-slate-100">Acao:</span>{" "}
+                {pendingFinalization.reason === "compra_efetuada" ? "Compra efetuada" : "Apagar"}
+              </p>
+              {pendingFinalization.reason === "compra_efetuada" ? (
+                <p className="mt-1">
+                  <span className="font-semibold text-slate-100">Valor:</span>{" "}
+                  {formatSaleValueCents(pendingFinalization.saleValueCents ?? 0)}
+                </p>
+              ) : null}
+            </div>
+            <p className="text-xs text-amber-200">
+              Confirme apenas se tiver certeza. Essa acao finaliza o lead na base operacional.
+            </p>
+            {finalizeError ? (
+              <p className="rounded-md border border-rose-400/40 bg-rose-500/10 px-2.5 py-2 text-xs text-rose-200">
+                {finalizeError}
+              </p>
+            ) : null}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="btn-ghost h-9 px-3 py-1.5 text-xs"
+                onClick={() => setFinalizeConfirmOpen(false)}
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                className={`h-9 rounded-md border px-3 py-1.5 text-xs transition ${
+                  pendingFinalization.reason === "compra_efetuada"
+                    ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
+                    : "border-rose-500/40 bg-rose-500/20 text-rose-200 hover:bg-rose-500/30"
+                }`}
+                onClick={() => {
+                  const didFinalize = onFinalizeLead(
+                    draftLead,
+                    pendingFinalization.reason,
+                    pendingFinalization.reason === "compra_efetuada" ? pendingFinalization.saleValueCents : undefined,
+                  );
+                  if (!didFinalize) {
+                    setFinalizeError("Nao foi possivel finalizar o lead com os dados informados.");
+                    return;
+                  }
+                  setFinalizeConfirmOpen(false);
+                  setPendingFinalization(null);
+                  setFinalizeOpen(false);
+                  setFinalizeError(null);
+                  onClose();
+                }}
+              >
+                Confirmar finalizacao
+              </button>
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </div>
   );
