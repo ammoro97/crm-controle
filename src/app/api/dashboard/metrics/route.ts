@@ -12,6 +12,7 @@ import type { PostCallWrapup } from "@/lib/post-call-flow";
 const MEETINGS_FILE = "crm.agenda.meetings.v1.json";
 const LEAD_FINALIZATIONS_FILE = "crm.leads.finalizations.v1.json";
 const WRAPUPS_FILE = "crm.calls.wrapups.v1.json";
+const CRM_TIMEZONE_OFFSET = "-03:00";
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
@@ -47,22 +48,9 @@ function buildLocalDateTime(date?: string | null, time?: string | null): Date | 
   const dateMatch = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!dateMatch || !parsedTime) return null;
 
-  const year = Number(dateMatch[1]);
-  const month = Number(dateMatch[2]) - 1;
-  const day = Number(dateMatch[3]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-
-  const parsed = new Date(year, month, day, parsedTime.hour, parsedTime.minute, 0, 0);
+  const isoWithOffset = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}T${String(parsedTime.hour).padStart(2, "0")}:${String(parsedTime.minute).padStart(2, "0")}:00${CRM_TIMEZONE_OFFSET}`;
+  const parsed = new Date(isoWithOffset);
   if (Number.isNaN(parsed.getTime())) return null;
-  if (
-    parsed.getFullYear() !== year ||
-    parsed.getMonth() !== month ||
-    parsed.getDate() !== day ||
-    parsed.getHours() !== parsedTime.hour ||
-    parsed.getMinutes() !== parsedTime.minute
-  ) {
-    return null;
-  }
 
   return parsed;
 }
