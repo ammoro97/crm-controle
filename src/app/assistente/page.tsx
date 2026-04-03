@@ -144,103 +144,111 @@ export default function AssistentePage() {
   }
 
   return (
-    <section className="space-y-4">
-      <header className="panel px-5 py-4">
-        <p className="text-[11px] uppercase tracking-[0.14em] text-cyan-300">Assistente Ativo</p>
-        <h1 className="mt-1 text-2xl font-semibold text-slate-100">Janela do Assistente</h1>
-        <p className="mt-2 max-w-4xl text-sm text-slate-300">
-          Converse com o assistente para investigar dados, receber insights proativos e transformar ideias em
-          acompanhamento continuo.
-        </p>
+    <section className="mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[#3a3b45] bg-[#202123] shadow-panel">
+      <header className="border-b border-[#3a3b45] px-4 py-3 md:px-6">
+        <p className="text-[11px] uppercase tracking-[0.14em] text-[#6de7ff]">Assistente GPT</p>
+        <h1 className="mt-1 text-lg font-semibold text-slate-100 md:text-xl">Janela do Assistente</h1>
       </header>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-        <div className="panel flex min-h-[66vh] flex-col overflow-hidden">
-          <div
-            ref={messagesContainerRef}
-            className="flex-1 space-y-4 overflow-y-auto px-4 py-4 md:px-5"
-          >
-            {messages.map((message) => {
-              const isUser = message.role === "user";
-              return (
-                <article
-                  key={message.id}
-                  className={`max-w-[92%] rounded-xl border px-3 py-2 text-sm shadow-sm md:max-w-[82%] ${
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto bg-[#202123]"
+      >
+        {messages.map((message) => {
+          const isUser = message.role === "user";
+          return (
+            <article
+              key={message.id}
+              className={`border-b border-[#2b2c33] px-4 py-5 md:px-6 ${
+                isUser ? "bg-[#2a2b32]" : "bg-[#202123]"
+              }`}
+            >
+              <div className="mx-auto flex max-w-4xl gap-3">
+                <div
+                  className={`mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
                     isUser
-                      ? "ml-auto border-cyan-400/40 bg-cyan-500/15 text-cyan-50"
-                      : "mr-auto border-border bg-slate-900/70 text-slate-100"
+                      ? "bg-[#0b6a88] text-cyan-50"
+                      : "bg-[#3a3b45] text-slate-200"
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.12em]">
+                  {isUser ? "U" : "AI"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.12em]">
                     <span className={isUser ? "text-cyan-200" : "text-slate-400"}>
                       {isUser ? "Voce" : "Assistente"}
                     </span>
-                    <span className={isUser ? "text-cyan-200/80" : "text-slate-500"}>
-                      {formatTimeLabel(message.createdAt)}
-                    </span>
+                    <span className="text-slate-500">{formatTimeLabel(message.createdAt)}</span>
                   </div>
-                  <p className="mt-2 whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-100">{message.content}</p>
                   {!isUser && message.source ? (
-                    <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                    <p className="mt-3 text-[10px] uppercase tracking-[0.12em] text-slate-500">
                       Fonte: {message.source === "openai" ? "API IA" : "Fallback local"}
                     </p>
                   ) : null}
-                </article>
-              );
-            })}
-            {sending ? (
-              <article className="mr-auto max-w-[82%] rounded-xl border border-border bg-slate-900/70 px-3 py-2 text-sm text-slate-300">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Assistente</p>
-                <p className="mt-2">Analisando dados do CRM e preparando recomendacoes...</p>
-              </article>
-            ) : null}
+                </div>
+              </div>
+            </article>
+          );
+        })}
+
+        {sending ? (
+          <article className="border-b border-[#2b2c33] bg-[#202123] px-4 py-5 md:px-6">
+            <div className="mx-auto flex max-w-4xl gap-3">
+              <div className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#3a3b45] text-xs font-semibold text-slate-200">
+                AI
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400">Assistente</p>
+                <p className="mt-2 text-sm text-slate-300">Pensando...</p>
+              </div>
+            </div>
+          </article>
+        ) : null}
+      </div>
+
+      <div className="border-t border-[#3a3b45] bg-[#202123] px-4 py-3 md:px-6">
+        <div className="mx-auto max-w-4xl">
+          <div className="mb-3 flex flex-wrap gap-2">
+            {QUICK_PROMPTS.map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                className="rounded-full border border-[#4a4b57] bg-[#2a2b32] px-3 py-1.5 text-xs text-slate-200 transition hover:border-cyan-400/60 hover:text-cyan-100"
+                onClick={() => void sendMessage(prompt)}
+                disabled={sending}
+              >
+                {prompt}
+              </button>
+            ))}
           </div>
 
-          <form onSubmit={onSubmit} className="border-t border-border px-4 py-3 md:px-5">
-            <textarea
-              className="field min-h-24 resize-y"
-              placeholder="Exemplo: Analise meu funil por horario e me proponha 3 acoes com estimativa de impacto."
-              value={inputValue}
-              onChange={(event) => setInputValue(event.target.value)}
-              disabled={sending}
-            />
-            {errorMessage ? <p className="mt-2 text-xs text-rose-300">{errorMessage}</p> : null}
-            <div className="mt-3 flex items-center justify-end">
-              <button type="submit" className="btn-primary px-4" disabled={!canSend}>
-                {sending ? "Enviando..." : "Enviar"}
-              </button>
+          <form onSubmit={onSubmit}>
+            <div className="rounded-2xl border border-[#4a4b57] bg-[#2a2b32] p-2">
+              <textarea
+                className="max-h-52 min-h-[88px] w-full resize-y bg-transparent px-2 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-400"
+                placeholder="Pergunte qualquer coisa sobre os dados do CRM..."
+                value={inputValue}
+                onChange={(event) => setInputValue(event.target.value)}
+                disabled={sending}
+              />
+              <div className="flex items-center justify-between px-2 pb-1">
+                <p className="text-[11px] text-slate-400">
+                  Diga &quot;quero acompanhar esse insight&quot; para ativar monitoramento continuo.
+                </p>
+                <button
+                  type="submit"
+                  className="inline-flex h-9 items-center justify-center rounded-lg bg-emerald-400 px-4 text-sm font-semibold text-slate-900 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!canSend}
+                >
+                  {sending ? "Enviando..." : "Enviar"}
+                </button>
+              </div>
             </div>
           </form>
+
+          {errorMessage ? <p className="mt-2 text-xs text-rose-300">{errorMessage}</p> : null}
         </div>
-
-        <aside className="space-y-4">
-          <div className="panel p-4">
-            <h2 className="text-sm font-semibold text-slate-100">Atalhos de insight</h2>
-            <p className="mt-1 text-xs text-slate-400">
-              Clique em um atalho para pedir uma analise com foco em acao.
-            </p>
-            <div className="mt-3 space-y-2">
-              {QUICK_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  className="w-full rounded-lg border border-border bg-slate-900/70 px-3 py-2 text-left text-xs text-slate-200 transition hover:border-cyan-400/50 hover:bg-cyan-500/10"
-                  onClick={() => void sendMessage(prompt)}
-                  disabled={sending}
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="panel p-4">
-            <h2 className="text-sm font-semibold text-slate-100">Modo ativo</h2>
-            <p className="mt-1 text-xs leading-relaxed text-slate-400">
-              Diga &quot;quero acompanhar isso&quot; para eu transformar o insight em monitor continuo.
-            </p>
-          </div>
-        </aside>
       </div>
     </section>
   );
