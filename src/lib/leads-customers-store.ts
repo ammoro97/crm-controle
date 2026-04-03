@@ -1,7 +1,6 @@
 import { createHash } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Lead } from "@/types/crm";
-import { initialLeads } from "@/lib/mock-data";
 import { readDataFile, writeDataFile } from "./storage-paths";
 import { getSupabaseAdmin } from "./supabase-admin";
 
@@ -191,27 +190,6 @@ async function readCollectionWithFallback(tableName: LeadTableName, legacyFile: 
       }
     }
     return legacyLeads;
-  }
-
-  if (tableName === LEADS_TABLE) {
-    const bootstrapLeads = dedupeByLeadId(asLeadArray(initialLeads));
-    if (bootstrapLeads.length > 0) {
-      if (tableLeads !== null) {
-        const seeded = await writeToTable(tableName, bootstrapLeads);
-        if (seeded) {
-          console.log(`[LEAD_TABLE] bootstrap seed completed table=${tableName} count=${bootstrapLeads.length}`);
-        }
-      }
-      try {
-        await writeDataFile(legacyFile, bootstrapLeads);
-      } catch (error) {
-        console.error(
-          `[LEAD_TABLE] bootstrap legacy snapshot write error file=${legacyFile}`,
-          error instanceof Error ? error.message : error,
-        );
-      }
-      return bootstrapLeads;
-    }
   }
 
   return tableLeads ?? [];

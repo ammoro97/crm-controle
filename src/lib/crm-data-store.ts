@@ -1,6 +1,5 @@
 "use client";
 
-import { initialLeads, initialMeetings } from "@/lib/mock-data";
 import { normalizeMeetingsSnapshot } from "@/lib/agenda-events";
 import { Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
 
@@ -123,18 +122,6 @@ function enqueueSnapshotSync(storageKey: string, payloadValue: unknown) {
   scheduleSyncFlush();
 }
 
-function shouldHydrateStorageKey(storageKey: string) {
-  if (!isBrowser()) return false;
-  const raw = window.localStorage.getItem(storageKey);
-  if (raw === null) return true;
-  try {
-    const parsed = JSON.parse(raw);
-    return !Array.isArray(parsed);
-  } catch {
-    return true;
-  }
-}
-
 function applyHydratedSnapshot(storageKey: string, eventName: string, value: unknown[]) {
   if (!isBrowser()) return;
   window.localStorage.setItem(storageKey, JSON.stringify(value));
@@ -153,16 +140,16 @@ async function hydrateSnapshotsFromServer() {
     const data = (await response.json()) as SnapshotResponse;
     if (!data.success || !data.snapshots) return;
 
-    if (Array.isArray(data.snapshots.leads) && shouldHydrateStorageKey(LEADS_STORAGE_KEY)) {
+    if (Array.isArray(data.snapshots.leads)) {
       applyHydratedSnapshot(LEADS_STORAGE_KEY, LEADS_EVENT, cloneLeads(data.snapshots.leads));
     }
-    if (Array.isArray(data.snapshots.meetings) && shouldHydrateStorageKey(MEETINGS_STORAGE_KEY)) {
+    if (Array.isArray(data.snapshots.meetings)) {
       applyHydratedSnapshot(MEETINGS_STORAGE_KEY, MEETINGS_EVENT, cloneMeetings(data.snapshots.meetings));
     }
-    if (Array.isArray(data.snapshots.customers) && shouldHydrateStorageKey(CUSTOMERS_STORAGE_KEY)) {
+    if (Array.isArray(data.snapshots.customers)) {
       applyHydratedSnapshot(CUSTOMERS_STORAGE_KEY, CUSTOMERS_EVENT, cloneLeads(data.snapshots.customers));
     }
-    if (Array.isArray(data.snapshots.leadFinalizations) && shouldHydrateStorageKey(LEAD_FINALIZATIONS_STORAGE_KEY)) {
+    if (Array.isArray(data.snapshots.leadFinalizations)) {
       applyHydratedSnapshot(
         LEAD_FINALIZATIONS_STORAGE_KEY,
         LEAD_FINALIZATIONS_EVENT,
@@ -183,29 +170,31 @@ function ensureSnapshotsHydrated() {
 
 export function getLeadsSnapshot(): Lead[] {
   ensureSnapshotsHydrated();
-  if (typeof window === "undefined") return cloneLeads(initialLeads);
-  const seeded = cloneLeads(initialLeads);
+  if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(LEADS_STORAGE_KEY);
     if (!raw) {
-      window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(seeded));
-      window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: seeded }));
-      enqueueSnapshotSync(LEADS_STORAGE_KEY, seeded);
-      return seeded;
+      const empty: Lead[] = [];
+      window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(empty));
+      window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: empty }));
+      enqueueSnapshotSync(LEADS_STORAGE_KEY, empty);
+      return empty;
     }
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(seeded));
-      window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: seeded }));
-      enqueueSnapshotSync(LEADS_STORAGE_KEY, seeded);
-      return seeded;
+      const empty: Lead[] = [];
+      window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(empty));
+      window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: empty }));
+      enqueueSnapshotSync(LEADS_STORAGE_KEY, empty);
+      return empty;
     }
     return cloneLeads(parsed as Lead[]);
   } catch {
-    window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(seeded));
-    window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: seeded }));
-    enqueueSnapshotSync(LEADS_STORAGE_KEY, seeded);
-    return seeded;
+    const empty: Lead[] = [];
+    window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(empty));
+    window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: empty }));
+    enqueueSnapshotSync(LEADS_STORAGE_KEY, empty);
+    return empty;
   }
 }
 
@@ -219,29 +208,31 @@ export function setLeadsSnapshot(next: Lead[]) {
 
 export function getMeetingsSnapshot(): Meeting[] {
   ensureSnapshotsHydrated();
-  if (typeof window === "undefined") return cloneMeetings(initialMeetings);
-  const seeded = cloneMeetings(initialMeetings);
+  if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(MEETINGS_STORAGE_KEY);
     if (!raw) {
-      window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(seeded));
-      window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: seeded }));
-      enqueueSnapshotSync(MEETINGS_STORAGE_KEY, seeded);
-      return seeded;
+      const empty: Meeting[] = [];
+      window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(empty));
+      window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: empty }));
+      enqueueSnapshotSync(MEETINGS_STORAGE_KEY, empty);
+      return empty;
     }
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(seeded));
-      window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: seeded }));
-      enqueueSnapshotSync(MEETINGS_STORAGE_KEY, seeded);
-      return seeded;
+      const empty: Meeting[] = [];
+      window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(empty));
+      window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: empty }));
+      enqueueSnapshotSync(MEETINGS_STORAGE_KEY, empty);
+      return empty;
     }
     return cloneMeetings(parsed as Meeting[]);
   } catch {
-    window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(seeded));
-    window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: seeded }));
-    enqueueSnapshotSync(MEETINGS_STORAGE_KEY, seeded);
-    return seeded;
+    const empty: Meeting[] = [];
+    window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(empty));
+    window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: empty }));
+    enqueueSnapshotSync(MEETINGS_STORAGE_KEY, empty);
+    return empty;
   }
 }
 
