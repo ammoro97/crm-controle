@@ -153,7 +153,8 @@ function isCallSchedulingMeeting(meeting: Meeting): boolean {
 
 function isAgendaScheduledCall(meeting: Meeting): boolean {
   if (!isCallSchedulingMeeting(meeting)) return false;
-  return normalizeAgendaEventStatus(meeting) === "ativo";
+  const status = normalizeAgendaEventStatus(meeting);
+  return status !== "apagado_logico" && status !== "remarcado";
 }
 
 function isFollowupMeeting(meeting: Meeting): boolean {
@@ -172,7 +173,8 @@ function isFutureActiveFollowup(meeting: Meeting, referenceDate: Date): boolean 
 }
 
 function isDecisionMakerWrapup(wrapup: PostCallWrapup): boolean {
-  return normalizeText(wrapup.rightPerson) === "sim";
+  if (normalizeText(wrapup.rightPerson) === "sim") return true;
+  return normalizeText(wrapup.result) === "falou com cliente";
 }
 
 function isOutboundMeeting(meeting: Meeting, outboundLeads: Lead[], outboundLeadIds: Set<string>): boolean {

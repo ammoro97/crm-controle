@@ -233,7 +233,8 @@ function hasDecisionContactByLeadData(lead: Lead): boolean {
 }
 
 function hasDecisionContactByWrapup(wrapup: PostCallWrapup): boolean {
-  return normalizeAgendaText(wrapup.rightPerson) === "sim";
+  if (normalizeAgendaText(wrapup.rightPerson) === "sim") return true;
+  return normalizeAgendaText(wrapup.result) === "falou com cliente";
 }
 
 function isOutboundEmailSentObservation(text?: string | null): boolean {
