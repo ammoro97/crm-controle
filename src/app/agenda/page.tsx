@@ -17,6 +17,7 @@ import {
   fromIsoDate,
   formatPeriodLabel,
   getCurrentReferenceDate,
+  getNextValidHalfHourSlot,
   BlockingInfo,
   getBlockingInfo,
   getPeriodBounds,
@@ -464,6 +465,25 @@ export default function AgendaPage() {
     });
   };
 
+  const resolveInitialCallTime = (dateIso: string, providedTime?: string): string | null => {
+    const explicitTime = String(providedTime || "").trim();
+    if (explicitTime) return explicitTime;
+
+    const todayIso = toIsoDate(nowRef);
+    if (dateIso !== todayIso) return "09:00";
+
+    const nextSlot = getNextValidHalfHourSlot(nowRef);
+    const match = nextSlot.match(/^(\d{2}):(\d{2})$/);
+    if (!match) return null;
+
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+    if (hour < 0 || hour > 23) return null;
+    if (minute < 0 || minute > 59) return null;
+    return nextSlot;
+  };
+
   const openNew = () => {
     if (!resolvedOwnerName) {
       setBlockingAlert({
@@ -473,13 +493,32 @@ export default function AgendaPage() {
       });
       return;
     }
-    setSelected(createEmptyMeeting(toIsoDate(selectedDate), resolvedOwnerName));
+    const selectedDateIso = toIsoDate(selectedDate);
+    const initialCallTime = resolveInitialCallTime(selectedDateIso);
+    if (!initialCallTime) {
+      setBlockingAlert({
+        message: "Nao ha horarios disponiveis para hoje.",
+        category: "Horario indisponivel",
+        reason: "Selecione outro dia para agendar.",
+      });
+      return;
+    }
+    setSelected({ ...createEmptyMeeting(selectedDateIso, resolvedOwnerName), callTime: initialCallTime });
     setIsNew(true);
     setOpen(true);
   };
 
   const openFromDate = (date: string, time?: string) => {
-    if (isPastDateTime(date, time || "09:00", nowRef)) {
+    const initialCallTime = resolveInitialCallTime(date, time);
+    if (!initialCallTime) {
+      setBlockingAlert({
+        message: "Nao ha horarios disponiveis para hoje.",
+        category: "Horario indisponivel",
+        reason: "Selecione outro dia para agendar.",
+      });
+      return;
+    }
+    if (isPastDateTime(date, initialCallTime, nowRef)) {
       setBlockingAlert({
         message: "Nao e possivel agendar em data ou horario que ja passou.",
         category: "Horario vencido",
@@ -487,7 +526,7 @@ export default function AgendaPage() {
       });
       return;
     }
-    const blockInfo = getBlockingInfo(date, time || "09:00", blocks);
+    const blockInfo = getBlockingInfo(date, initialCallTime, blocks);
     if (blockInfo) {
       showBlockingAlert(blockInfo);
       return;
@@ -500,7 +539,7 @@ export default function AgendaPage() {
       });
       return;
     }
-    setSelected({ ...createEmptyMeeting(date, resolvedOwnerName), callTime: time || "09:00" });
+    setSelected({ ...createEmptyMeeting(date, resolvedOwnerName), callTime: initialCallTime });
     setIsNew(true);
     setOpen(true);
   };
