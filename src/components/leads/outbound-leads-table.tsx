@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Modal } from "@/components/ui/modal";
 import { getLeadPhoneItems, getLeadPhones } from "@/lib/lead-contact-utils";
@@ -397,6 +398,7 @@ const RESPONSAVEL_REQUIRED_MESSAGE =
 
 export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: OutboundLeadsTableProps) {
   const { currentUser } = useAuth();
+  const router = useRouter();
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const bottomScrollRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -470,8 +472,8 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
           ? "Existe uma ligacao encerrada aguardando finalizacao obrigatoria. Finalize antes de iniciar outra."
           : "Existe uma ligacao em andamento. Conclua essa chamada antes de iniciar outra.";
       setCallFeedback(lead.id, { type: "error", message: blockingMessage });
-      if (typeof window !== "undefined" && blocking.reason === "pending_wrapup") {
-        window.location.assign("/ligacoes?postCall=1");
+      if (blocking.reason === "pending_wrapup") {
+        router.push("/ligacoes?postCall=1");
       }
       return;
     }
@@ -530,9 +532,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
         atendenteNome: resolvedResponsavel.responsavel.nome,
         sourcePath: typeof window !== "undefined" ? window.location.pathname : "/leads",
       });
-      if (typeof window !== "undefined") {
-        window.location.assign(`/ligacoes?postCall=1&sessionId=${encodeURIComponent(session.sessionId)}`);
-      }
+      router.push(`/ligacoes?postCall=1&sessionId=${encodeURIComponent(session.sessionId)}`);
     } catch {
       setCallFeedback(lead.id, { type: "error", message: "Falha de rede ao tentar ligar." });
     } finally {
