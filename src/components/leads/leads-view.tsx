@@ -14,6 +14,7 @@ import {
   setLeadFinalizationsSnapshot,
   setLeadsSnapshot,
   subscribeLeadFinalizationsSnapshot,
+  subscribeLeadsSnapshot,
   subscribeMeetingsSnapshot,
 } from "@/lib/crm-data-store";
 import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
@@ -876,6 +877,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const responsaveis = useResponsaveis();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const openedFromQueryRef = useRef<string | null>(null);
+  const hasSyncedLeadsRef = useRef(false);
+  const applyingExternalLeadsRef = useRef(false);
 
   const [leads, setLeads] = useState<Lead[]>(() => getLeadsSnapshot().map(normalizeLead));
   const [meetings, setMeetings] = useState<Meeting[]>(() => getMeetingsSnapshot());
@@ -1029,6 +1032,13 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       cancelled = true;
       window.clearInterval(intervalId);
     };
+  }, []);
+
+  useEffect(() => {
+    return subscribeLeadsSnapshot(() => {
+      applyingExternalLeadsRef.current = true;
+      setLeads(getLeadsSnapshot().map(normalizeLead));
+    });
   }, []);
 
   useEffect(() => {
@@ -1902,11 +1912,15 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   };
 
   useEffect(() => {
-    const saveId = setTimeout(() => {
-      setLeadsSnapshot(leads);
-    }, 220);
-
-    return () => clearTimeout(saveId);
+    if (!hasSyncedLeadsRef.current) {
+      hasSyncedLeadsRef.current = true;
+      return;
+    }
+    if (applyingExternalLeadsRef.current) {
+      applyingExternalLeadsRef.current = false;
+      return;
+    }
+    setLeadsSnapshot(leads);
   }, [leads]);
 
   useEffect(() => {

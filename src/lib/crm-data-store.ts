@@ -29,7 +29,6 @@ type SnapshotResponse = {
 };
 
 const syncQueue = new Map<SnapshotPayloadField, unknown>();
-let syncTimer: number | null = null;
 let syncInFlight = false;
 let hydrationStarted = false;
 
@@ -63,13 +62,29 @@ function hasPendingSyncQueue() {
 
 function scheduleSyncFlush() {
   if (!isBrowser()) return;
-  if (syncTimer !== null) {
-    window.clearTimeout(syncTimer);
+  void flushSyncQueue();
+}
+
+function applyFieldSnapshot(field: SnapshotPayloadField, value: unknown) {
+  if (field === "leads") {
+    applyHydratedSnapshot(LEADS_STORAGE_KEY, LEADS_EVENT, cloneLeads(value as Lead[]));
+    return;
   }
-  syncTimer = window.setTimeout(() => {
-    syncTimer = null;
-    void flushSyncQueue();
-  }, 420);
+  if (field === "meetings") {
+    applyHydratedSnapshot(MEETINGS_STORAGE_KEY, MEETINGS_EVENT, cloneMeetings(value as Meeting[]));
+    return;
+  }
+  if (field === "customers") {
+    applyHydratedSnapshot(CUSTOMERS_STORAGE_KEY, CUSTOMERS_EVENT, cloneLeads(value as Lead[]));
+    return;
+  }
+  if (field === "leadFinalizations") {
+    applyHydratedSnapshot(
+      LEAD_FINALIZATIONS_STORAGE_KEY,
+      LEAD_FINALIZATIONS_EVENT,
+      cloneLeadFinalizations(value as LeadFinalizationRecord[]),
+    );
+  }
 }
 
 async function flushSyncQueue() {
@@ -99,6 +114,10 @@ async function flushSyncQueue() {
 
     if (!response.ok) {
       throw new Error("SNAPSHOT_SYNC_FAILED");
+    }
+
+    for (const [field, value] of pendingEntries) {
+      applyFieldSnapshot(field, value);
     }
   } catch {
     for (const [field, value] of pendingEntries) {
@@ -177,35 +196,18 @@ export function getLeadsSnapshot(): Lead[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(LEADS_STORAGE_KEY);
-    if (!raw) {
-      const empty: Lead[] = [];
-      window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(empty));
-      window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: empty }));
-      enqueueSnapshotSync(LEADS_STORAGE_KEY, empty);
-      return empty;
-    }
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      const empty: Lead[] = [];
-      window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(empty));
-      window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: empty }));
-      enqueueSnapshotSync(LEADS_STORAGE_KEY, empty);
-      return empty;
-    }
+    if (!Array.isArray(parsed)) return [];
     return cloneLeads(parsed as Lead[]);
   } catch {
-    const empty: Lead[] = [];
-    window.localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(empty));
-    window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: empty }));
-    enqueueSnapshotSync(LEADS_STORAGE_KEY, empty);
-    return empty;
+    return [];
   }
 }
 
 export function setLeadsSnapshot(next: Lead[]) {
   if (typeof window === "undefined") return;
   const safeNext = cloneLeads(next);
-  window.dispatchEvent(new CustomEvent(LEADS_EVENT, { detail: safeNext }));
   enqueueSnapshotSync(LEADS_STORAGE_KEY, safeNext);
 }
 
@@ -214,35 +216,18 @@ export function getMeetingsSnapshot(): Meeting[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(MEETINGS_STORAGE_KEY);
-    if (!raw) {
-      const empty: Meeting[] = [];
-      window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(empty));
-      window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: empty }));
-      enqueueSnapshotSync(MEETINGS_STORAGE_KEY, empty);
-      return empty;
-    }
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      const empty: Meeting[] = [];
-      window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(empty));
-      window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: empty }));
-      enqueueSnapshotSync(MEETINGS_STORAGE_KEY, empty);
-      return empty;
-    }
+    if (!Array.isArray(parsed)) return [];
     return cloneMeetings(parsed as Meeting[]);
   } catch {
-    const empty: Meeting[] = [];
-    window.localStorage.setItem(MEETINGS_STORAGE_KEY, JSON.stringify(empty));
-    window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: empty }));
-    enqueueSnapshotSync(MEETINGS_STORAGE_KEY, empty);
-    return empty;
+    return [];
   }
 }
 
 export function setMeetingsSnapshot(next: Meeting[]) {
   if (typeof window === "undefined") return;
   const safeNext = cloneMeetings(next);
-  window.dispatchEvent(new CustomEvent(MEETINGS_EVENT, { detail: safeNext }));
   enqueueSnapshotSync(MEETINGS_STORAGE_KEY, safeNext);
 }
 
@@ -263,7 +248,6 @@ export function getCustomersSnapshot(): Lead[] {
 export function setCustomersSnapshot(next: Lead[]) {
   if (typeof window === "undefined") return;
   const safeNext = cloneLeads(next);
-  window.dispatchEvent(new CustomEvent(CUSTOMERS_EVENT, { detail: safeNext }));
   enqueueSnapshotSync(CUSTOMERS_STORAGE_KEY, safeNext);
 }
 
@@ -284,7 +268,6 @@ export function getLeadFinalizationsSnapshot(): LeadFinalizationRecord[] {
 export function setLeadFinalizationsSnapshot(next: LeadFinalizationRecord[]) {
   if (typeof window === "undefined") return;
   const safeNext = cloneLeadFinalizations(next);
-  window.dispatchEvent(new CustomEvent(LEAD_FINALIZATIONS_EVENT, { detail: safeNext }));
   enqueueSnapshotSync(LEAD_FINALIZATIONS_STORAGE_KEY, safeNext);
 }
 

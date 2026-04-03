@@ -42,6 +42,7 @@ import {
   setCustomersSnapshot,
   setLeadsSnapshot,
   setMeetingsSnapshot,
+  subscribeMeetingsSnapshot,
 } from "@/lib/crm-data-store";
 import { getLeadNames } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
@@ -326,6 +327,8 @@ export default function AgendaPage() {
   const hasActiveSearch = normalizeSearchText(searchTerm).length > 0;
   const [nowRef, setNowRef] = useState<Date>(() => getCurrentReferenceDate());
   const openedEventFromQueryRef = useRef<string>("");
+  const hasSyncedMeetingsRef = useRef(false);
+  const applyingExternalMeetingsRef = useRef(false);
   const today = startOfDay(nowRef);
 
   useEffect(() => {
@@ -864,10 +867,22 @@ export default function AgendaPage() {
   };
 
   useEffect(() => {
-    const saveId = setTimeout(() => {
-      setMeetingsSnapshot(meetings);
-    }, 220);
-    return () => clearTimeout(saveId);
+    return subscribeMeetingsSnapshot(() => {
+      applyingExternalMeetingsRef.current = true;
+      setMeetings(normalizeMeetingsSnapshot(getMeetingsSnapshot()));
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!hasSyncedMeetingsRef.current) {
+      hasSyncedMeetingsRef.current = true;
+      return;
+    }
+    if (applyingExternalMeetingsRef.current) {
+      applyingExternalMeetingsRef.current = false;
+      return;
+    }
+    setMeetingsSnapshot(meetings);
   }, [meetings]);
 
   useEffect(() => {
