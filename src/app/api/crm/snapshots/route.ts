@@ -62,6 +62,20 @@ export async function POST(request: NextRequest) {
 
     const leads = asArray<Lead>(body?.leads);
     if (leads) {
+      if (leads.length === 0) {
+        const currentLeads = await readLeadsCollection();
+        if (currentLeads.length > 0) {
+          return NextResponse.json(
+            {
+              success: false,
+              message:
+                "Bloqueado snapshot vazio de leads para evitar apagar crm_leads sem confirmacao explicita.",
+              code: "LEADS_EMPTY_SNAPSHOT_BLOCKED",
+            },
+            { status: 409 },
+          );
+        }
+      }
       writes.push(writeLeadsCollection(leads));
     }
 
@@ -94,7 +108,17 @@ export async function POST(request: NextRequest) {
 
     await Promise.all(writes);
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "LEADS_EMPTY_SNAPSHOT_BLOCKED") {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Bloqueado snapshot vazio de leads para evitar perda de dados.",
+          code: "LEADS_EMPTY_SNAPSHOT_BLOCKED",
+        },
+        { status: 409 },
+      );
+    }
     return NextResponse.json(
       { success: false, message: "Nao foi possivel salvar snapshots do CRM." },
       { status: 500 },

@@ -179,6 +179,15 @@ async function readCollection(tableName: LeadTableName): Promise<Lead[]> {
 
 async function writeCollection(tableName: LeadTableName, leads: Lead[]) {
   const normalized = dedupeByLeadId(asLeadArray(leads));
+
+  if (tableName === LEADS_TABLE && normalized.length === 0) {
+    const current = await readFromTable(tableName);
+    if (current && current.length > 0) {
+      console.error("[LEAD_TABLE] bloqueado snapshot vazio para crm_leads (protecao anti-wipe)");
+      throw new Error("LEADS_EMPTY_SNAPSHOT_BLOCKED");
+    }
+  }
+
   const tableWriteOk = await writeToTable(tableName, normalized);
 
   if (!tableWriteOk) {
