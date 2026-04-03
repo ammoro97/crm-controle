@@ -72,21 +72,6 @@ function isAnsweredCallStatus(status?: string | null): boolean {
   return normalized === "atendida" || normalized === "answered" || normalized === "conectada";
 }
 
-function shouldUseOutboundScope(leads: Lead[]): boolean {
-  return leads.some((lead) => lead.channel === "outbound");
-}
-
-function isInOutboundScopeByLeadId(
-  leadId: string | null | undefined,
-  outboundLeadIds: Set<string>,
-  useOutboundScope: boolean,
-): boolean {
-  if (!useOutboundScope) return true;
-  const normalizedLeadId = normalizeLeadId(leadId);
-  if (!normalizedLeadId) return true;
-  return outboundLeadIds.has(normalizedLeadId);
-}
-
 function buildLeadPhoneIndex(leads: Lead[]): Map<string, Set<string>> {
   const byDigits = new Map<string, Set<string>>();
   for (const lead of leads) {
@@ -142,6 +127,18 @@ function resolveScopedLeadIdByCall(
   return null;
 }
 
+function resolveScopedLeadIdByWrapup(
+  wrapup: PostCallWrapup,
+  scopedLeadIds: Set<string>,
+  leadPhoneIndex: Map<string, Set<string>>,
+): string | null {
+  const directLeadId = normalizeLeadId(wrapup.leadId);
+  if (directLeadId && scopedLeadIds.has(directLeadId)) return directLeadId;
+  const byPhone = resolveLeadIdByPhone([wrapup.telefone], leadPhoneIndex);
+  if (byPhone && scopedLeadIds.has(byPhone)) return byPhone;
+  return null;
+}
+
 function isNoShowMeeting(meeting: Meeting): boolean {
   const normalizedStatus = normalizeText(meeting.status);
   const normalizedType = normalizeText(meeting.eventType);
@@ -179,6 +176,11 @@ function isCallSchedulingMeeting(meeting: Meeting): boolean {
   );
 }
 
+function isAgendaScheduledCall(meeting: Meeting): boolean {
+  if (!isCallSchedulingMeeting(meeting)) return false;
+  return normalizeAgendaEventStatus(meeting) === "ativo";
+}
+
 function isFollowupMeeting(meeting: Meeting): boolean {
   const normalizedType = normalizeText(meeting.eventType);
   const normalizedReason = normalizeText(meeting.reason);
@@ -196,22 +198,6 @@ function isFutureActiveFollowup(meeting: Meeting, referenceDate: Date): boolean 
 
 function isDecisionMakerWrapup(wrapup: PostCallWrapup): boolean {
   return normalizeText(wrapup.rightPerson) === "sim";
-}
-
-function isCallSchedulingWrapup(wrapup: PostCallWrapup): boolean {
-  const normalized = normalizeText(wrapup.nextAction);
-  if (!normalized) return false;
-  if (normalized.includes("whatsapp") || normalized.includes("email") || normalized.includes("e-mail")) return false;
-
-  return (
-    normalized.includes("agendar") ||
-    normalized.includes("ligacao") ||
-    normalized.includes("ligar") ||
-    normalized.includes("call") ||
-    normalized.includes("video") ||
-    normalized.includes("reuniao") ||
-    normalized.includes("retorno")
-  );
 }
 
 function isOutboundMeeting(meeting: Meeting, outboundLeads: Lead[], outboundLeadIds: Set<string>): boolean {
@@ -282,40 +268,64 @@ function buildPayload(params: {
 
   const outboundLeads = leads.filter((lead) => lead.channel === "outbound");
   const outboundLeadIds = new Set(outboundLeads.map((lead) => normalizeLeadId(lead.id)).filter(Boolean));
-  const useOutboundScope = shouldUseOutboundScope(leads);
+  const scopedLeadIds = new Set(outboundLeads.map((lead) => normalizeLeadId(lead.id)).filter(Boolean));
+  const leadPhoneIndex = buildLeadPhoneIndex(outboundLeads);
+  const meetingsInScope = meetings.filter((meeting) => isOutboundMeeting(meeting, outboundLeads, outboundLeadIds));
+  const totalLeadsCadastrados = outboundLeads.length;
 
-  const callsInScope = callLogs.filter((call) => isInOutboundScopeByLeadId(call.leadId, outboundLeadIds, useOutboundScope));
+  if (totalLeadsCadastrados === 0) {
+    return {
+      funnels: {
+        absoluto: {
+          ligacoes: 0,
+          atendidas: 0,
+          decisor: 0,
+          agendamentos: 0,
+        },
+        conversao: {
+          atendidasPercentual: 0,
+          decisorPercentual: 0,
+          agendamentosPercentual: 0,
+        },
+      },
+      cards: {
+        acionamentoBase: 0,
+        faturamento: 0,
+        vendasRealizadas: 0,
+        leadDesqualificado: 0,
+        followUpsPendentes: 0,
+        conversaoLigacao: 0,
+        percentualAtendimento: 0,
+        percentualCpc: 0,
+        noShow: 0,
+      },
+    };
+  }
+
+  const callsInScope = callLogs.filter((call) => Boolean(resolveScopedLeadIdByCall(call, scopedLeadIds, leadPhoneIndex)));
   const wrapsInScope = wrapups.filter((wrapup) =>
-    isInOutboundScopeByLeadId(wrapup.leadId, outboundLeadIds, useOutboundScope),
+    Boolean(resolveScopedLeadIdByWrapup(wrapup, scopedLeadIds, leadPhoneIndex)),
   );
-  const meetingsInScope = useOutboundScope
-    ? meetings.filter((meeting) => isOutboundMeeting(meeting, outboundLeads, outboundLeadIds))
-    : meetings;
-  const leadsInScope = useOutboundScope ? outboundLeads : leads;
-  const scopedLeadIds = new Set(leadsInScope.map((lead) => normalizeLeadId(lead.id)).filter(Boolean));
-  const leadPhoneIndex = buildLeadPhoneIndex(leadsInScope);
 
   const ligacoes = callsInScope.length;
   const atendidas = callsInScope.filter((call) => isAnsweredCallStatus(call.status)).length;
   const leadsUnicosAcionados = new Set<string>();
-  for (const call of callLogs) {
+  for (const call of callsInScope) {
     const leadId = resolveScopedLeadIdByCall(call, scopedLeadIds, leadPhoneIndex);
     if (!leadId) continue;
     leadsUnicosAcionados.add(leadId);
   }
 
   const decisorFromWrapups = wrapsInScope.filter((wrapup) => isDecisionMakerWrapup(wrapup)).length;
-  const agendamentosFromWrapups = wrapsInScope.filter((wrapup) => isCallSchedulingWrapup(wrapup)).length;
-  const agendamentosFromMeetings = meetingsInScope.filter((meeting) => isCallSchedulingMeeting(meeting)).length;
+  const agendamentosFromMeetings = meetingsInScope.filter((meeting) => isAgendaScheduledCall(meeting)).length;
 
   const decisor = Math.max(decisorFromWrapups, 0);
-  const agendamentos = Math.max(agendamentosFromWrapups, agendamentosFromMeetings, 0);
+  const agendamentos = Math.max(agendamentosFromMeetings, 0);
 
   const atendidasPercentual = safePercent(atendidas, ligacoes);
   const decisorPercentual = safePercent(decisor, atendidas);
   const agendamentosPercentual = safePercent(agendamentos, decisor);
 
-  const totalLeadsCadastrados = useOutboundScope ? outboundLeads.length : leads.length;
   const leadDesqualificado = countLeadDesqualificado(leads, finalizations);
 
   const closingCallsForCpc = meetingsInScope.filter((meeting) => isClosingCallForCpc(meeting));
