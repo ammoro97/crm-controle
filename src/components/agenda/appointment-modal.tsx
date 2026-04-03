@@ -7,6 +7,8 @@ import { getLeadsSnapshot, subscribeLeadsSnapshot } from "@/lib/crm-data-store";
 import { getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { CallReason, Lead, Meeting } from "@/types/crm";
 
+export type AppointmentManualAction = "done" | "cancel" | "reschedule" | "no_show";
+
 type AppointmentModalProps = {
   open: boolean;
   isNew: boolean;
@@ -14,6 +16,7 @@ type AppointmentModalProps = {
   onClose: () => void;
   onChange: (meeting: Meeting) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onManualAction?: (action: AppointmentManualAction) => void;
 };
 
 const reasonOptions: CallReason[] = ["apresentacao", "acompanhamento", "fechamento", "follow-up"];
@@ -42,6 +45,7 @@ export function AppointmentModal({
   onClose,
   onChange,
   onSubmit,
+  onManualAction,
 }: AppointmentModalProps) {
   const [leads, setLeads] = useState<Lead[]>(() => getLeadsSnapshot());
   const [query, setQuery] = useState("");
@@ -226,8 +230,47 @@ export function AppointmentModal({
               onChange={(e) => onChange({ ...meeting, notes: e.target.value })}
             />
           </label>
+
+          {!isNew ? (
+            <div className="rounded-lg border border-border bg-slate-900/50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Finalizacao manual</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20"
+                  onClick={() => onManualAction?.("done")}
+                >
+                  1 - Acao realizada
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20"
+                  onClick={() => onManualAction?.("cancel")}
+                >
+                  2 - Cancelar acao
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20"
+                  onClick={() => onManualAction?.("reschedule")}
+                >
+                  3 - Reagendar acao
+                </button>
+                {meeting.reason === "fechamento" ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/20"
+                    onClick={() => onManualAction?.("no_show")}
+                  >
+                    No-Show
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <button type="submit" className="btn-primary">
-            Salvar
+            Salvar alteracoes
           </button>
         </form>
       ) : null}

@@ -84,9 +84,9 @@ export function normalizeAgendaEventStatus(meeting: Meeting): AgendaEventStatus 
 }
 
 export function getAgendaEventDisplayStatus(meeting: Meeting, referenceDate = new Date()): AgendaEventStatus {
+  void referenceDate;
   const baseStatus = normalizeAgendaEventStatus(meeting);
   if (baseStatus !== "ativo") return baseStatus;
-  if (isPastAgendaDateTime(meeting.date, meeting.callTime, referenceDate)) return "concluido";
   return "ativo";
 }
 

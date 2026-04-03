@@ -32,7 +32,7 @@ export function AgendaFortnightView({
   onSelectMeeting,
 }: AgendaFortnightViewProps) {
   const reference = getCurrentReferenceDate();
-  const days = getFortnightDays(selectedDate, reference);
+  const days = getFortnightDays(selectedDate);
   const meetingsByDate = useMemo(() => buildMeetingsByDateIndex(meetings), [meetings]);
 
   return (
@@ -49,10 +49,11 @@ export function AgendaFortnightView({
             <button
               key={iso}
               type="button"
-              disabled={isPast}
               onClick={() => {
                 onSelectDate(day);
-                onCreateOnDate(iso);
+                if (!isPast) {
+                  onCreateOnDate(iso);
+                }
               }}
               className={`min-h-40 rounded-lg border p-2 text-left transition ${
                 isPast

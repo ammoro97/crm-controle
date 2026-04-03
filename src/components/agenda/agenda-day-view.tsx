@@ -9,7 +9,6 @@ import {
   formatDayLabel,
   getCurrentReferenceDate,
   getDayMeetingsFromIndex,
-  getNextValidHalfHourSlot,
   isPastDate,
   toIsoDate,
 } from "./agenda-utils";
@@ -40,24 +39,12 @@ export function AgendaDayView({
   onCreateOnDate,
 }: AgendaDayViewProps) {
   const reference = getCurrentReferenceDate();
-  const isToday = toIsoDate(selectedDate) === toIsoDate(reference);
   const meetingsByDate = useMemo(() => buildMeetingsByDateIndex(meetings), [meetings]);
-  const nextValidSlot = getNextValidHalfHourSlot(reference);
-  const dayMeetings = getDayMeetingsFromIndex(meetingsByDate, selectedDate).filter(
-    (meeting) => !(isToday && meeting.callTime < nextValidSlot),
-  );
+  const dayMeetings = getDayMeetingsFromIndex(meetingsByDate, selectedDate);
   const selectedIso = toIsoDate(selectedDate);
   const wholeDayBlocked = isDateBlocked(selectedIso, blocks);
-  const minSlot = isToday ? nextValidSlot : "00:00";
-  const visibleSlots = timelineSlots.filter((slot) => slot >= minSlot && slot <= "23:59");
-
-  if (isPastDate(selectedDate, reference)) {
-    return (
-      <section className="rounded-2xl border border-slate-300 bg-slate-200/80 p-4 shadow-sm">
-        <p className="text-sm text-slate-600">Nao ha horarios disponiveis para datas passadas.</p>
-      </section>
-    );
-  }
+  const visibleSlots = timelineSlots.filter((slot) => slot <= "23:59");
+  const isPastSelectedDate = isPastDate(selectedDate, reference);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -80,9 +67,16 @@ export function AgendaDayView({
             <button
               key={slot}
               type="button"
-              onClick={() => onCreateOnDate(selectedIso, slot)}
+              onClick={() => {
+                if (isPastSelectedDate) return;
+                onCreateOnDate(selectedIso, slot);
+              }}
               className={`grid w-full grid-cols-[74px_1fr] border-b border-slate-100 text-left last:border-b-0 ${
-                slotBlocked ? "bg-rose-50/70 hover:bg-rose-50" : "hover:bg-slate-50"
+                isPastSelectedDate
+                  ? "cursor-not-allowed bg-slate-100/80"
+                  : slotBlocked
+                    ? "bg-rose-50/70 hover:bg-rose-50"
+                    : "hover:bg-slate-50"
               }`}
             >
               <div className="flex items-start justify-end gap-2 border-r border-slate-100 px-2 py-2 text-xs text-slate-500">
@@ -97,7 +91,7 @@ export function AgendaDayView({
                 ) : null}
                 {slotMeetings.map((meeting) => (
                   <div key={meeting.id}>
-                    <AppointmentCard meeting={meeting} onClick={onSelectMeeting} />
+                    <AppointmentCard meeting={meeting} onClick={onSelectMeeting} muted={isPastSelectedDate} />
                     <p className="mt-1 text-xs text-slate-500">Faixa: {meeting.callTime} - 30 min</p>
                   </div>
                 ))}

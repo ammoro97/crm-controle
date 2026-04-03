@@ -32,7 +32,7 @@ export function AgendaWeekView({
   onSelectMeeting,
 }: AgendaWeekViewProps) {
   const reference = getCurrentReferenceDate();
-  const weekDays = getWeekDays(selectedDate, reference);
+  const weekDays = getWeekDays(selectedDate);
   const meetingsByDate = useMemo(() => buildMeetingsByDateIndex(meetings), [meetings]);
 
   return (
@@ -49,10 +49,11 @@ export function AgendaWeekView({
             <button
               key={iso}
               type="button"
-              disabled={isPast}
               onClick={() => {
                 onSelectDate(day);
-                onCreateOnDate(iso);
+                if (!isPast) {
+                  onCreateOnDate(iso);
+                }
               }}
               className={`min-h-44 rounded-lg border p-2 text-left transition ${
                 isPast

@@ -9,12 +9,11 @@ import { AgendaFilters } from "@/components/agenda/agenda-filters";
 import { AgendaAllList } from "@/components/agenda/agenda-all-list";
 import { AgendaList } from "@/components/agenda/agenda-list";
 import { AgendaPeriodNavigator } from "@/components/agenda/agenda-period-navigator";
-import { AppointmentModal } from "@/components/agenda/appointment-modal";
+import { AppointmentManualAction, AppointmentModal } from "@/components/agenda/appointment-modal";
 import { getMeetingReasonStyle } from "@/components/agenda/reason-style";
 import { AgendaBlocks, AgendaDisplayMode, AgendaPeriodMode, emptyAgendaBlocks } from "@/components/agenda/agenda-types";
 import {
   clampDateToPresent,
-  filterFutureMeetings,
   fromIsoDate,
   formatPeriodLabel,
   getCurrentReferenceDate,
@@ -102,6 +101,18 @@ function getMeetingSearchableText(meeting: Meeting) {
 
 function normalizeDateTimeIdentity(meeting: Meeting) {
   return `${String(meeting.date || "").trim()}|${String(meeting.callTime || "").trim()}`;
+}
+
+function hasNoShowNote(notes?: string | null) {
+  const normalized = normalizeSearchText(String(notes || ""));
+  return normalized.includes("no show") || normalized.includes("nao compareceu");
+}
+
+function appendNoShowNote(notes?: string | null) {
+  const raw = String(notes || "").trim();
+  if (hasNoShowNote(raw)) return raw;
+  if (!raw) return "No-Show";
+  return `${raw}\nNo-Show`;
 }
 
 function isTimelineRelevantStatus(status: AgendaEventStatus) {
@@ -213,12 +224,10 @@ export default function AgendaPage() {
     [meetings],
   );
 
-  const futureMeetings = useMemo(() => filterFutureMeetings(activeMeetings, nowRef), [activeMeetings, nowRef]);
-
   const ownerFilteredMeetings = useMemo(() => {
-    if (effectiveOwnerFilter === "Todos") return futureMeetings;
-    return futureMeetings.filter((meeting) => meeting.owner === effectiveOwnerFilter);
-  }, [futureMeetings, effectiveOwnerFilter]);
+    if (effectiveOwnerFilter === "Todos") return activeMeetings;
+    return activeMeetings.filter((meeting) => meeting.owner === effectiveOwnerFilter);
+  }, [activeMeetings, effectiveOwnerFilter]);
 
   const visibleMeetings = useMemo(() => {
     if (!hasActiveSearch) return ownerFilteredMeetings;
@@ -339,50 +348,73 @@ export default function AgendaPage() {
     setOpen(true);
   };
 
-  const saveMeeting = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selected) return;
+  const closeEditor = () => {
+    setOpen(false);
+    setSelected(null);
+    setIsNew(false);
+  };
+
+  const persistMeeting = (inputMeeting: Meeting, options?: { requireDateTimeChange?: boolean }): boolean => {
+    const requireDateTimeChange = Boolean(options?.requireDateTimeChange);
+
     if (!resolvedOwnerName) {
       setBlockingAlert({
         message: "Nao foi possivel salvar agendamento sem responsavel vinculado.",
         category: "Responsavel nao vinculado",
         reason: resolvedOwnerError || "Vincule seu e-mail em Configuracoes > Responsaveis.",
       });
-      return;
+      return false;
     }
-    if (isPastDateTime(selected.date, selected.callTime, nowRef)) {
+
+    if ((isNew || requireDateTimeChange) && isPastDateTime(inputMeeting.date, inputMeeting.callTime, nowRef)) {
       setBlockingAlert({
         message: "Nao e possivel agendar em data ou horario que ja passou.",
         category: "Horario vencido",
         reason: "Selecione um horario futuro.",
       });
-      return;
+      return false;
     }
-    const blockInfo = getBlockingInfo(selected.date, selected.callTime, blocks);
-    if (blockInfo) {
+
+    const shouldValidateBlocking = isNew || requireDateTimeChange;
+    const blockInfo = shouldValidateBlocking ? getBlockingInfo(inputMeeting.date, inputMeeting.callTime, blocks) : null;
+    if (blockInfo && shouldValidateBlocking) {
       showBlockingAlert(blockInfo);
-      return;
+      return false;
+    }
+
+    const sourceMeeting = meetings.find((meeting) => meeting.id === inputMeeting.id);
+    if (requireDateTimeChange && sourceMeeting) {
+      const normalizedSource = ensureAgendaEventDefaults(sourceMeeting);
+      const hasScheduleChanged = normalizeDateTimeIdentity(normalizedSource) !== normalizeDateTimeIdentity(inputMeeting);
+      if (!hasScheduleChanged) {
+        setBlockingAlert({
+          message: "Para reagendar, altere data ou horario antes de confirmar.",
+          category: "Reagendamento",
+          reason: "Defina uma nova data/horario e selecione novamente a opcao de reagendar.",
+        });
+        return false;
+      }
     }
 
     const nowIso = new Date().toISOString();
-    const eventType = selected.eventType || inferAgendaEventTypeFromReason(selected.reason);
+    const eventType = inputMeeting.eventType || inferAgendaEventTypeFromReason(inputMeeting.reason);
     const normalizedSelected = ensureAgendaEventDefaults({
-      ...selected,
+      ...inputMeeting,
       owner: resolvedOwnerName,
-      status: selected.status || "ativo",
+      status: inputMeeting.status || "ativo",
       eventType,
-      channel: selected.channel || inferAgendaChannelFromType(eventType),
+      channel: inputMeeting.channel || inferAgendaChannelFromType(eventType),
       updatedAt: nowIso,
-      createdAt: selected.createdAt || nowIso,
+      createdAt: inputMeeting.createdAt || nowIso,
     });
 
     setMeetings((prev) => {
-      const currentIndex = prev.findIndex((meeting) => meeting.id === selected.id);
+      const currentIndex = prev.findIndex((meeting) => meeting.id === inputMeeting.id);
       if (isNew || currentIndex < 0) return normalizeMeetingsSnapshot([...prev, normalizedSelected]);
 
       const current = ensureAgendaEventDefaults(prev[currentIndex]);
       const hasScheduleChanged = normalizeDateTimeIdentity(current) !== normalizeDateTimeIdentity(normalizedSelected);
-      const currentStatus = getAgendaEventDisplayStatus(current, nowRef);
+      const currentStatus = current.status || getAgendaEventDisplayStatus(current, nowRef);
       const canReschedule = hasScheduleChanged && !isTimelineRelevantStatus(currentStatus);
 
       if (canReschedule) {
@@ -417,9 +449,78 @@ export default function AgendaPage() {
       return normalizeMeetingsSnapshot(updated);
     });
 
-    setOpen(false);
-    setSelected(null);
-    setIsNew(false);
+    return true;
+  };
+
+  const saveMeeting = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected) return;
+    const saved = persistMeeting(selected);
+    if (!saved) return;
+    closeEditor();
+  };
+
+  const applyManualActionToSelected = (action: AppointmentManualAction) => {
+    if (!selected || isNew) return;
+
+    if (action === "reschedule") {
+      const rescheduled = persistMeeting(selected, { requireDateTimeChange: true });
+      if (rescheduled) {
+        closeEditor();
+      }
+      return;
+    }
+
+    if (action === "no_show" && selected.reason !== "fechamento") {
+      setBlockingAlert({
+        message: "No-Show so esta disponivel para agendamentos de fechamento.",
+        category: "No-Show indisponivel",
+        reason: "Altere o motivo para fechamento, se aplicavel.",
+      });
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    setMeetings((prev) =>
+      normalizeMeetingsSnapshot(
+        prev.map((meeting) => {
+          if (meeting.id !== selected.id) return meeting;
+          const current = ensureAgendaEventDefaults(meeting);
+
+          if (action === "done") {
+            return {
+              ...current,
+              status: "concluido",
+              completedAt: nowIso,
+              canceledAt: null,
+              updatedAt: nowIso,
+            };
+          }
+
+          if (action === "cancel") {
+            return {
+              ...current,
+              status: "cancelado",
+              eventType: current.eventType || "cancelamento",
+              canceledAt: nowIso,
+              completedAt: null,
+              updatedAt: nowIso,
+            };
+          }
+
+          return {
+            ...current,
+            status: "cancelado",
+            eventType: current.eventType || "cancelamento",
+            canceledAt: nowIso,
+            completedAt: null,
+            notes: appendNoShowNote(current.notes),
+            updatedAt: nowIso,
+          };
+        }),
+      ),
+    );
+    closeEditor();
   };
 
   const deleteMeeting = (meetingId: string) => {
@@ -627,13 +728,10 @@ export default function AgendaPage() {
         open={open}
         isNew={isNew}
         meeting={selected}
-        onClose={() => {
-          setOpen(false);
-          setSelected(null);
-          setIsNew(false);
-        }}
+        onClose={closeEditor}
         onChange={setSelected}
         onSubmit={saveMeeting}
+        onManualAction={applyManualActionToSelected}
       />
 
       <AgendaBlocksModal open={blocksOpen} blocks={blocks} onClose={() => setBlocksOpen(false)} onChange={updateBlocks} />
