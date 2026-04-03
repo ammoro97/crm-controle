@@ -189,7 +189,7 @@ const metricGroups: MetricGroup[] = [
       {
         key: "percentualCpc",
         title: "% CPC",
-        description: "Formula: (clientes convertidos / ligacoes atendidas) x 100.",
+        description: "Formula: (compras via call de fechamento na agenda / calls de fechamento) x 100.",
         accentFrom: "#06B6D4",
         accentTo: "#0E7490",
         icon: iconChart(),

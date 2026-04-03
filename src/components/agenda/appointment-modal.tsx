@@ -7,7 +7,7 @@ import { getLeadsSnapshot, subscribeLeadsSnapshot } from "@/lib/crm-data-store";
 import { getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { CallReason, Lead, Meeting } from "@/types/crm";
 
-export type AppointmentManualAction = "done" | "cancel" | "reschedule" | "no_show";
+export type AppointmentManualAction = "done" | "cancel" | "reschedule" | "no_show" | "purchase";
 
 type AppointmentModalProps = {
   open: boolean;
@@ -256,6 +256,15 @@ export function AppointmentModal({
                 >
                   3 - Reagendar acao
                 </button>
+                {meeting.reason === "fechamento" ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20"
+                    onClick={() => onManualAction?.("purchase")}
+                  >
+                    4 - Compra realizada
+                  </button>
+                ) : null}
                 {meeting.reason === "fechamento" ? (
                   <button
                     type="button"

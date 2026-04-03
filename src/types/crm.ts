@@ -208,6 +208,9 @@ export type LeadAgendaEvent = {
   deletedAt?: string | null;
   canceledAt?: string | null;
   completedAt?: string | null;
+  manualFinalizationAction?: "done" | "cancel" | "reschedule" | "no_show" | "purchase" | null;
+  saleValueCents?: number | null;
+  convertedToCustomerAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };

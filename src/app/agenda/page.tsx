@@ -35,10 +35,19 @@ import {
   isMeetingActiveForScheduling,
   normalizeMeetingsSnapshot,
 } from "@/lib/agenda-events";
-import { getMeetingsSnapshot, setMeetingsSnapshot } from "@/lib/crm-data-store";
+import {
+  getCustomersSnapshot,
+  getLeadsSnapshot,
+  getMeetingsSnapshot,
+  setCustomersSnapshot,
+  setLeadsSnapshot,
+  setMeetingsSnapshot,
+} from "@/lib/crm-data-store";
+import { getLeadNames } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
-import { AgendaEventStatus, Meeting } from "@/types/crm";
+import { digitsToSaleValueCents, formatCurrencyFromDigits, formatSaleValueCents, isValidSaleValueCents } from "@/lib/sale-value";
+import { AgendaEventStatus, Lead, Meeting } from "@/types/crm";
 
 function createEmptyMeeting(date = "", owner = ""): Meeting {
   const now = new Date().toISOString();
@@ -61,6 +70,9 @@ function createEmptyMeeting(date = "", owner = ""): Meeting {
     deletedAt: null,
     canceledAt: null,
     completedAt: null,
+    manualFinalizationAction: null,
+    saleValueCents: null,
+    convertedToCustomerAt: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -120,6 +132,101 @@ function appendNoShowNote(notes?: string | null) {
   return `${raw}\nNo-Show`;
 }
 
+function appendPurchaseNote(notes: string | null | undefined, saleValueCents: number) {
+  const raw = String(notes || "").trim();
+  const purchaseLine = `Compra realizada: ${formatSaleValueCents(saleValueCents)}`;
+  if (!raw) return purchaseLine;
+
+  const lines = raw.split(/\r?\n/);
+  const updated = lines.map((line) => {
+    if (normalizeSearchText(line).startsWith("compra realizada:")) return purchaseLine;
+    return line;
+  });
+
+  if (updated.some((line) => normalizeSearchText(line).startsWith("compra realizada:"))) {
+    return updated.join("\n");
+  }
+
+  return `${raw}\n${purchaseLine}`;
+}
+
+function nowStamp() {
+  const now = new Date();
+  return {
+    date: now.toISOString().slice(0, 10),
+    time: now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+  };
+}
+
+function buildCustomerFromLead({
+  lead,
+  finalizedBy,
+  finalizedAtIso,
+  saleValueCents,
+}: {
+  lead: Lead;
+  finalizedBy: string;
+  finalizedAtIso: string;
+  saleValueCents: number;
+}): Lead {
+  const stamp = nowStamp();
+  return {
+    ...lead,
+    status: "Fechado",
+    finalizedAt: finalizedAtIso,
+    finalizedBy,
+    finalizationReason: "compra_efetuada",
+    finalizationSource: "lead_profile",
+    finalizedViaLeadProfile: false,
+    convertedToCustomerAt: finalizedAtIso,
+    customerStatus: "cliente",
+    saleValueCents,
+    history: [
+      ...(lead.history || []),
+      {
+        id: `H-AGENDA-SALE-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        date: stamp.date,
+        time: stamp.time,
+        eventType: "COMPRA_FINALIZADA_AGENDA",
+        description: `Compra realizada em call de fechamento na agenda. Valor registrado: ${formatSaleValueCents(saleValueCents)}.`,
+        owner: finalizedBy,
+      },
+      {
+        id: `H-CUSTOMER-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        date: stamp.date,
+        time: stamp.time,
+        eventType: "CLIENTE",
+        description: `Lead convertido em cliente com venda de ${formatSaleValueCents(saleValueCents)}.`,
+        owner: finalizedBy,
+      },
+    ],
+  };
+}
+
+function resolveLeadFromMeeting(meeting: Meeting, leads: Lead[]): Lead | null {
+  const targetLeadId = String(meeting.leadId || "").trim();
+  if (targetLeadId) {
+    const byId = leads.find((lead) => String(lead.id || "").trim() === targetLeadId);
+    if (byId) return byId;
+  }
+
+  const normalizedPersonName = normalizeSearchText(meeting.personName || "");
+  if (!normalizedPersonName) return null;
+
+  const byIdentity = leads.find((lead) => {
+    const normalizedCompany = normalizeSearchText(lead.company || "");
+    if (normalizedCompany && normalizedCompany === normalizedPersonName) return true;
+
+    const normalizedName = normalizeSearchText(lead.name || "");
+    if (normalizedName && normalizedName === normalizedPersonName) return true;
+
+    const normalizedNames = getLeadNames(lead).map((name) => normalizeSearchText(name));
+    return normalizedNames.includes(normalizedPersonName);
+  });
+
+  return byIdentity || null;
+}
+
 function isTimelineRelevantStatus(status: AgendaEventStatus) {
   return status === "remarcado" || status === "cancelado" || status === "apagado_logico";
 }
@@ -149,6 +256,14 @@ function getManualActionConfirmationCopy(action: AppointmentManualAction) {
       confirmClassName: "rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500",
     };
   }
+  if (action === "purchase") {
+    return {
+      title: "Confirmar compra realizada",
+      message: "Confirme a compra realizada nessa call de fechamento e informe o valor da venda.",
+      confirmLabel: "Confirmar compra",
+      confirmClassName: "rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500",
+    };
+  }
   return {
     title: "Confirmar No-Show",
     message: "Deseja marcar este agendamento como No-Show?",
@@ -156,6 +271,12 @@ function getManualActionConfirmationCopy(action: AppointmentManualAction) {
     confirmClassName: "rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-500",
   };
 }
+
+type PendingManualActionState = {
+  action: AppointmentManualAction;
+  saleValueDigits: string;
+  saleValueError: string | null;
+};
 
 export default function AgendaPage() {
   const searchParams = useSearchParams();
@@ -171,7 +292,7 @@ export default function AgendaPage() {
   const [isNew, setIsNew] = useState(false);
   const [blocksOpen, setBlocksOpen] = useState(false);
   const [pendingDeleteMeeting, setPendingDeleteMeeting] = useState<Meeting | null>(null);
-  const [pendingManualAction, setPendingManualAction] = useState<AppointmentManualAction | null>(null);
+  const [pendingManualAction, setPendingManualAction] = useState<PendingManualActionState | null>(null);
   const [blockingAlert, setBlockingAlert] = useState<{
     message: string;
     category: string;
@@ -394,6 +515,39 @@ export default function AgendaPage() {
     setPendingManualAction(null);
   };
 
+  const convertMeetingLeadToCustomer = (
+    meeting: Meeting,
+    saleValueCents: number,
+    finalizedAtIso: string,
+  ): { ok: true; leadId: string } | { ok: false; reason: string } => {
+    const leads = getLeadsSnapshot();
+    const matchedLead = resolveLeadFromMeeting(meeting, leads);
+
+    if (!matchedLead) {
+      return {
+        ok: false,
+        reason:
+          "Nao foi possivel localizar o lead deste agendamento para mover para Clientes. Vincule o lead ao agendamento e tente novamente.",
+      };
+    }
+
+    const finalizedBy = String(meeting.owner || matchedLead.owner || "Time Comercial").trim() || "Time Comercial";
+    const customerLead = buildCustomerFromLead({
+      lead: matchedLead,
+      finalizedBy,
+      finalizedAtIso,
+      saleValueCents,
+    });
+
+    setLeadsSnapshot(leads.filter((lead) => lead.id !== matchedLead.id));
+
+    const currentCustomers = getCustomersSnapshot();
+    const nextCustomers = [...currentCustomers.filter((lead) => lead.id !== customerLead.id), customerLead];
+    setCustomersSnapshot(nextCustomers);
+
+    return { ok: true, leadId: matchedLead.id };
+  };
+
   const persistMeeting = (inputMeeting: Meeting, options?: { requireDateTimeChange?: boolean }): boolean => {
     const requireDateTimeChange = Boolean(options?.requireDateTimeChange);
 
@@ -500,15 +654,20 @@ export default function AgendaPage() {
     closeEditor();
   };
 
-  const applyManualActionToSelected = (action: AppointmentManualAction) => {
-    if (!selected || isNew) return;
+  const applyManualActionToSelected = (
+    action: AppointmentManualAction,
+    options?: {
+      saleValueCents?: number;
+    },
+  ): boolean => {
+    if (!selected || isNew) return false;
 
     if (action === "reschedule") {
       const rescheduled = persistMeeting(selected, { requireDateTimeChange: true });
       if (rescheduled) {
         closeEditor();
       }
-      return;
+      return rescheduled;
     }
 
     if (action === "no_show" && selected.reason !== "fechamento") {
@@ -517,10 +676,43 @@ export default function AgendaPage() {
         category: "No-Show indisponivel",
         reason: "Altere o motivo para fechamento, se aplicavel.",
       });
-      return;
+      return false;
+    }
+
+    if (action === "purchase" && selected.reason !== "fechamento") {
+      setBlockingAlert({
+        message: "Compra realizada so esta disponivel para agendamentos de fechamento.",
+        category: "Compra indisponivel",
+        reason: "Altere o motivo para fechamento, se aplicavel.",
+      });
+      return false;
+    }
+
+    const saleValueCents = Number.isFinite(options?.saleValueCents) ? Math.round(Number(options?.saleValueCents)) : 0;
+    if (action === "purchase" && !isValidSaleValueCents(saleValueCents)) {
+      setBlockingAlert({
+        message: "Informe um valor valido para concluir a compra realizada.",
+        category: "Valor obrigatorio",
+        reason: "O valor precisa ser maior que zero.",
+      });
+      return false;
     }
 
     const nowIso = new Date().toISOString();
+    let resolvedLeadIdForPurchase = String(selected.leadId || "").trim() || null;
+    if (action === "purchase") {
+      const conversion = convertMeetingLeadToCustomer(selected, saleValueCents, nowIso);
+      if (!conversion.ok) {
+        setBlockingAlert({
+          message: "Nao foi possivel concluir compra realizada.",
+          category: "Lead nao localizado",
+          reason: conversion.reason,
+        });
+        return false;
+      }
+      resolvedLeadIdForPurchase = conversion.leadId;
+    }
+
     setMeetings((prev) =>
       normalizeMeetingsSnapshot(
         prev.map((meeting) => {
@@ -533,6 +725,9 @@ export default function AgendaPage() {
               status: "concluido",
               completedAt: nowIso,
               canceledAt: null,
+              manualFinalizationAction: "done",
+              saleValueCents: null,
+              convertedToCustomerAt: null,
               updatedAt: nowIso,
             };
           }
@@ -544,6 +739,24 @@ export default function AgendaPage() {
               eventType: current.eventType || "cancelamento",
               canceledAt: nowIso,
               completedAt: null,
+              manualFinalizationAction: "cancel",
+              saleValueCents: null,
+              convertedToCustomerAt: null,
+              updatedAt: nowIso,
+            };
+          }
+
+          if (action === "purchase") {
+            return {
+              ...current,
+              leadId: resolvedLeadIdForPurchase || current.leadId || null,
+              status: "concluido",
+              completedAt: nowIso,
+              canceledAt: null,
+              manualFinalizationAction: "purchase",
+              saleValueCents,
+              convertedToCustomerAt: nowIso,
+              notes: appendPurchaseNote(current.notes, saleValueCents),
               updatedAt: nowIso,
             };
           }
@@ -554,6 +767,9 @@ export default function AgendaPage() {
             eventType: current.eventType || "cancelamento",
             canceledAt: nowIso,
             completedAt: null,
+            manualFinalizationAction: "no_show",
+            saleValueCents: null,
+            convertedToCustomerAt: null,
             notes: appendNoShowNote(current.notes),
             updatedAt: nowIso,
           };
@@ -561,18 +777,44 @@ export default function AgendaPage() {
       ),
     );
     closeEditor();
+    return true;
   };
 
   const requestManualActionConfirmation = (action: AppointmentManualAction) => {
     if (!selected || isNew) return;
-    setPendingManualAction(action);
+    const saleValueDigits = action === "purchase" && Number.isFinite(selected.saleValueCents)
+      ? String(Math.max(0, Math.round(Number(selected.saleValueCents))))
+      : "";
+    setPendingManualAction({
+      action,
+      saleValueDigits,
+      saleValueError: null,
+    });
   };
 
   const confirmPendingManualAction = () => {
     if (!pendingManualAction) return;
-    const action = pendingManualAction;
-    setPendingManualAction(null);
-    applyManualActionToSelected(action);
+
+    if (pendingManualAction.action === "purchase") {
+      const saleValueCents = digitsToSaleValueCents(pendingManualAction.saleValueDigits);
+      if (!isValidSaleValueCents(saleValueCents)) {
+        setPendingManualAction((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            saleValueError: "Informe um valor valido (maior que zero).",
+          };
+        });
+        return;
+      }
+
+      const applied = applyManualActionToSelected("purchase", { saleValueCents });
+      if (applied) setPendingManualAction(null);
+      return;
+    }
+
+    const applied = applyManualActionToSelected(pendingManualAction.action);
+    if (applied) setPendingManualAction(null);
   };
 
   const deleteMeeting = (meetingId: string) => {
@@ -821,13 +1063,13 @@ export default function AgendaPage() {
       </Modal>
 
       <Modal
-        title={pendingManualAction ? getManualActionConfirmationCopy(pendingManualAction).title : "Confirmar finalizacao"}
+        title={pendingManualAction ? getManualActionConfirmationCopy(pendingManualAction.action).title : "Confirmar finalizacao"}
         open={Boolean(open && selected && !isNew && pendingManualAction)}
         onClose={() => setPendingManualAction(null)}
       >
         {pendingManualAction && selected ? (
           <div className="space-y-4">
-            <p className="text-sm text-slate-200">{getManualActionConfirmationCopy(pendingManualAction).message}</p>
+            <p className="text-sm text-slate-200">{getManualActionConfirmationCopy(pendingManualAction.action).message}</p>
             <div className="rounded-lg border border-border bg-slate-900/50 p-3 text-sm text-slate-100">
               <p className="font-semibold">{selected.personName}</p>
               <p className="mt-1 text-slate-300">
@@ -836,16 +1078,47 @@ export default function AgendaPage() {
               <p className="text-slate-300">Responsavel: {selected.owner}</p>
               <p className="text-slate-300">Motivo: {selected.reason}</p>
             </div>
+            {pendingManualAction.action === "purchase" ? (
+              <label className="block text-sm text-slate-200">
+                Valor da compra <span className="text-rose-300">*</span>
+                <input
+                  className="field mt-1 h-10"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="R$ 0,00"
+                  value={pendingManualAction.saleValueDigits ? formatCurrencyFromDigits(pendingManualAction.saleValueDigits) : ""}
+                  onChange={(event) => {
+                    const nextDigits = String(event.target.value || "").replace(/\D/g, "").slice(0, 12);
+                    setPendingManualAction((prev) => {
+                      if (!prev) return prev;
+                      return {
+                        ...prev,
+                        saleValueDigits: nextDigits,
+                        saleValueError: null,
+                      };
+                    });
+                  }}
+                />
+                <p className="mt-1 text-xs text-slate-400">
+                  Valor valido: {formatSaleValueCents(digitsToSaleValueCents(pendingManualAction.saleValueDigits))}.
+                </p>
+              </label>
+            ) : null}
+            {pendingManualAction.saleValueError ? (
+              <p className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                {pendingManualAction.saleValueError}
+              </p>
+            ) : null}
             <div className="flex items-center gap-2">
               <button type="button" className="btn-ghost" onClick={() => setPendingManualAction(null)}>
                 Voltar
               </button>
               <button
                 type="button"
-                className={getManualActionConfirmationCopy(pendingManualAction).confirmClassName}
+                className={getManualActionConfirmationCopy(pendingManualAction.action).confirmClassName}
                 onClick={confirmPendingManualAction}
               >
-                {getManualActionConfirmationCopy(pendingManualAction).confirmLabel}
+                {getManualActionConfirmationCopy(pendingManualAction.action).confirmLabel}
               </button>
             </div>
           </div>

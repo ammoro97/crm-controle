@@ -170,20 +170,28 @@ function countLeadDesqualificado(leads: Lead[], finalizations: LeadFinalizationR
   return lostLeadsCount + finalizedAsDeleted;
 }
 
-function countVendasRealizadas(finalizations: LeadFinalizationRecord[]): number {
-  return finalizations.filter((record) => isOutboundFinalization(record) && record.reason === "compra_efetuada").length;
+function isClosingCallForCpc(meeting: Meeting): boolean {
+  if (normalizeText(meeting.reason) !== "fechamento") return false;
+  const status = normalizeAgendaEventStatus(meeting);
+  return status !== "apagado_logico" && status !== "remarcado";
 }
 
-function sumFaturamento(finalizations: LeadFinalizationRecord[]): number {
-  return finalizations
-    .filter(
-      (record) =>
-        isOutboundFinalization(record) &&
-        record.reason === "compra_efetuada" &&
-        Number.isFinite(record.saleValueCents) &&
-        Number(record.saleValueCents) > 0,
-    )
-    .reduce((total, record) => total + Number(record.saleValueCents), 0);
+function isPurchasedClosingCall(meeting: Meeting): boolean {
+  if (!isClosingCallForCpc(meeting)) return false;
+  const manualAction = normalizeText(meeting.manualFinalizationAction);
+  if (manualAction === "purchase") return true;
+
+  const notes = normalizeText(meeting.notes);
+  if (notes.includes("compra realizada")) return true;
+
+  return false;
+}
+
+function getMeetingSaleValueCents(meeting: Meeting): number {
+  if (Number.isFinite(meeting.saleValueCents) && Number(meeting.saleValueCents) > 0) {
+    return Math.round(Number(meeting.saleValueCents));
+  }
+  return 0;
 }
 
 async function readServerSnapshot() {
@@ -239,9 +247,14 @@ function buildPayload(params: {
   const agendamentosPercentual = safePercent(agendamentos, decisor);
 
   const totalLeadsCadastrados = useOutboundScope ? outboundLeads.length : leads.length;
-  const vendasRealizadas = countVendasRealizadas(finalizations);
-  const faturamento = sumFaturamento(finalizations) / 100;
   const leadDesqualificado = countLeadDesqualificado(leads, finalizations);
+
+  const closingCallsForCpc = meetingsInScope.filter((meeting) => isClosingCallForCpc(meeting));
+  const purchasedClosingCalls = closingCallsForCpc.filter((meeting) => isPurchasedClosingCall(meeting));
+  const vendasRealizadas = purchasedClosingCalls.length;
+  const faturamento =
+    purchasedClosingCalls.reduce((total, meeting) => total + getMeetingSaleValueCents(meeting), 0) / 100;
+  const percentualCpc = safePercent(vendasRealizadas, closingCallsForCpc.length);
 
   const followUpsPendentes = meetingsInScope.filter((meeting) => isFutureActiveFollowup(meeting, referenceDate)).length;
   const noShow = meetingsInScope.filter((meeting) => isNoShowMeeting(meeting)).length;
@@ -268,7 +281,7 @@ function buildPayload(params: {
       followUpsPendentes,
       conversaoLigacao: safePercent(agendamentos, decisor),
       percentualAtendimento: atendidasPercentual,
-      percentualCpc: safePercent(vendasRealizadas, atendidas),
+      percentualCpc,
       noShow,
     },
   };
