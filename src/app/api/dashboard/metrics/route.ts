@@ -87,10 +87,15 @@ function isNoShowMeeting(meeting: Meeting): boolean {
   const normalizedType = normalizeText(meeting.eventType);
   const normalizedReason = normalizeText(meeting.reason);
   const normalizedNotes = normalizeText(meeting.notes);
+  const hasNoShowMarker =
+    normalizedNotes.includes("no show") ||
+    normalizedNotes.includes("no-show") ||
+    normalizedNotes.includes("no_show") ||
+    normalizedNotes.includes("nao compareceu");
 
-  if (normalizedStatus === "cancelado" && normalizedNotes.includes("no show")) return true;
-  if (normalizedStatus === "concluido" && normalizedNotes.includes("nao compareceu")) return true;
-  if (normalizedType === "call_agendada" && normalizedReason === "fechamento" && normalizedNotes.includes("no show")) return true;
+  if (normalizedStatus === "cancelado" && hasNoShowMarker) return true;
+  if (normalizedStatus === "concluido" && hasNoShowMarker) return true;
+  if (normalizedType === "call_agendada" && normalizedReason === "fechamento" && hasNoShowMarker) return true;
   return false;
 }
 

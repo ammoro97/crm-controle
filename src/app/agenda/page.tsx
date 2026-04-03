@@ -105,7 +105,12 @@ function normalizeDateTimeIdentity(meeting: Meeting) {
 
 function hasNoShowNote(notes?: string | null) {
   const normalized = normalizeSearchText(String(notes || ""));
-  return normalized.includes("no show") || normalized.includes("nao compareceu");
+  return (
+    normalized.includes("no show") ||
+    normalized.includes("no-show") ||
+    normalized.includes("no_show") ||
+    normalized.includes("nao compareceu")
+  );
 }
 
 function appendNoShowNote(notes?: string | null) {
