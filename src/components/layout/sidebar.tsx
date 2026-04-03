@@ -150,6 +150,17 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
         </Link>
 
         <Link
+          href="/assistente"
+          onClick={onNavigate}
+          className={linkClass(pathname === "/assistente")}
+        >
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-slate-900/80 text-[11px] font-semibold text-slate-200">
+            IA
+          </span>
+          {isPinned ? <span className="ml-3">Assistente</span> : null}
+        </Link>
+
+        <Link
           href="/configuracoes"
           onClick={onNavigate}
           className={linkClass(pathname === "/configuracoes")}
