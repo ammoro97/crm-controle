@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCallLogs } from "@/lib/calls-store";
 import { isAgendaEventLinkedToLead, normalizeAgendaEventStatus, normalizeText } from "@/lib/agenda-events";
 import { getLeadPhones } from "@/lib/lead-contact-utils";
-import { readLeadsCollection } from "@/lib/leads-customers-store";
+import { readCustomersCollection, readLeadsCollection } from "@/lib/leads-customers-store";
 import { readDataFile } from "@/lib/storage-paths";
 import { requireAuth } from "@/lib/require-auth";
 import type { DashboardMetrics } from "@/types/dashboard";
@@ -228,9 +228,10 @@ function getMeetingSaleValueCents(meeting: Meeting): number {
 }
 
 async function readServerSnapshot() {
-  const [leads, meetings, finalizations, wrapups] = await Promise.all([
+  const [leads, meetings, customers, finalizations, wrapups] = await Promise.all([
     readLeadsCollection(),
     readDataFile<Meeting[]>(MEETINGS_FILE, []),
+    readCustomersCollection(),
     readDataFile<LeadFinalizationRecord[]>(LEAD_FINALIZATIONS_FILE, []),
     readDataFile<PostCallWrapup[]>(WRAPUPS_FILE, []),
   ]);
@@ -238,6 +239,7 @@ async function readServerSnapshot() {
   return {
     leads: asArray<Lead>(leads),
     meetings: asArray<Meeting>(meetings),
+    customers: asArray<Lead>(customers),
     finalizations: asArray<LeadFinalizationRecord>(finalizations),
     wrapups: asArray<PostCallWrapup>(wrapups),
   };
@@ -245,19 +247,26 @@ async function readServerSnapshot() {
 
 function buildPayload(params: {
   leads: Lead[];
+  customers: Lead[];
   meetings: Meeting[];
   finalizations: LeadFinalizationRecord[];
   wrapups: PostCallWrapup[];
   referenceDate: Date;
   callLogs: CallLog[];
 }): DashboardMetrics {
-  const { leads, meetings, finalizations, wrapups, referenceDate, callLogs } = params;
+  const { leads, customers, meetings, finalizations, wrapups, referenceDate, callLogs } = params;
 
   const outboundLeads = leads.filter((lead) => lead.channel === "outbound");
-  const outboundLeadIds = new Set(outboundLeads.map((lead) => normalizeLeadId(lead.id)).filter(Boolean));
-  const scopedLeadIds = new Set(outboundLeads.map((lead) => normalizeLeadId(lead.id)).filter(Boolean));
-  const leadPhoneIndex = buildLeadPhoneIndex(outboundLeads);
-  const meetingsInScope = meetings.filter((meeting) => isOutboundMeeting(meeting, outboundLeads, outboundLeadIds));
+  const outboundCustomers = customers.filter((customer) => customer.channel === "outbound");
+  const outboundOperationalLeads = [...outboundLeads, ...outboundCustomers];
+  const outboundOperationalLeadIds = new Set(
+    outboundOperationalLeads.map((lead) => normalizeLeadId(lead.id)).filter(Boolean),
+  );
+  const scopedLeadIds = outboundOperationalLeadIds;
+  const leadPhoneIndex = buildLeadPhoneIndex(outboundOperationalLeads);
+  const meetingsInScope = meetings.filter((meeting) =>
+    isOutboundMeeting(meeting, outboundOperationalLeads, outboundOperationalLeadIds),
+  );
   const totalLeadsCadastrados = outboundLeads.length;
 
   if (totalLeadsCadastrados === 0) {
