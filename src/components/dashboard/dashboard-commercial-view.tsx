@@ -34,6 +34,9 @@ type MetricCardDefinition = {
 type MetricGroup = {
   id: string;
   title: string;
+  sectionClassName: string;
+  headerBarClassName: string;
+  headerTitleClassName: string;
   cards: MetricCardDefinition[];
 };
 
@@ -119,6 +122,10 @@ const metricGroups: MetricGroup[] = [
   {
     id: "ativacao_contato",
     title: "Ativacao e contato inicial",
+    sectionClassName:
+      "rounded-2xl border border-slate-700/70 bg-[linear-gradient(145deg,rgba(30,64,175,0.12),rgba(15,23,42,0.84))] p-6 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)]",
+    headerBarClassName: "bg-blue-400",
+    headerTitleClassName: "text-blue-200",
     cards: [
       {
         key: "acionamentoBase",
@@ -185,6 +192,10 @@ const metricGroups: MetricGroup[] = [
   {
     id: "qualificacao_andamento",
     title: "Qualificacao e andamento",
+    sectionClassName:
+      "rounded-2xl border border-slate-700/70 bg-[linear-gradient(145deg,rgba(180,83,9,0.12),rgba(15,23,42,0.84))] p-6 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)]",
+    headerBarClassName: "bg-orange-400",
+    headerTitleClassName: "text-orange-200",
     cards: [
       {
         key: "followUpsPendentes",
@@ -218,6 +229,10 @@ const metricGroups: MetricGroup[] = [
   {
     id: "resultado_comercial",
     title: "Resultado comercial",
+    sectionClassName:
+      "rounded-2xl border border-slate-700/70 bg-[linear-gradient(145deg,rgba(21,128,61,0.12),rgba(15,23,42,0.84))] p-6 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)]",
+    headerBarClassName: "bg-emerald-400",
+    headerTitleClassName: "text-emerald-200",
     cards: [
       {
         key: "percentualCpc",
@@ -338,14 +353,16 @@ export function DashboardCommercialView() {
             comprasPercentual={metrics.funnels.conversao.comprasPercentual}
           />
 
-          <div className="space-y-3">
+          <div className="space-y-10">
             {metricGroups.map((group) => (
-              <section
-                key={group.id}
-                className="rounded-2xl border border-slate-800/80 bg-gradient-to-br from-slate-900/78 to-slate-950/40 p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)]"
-              >
+              <section key={group.id} className={group.sectionClassName}>
                 <div className="mb-2 flex items-center justify-between">
-                  <h3 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-300">{group.title}</h3>
+                  <div className="flex items-center gap-3">
+                    <span className={`h-5 w-1 rounded-full ${group.headerBarClassName}`} aria-hidden="true" />
+                    <h3 className={`text-xs font-semibold uppercase tracking-[0.1em] ${group.headerTitleClassName}`}>
+                      {group.title}
+                    </h3>
+                  </div>
                   <span className="text-[10px] uppercase tracking-[0.1em] text-slate-500">Grupo operacional</span>
                 </div>
 
