@@ -138,7 +138,10 @@ function parseDateTime(value?: string | null): Date | null {
 }
 
 function isWithinRange(referenceDate: Date | null, rangeStart: Date, rangeEnd: Date): boolean {
-  if (!referenceDate) return true;
+  // Entities without a date are not considered to be in any period.
+  // Exception: period "max" uses rangeStart=1970, rangeEnd=9999 — explicit inclusion
+  // is handled by the caller passing MIN/MAX_HISTORY_DATE ranges. Null dates remain excluded.
+  if (!referenceDate) return false;
   const reference = referenceDate.getTime();
   return reference >= rangeStart.getTime() && reference <= rangeEnd.getTime();
 }
@@ -613,17 +616,15 @@ function buildPayload(params: {
     nome: filters.vendedorNome,
   };
 
+  // Lead base: ALL outbound leads assigned to the vendor, regardless of entry date.
+  // Period filter must NOT apply to the base — it applies only to actions (calls, wrapups, meetings).
+  // Filtering by entry date would cause acionamentoBase to use only "new this period" leads as
+  // denominator, silently excluding the vendor's older pipeline from all funnel metrics.
   const outboundLeads = leads.filter(
-    (lead) =>
-      lead.channel === "outbound" &&
-      matchesVendedorByName(lead.owner, vendedorFilter) &&
-      isWithinRange(getLeadReferenceDate(lead), filters.rangeStart, filters.rangeEnd),
+    (lead) => lead.channel === "outbound" && matchesVendedorByName(lead.owner, vendedorFilter),
   );
   const outboundCustomers = customers.filter(
-    (customer) =>
-      customer.channel === "outbound" &&
-      matchesVendedorByName(customer.owner, vendedorFilter) &&
-      isWithinRange(getLeadReferenceDate(customer), filters.rangeStart, filters.rangeEnd),
+    (customer) => customer.channel === "outbound" && matchesVendedorByName(customer.owner, vendedorFilter),
   );
   const outboundOperationalLeads = [...outboundLeads, ...outboundCustomers];
   const outboundOperationalLeadIds = new Set(
@@ -693,6 +694,11 @@ function buildPayload(params: {
   const finalizationsInPeriod = finalizations.filter((record) =>
     isWithinRange(getFinalizationReferenceDate(record), filters.rangeStart, filters.rangeEnd),
   );
+  // Active lead IDs (excludes converted customers). Used to restrict acionamentoBase numerator:
+  // calls linked to a customer record must not count as "lead acionado" since customers are
+  // already closed deals and don't appear in the leads table, creating a phantom activation %.
+  const activeLeadIds = new Set(outboundLeads.map((lead) => normalizeLeadId(lead.id)).filter(Boolean));
+
   const totalLeadsCadastrados = outboundLeads.length;
 
   if (totalLeadsCadastrados === 0) {
@@ -733,10 +739,14 @@ function buildPayload(params: {
 
   const ligacoes = callsInScope.length;
   const atendidas = callsInScope.filter((call) => isAnsweredCallStatus(call.status)).length;
+  // acionamentoBase numerator: unique LEADS (not customers) that received at least one call in scope.
+  // Customers are excluded because they are no longer part of the active sales base and do not
+  // appear in the leads listing — counting their calls would inflate the metric vs. what the
+  // operator observes in the table.
   const leadsUnicosAcionados = new Set<string>();
   for (const call of callsInScope) {
     const leadId = resolveScopedLeadIdByCall(call, scopedLeadIds, leadPhoneIndex);
-    if (!leadId) continue;
+    if (!leadId || !activeLeadIds.has(leadId)) continue;
     leadsUnicosAcionados.add(leadId);
   }
 
@@ -768,7 +778,17 @@ function buildPayload(params: {
     purchasedClosingCalls.reduce((total, meeting) => total + getMeetingSaleValueCents(meeting), 0) / 100;
   const percentualCpc = safePercent(vendasRealizadas, closingCallsForCpc.length);
 
-  const followUpsPendentes = meetingsInScope.filter((meeting) => isFutureActiveFollowup(meeting, referenceDate)).length;
+  // followUpsPendentes: count ALL future active follow-ups for the vendor's leads,
+  // not just those whose scheduled date falls within the selected period.
+  // A follow-up scheduled next week is still "pending" even when the dashboard period is "last 7 days".
+  // Using meetingsInScope (period-filtered by scheduled date) would silently exclude upcoming meetings
+  // that were created outside the window, understating the vendor's pending workload.
+  const followUpsPendentes = meetings.filter(
+    (meeting) =>
+      isOutboundMeeting(meeting, outboundOperationalLeads, outboundOperationalLeadIds) &&
+      matchesVendedorByIdOrName({ ownerName: meeting.owner }, vendedorFilter) &&
+      isFutureActiveFollowup(meeting, referenceDate),
+  ).length;
   const noShow = meetingsInScope.filter((meeting) => isNoShowMeeting(meeting)).length;
 
   return {
