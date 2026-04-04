@@ -39,7 +39,7 @@ const VARIANT_STYLES: Record<FunnelStageVariant, { from: string; to: string; glo
 
 function clampWidthPercent(value: number) {
   if (!Number.isFinite(value)) return 100;
-  return Math.max(46, Math.min(100, value));
+  return Math.max(40, Math.min(100, value));
 }
 
 export function FunnelStage({ label, value, widthPercent, variant, icon, animateIn, index }: FunnelStageProps) {

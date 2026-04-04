@@ -119,7 +119,7 @@ export function DashboardFunnel({
         id: "abs_compras",
         label: "Compras",
         value: formatMetricNumber(compras),
-        widthPercent: 38,
+        widthPercent: 40,
         variant: "green",
         icon: iconForStep("compras"),
       },
