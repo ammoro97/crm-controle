@@ -247,6 +247,9 @@ export type CallLog = {
   externalCallId?: string | null;
   sessionId?: string | null;
   leadId?: string | null;
+  userId?: string | null;
+  responsavelId?: string | null;
+  atendenteNome?: string | null;
   nome?: string;
   empresa?: string;
   telefone?: string;

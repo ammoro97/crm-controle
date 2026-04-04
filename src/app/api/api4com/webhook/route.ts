@@ -148,6 +148,9 @@ export async function POST(request: Request) {
     const metadata = payload.metadata || {};
     const metaLeadId = String(metadata.leadId || "").trim() || null;
     const metaSessionId = String(metadata.sessionId || "").trim() || null;
+    const metaUserId = String(metadata.userId || "").trim() || null;
+    const metaResponsavelId = String(metadata.responsavelId || "").trim() || null;
+    const metaAtendenteNome = String(metadata.atendenteNome || "").trim() || null;
     const metaNome = String(metadata.nome || "").trim();
     const metaEmpresa = String(metadata.empresa || "").trim();
     const metaGateway = String(metadata.gateway || "").trim() || null;
@@ -182,6 +185,9 @@ export async function POST(request: Request) {
       externalCallId: callId,
       sessionId: metaSessionId,
       leadId,
+      userId: metaUserId,
+      responsavelId: metaResponsavelId,
+      atendenteNome: metaAtendenteNome,
       nome,
       empresa,
       telefone,

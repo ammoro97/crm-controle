@@ -27,6 +27,11 @@ type MetricsRequestFilters = {
   vendedorNome?: string;
 };
 
+type VendedorFilter = {
+  id?: string;
+  nome?: string;
+};
+
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -135,12 +140,17 @@ function parseFiltersFromRequest(request: Request): MetricsRequestFilters {
   };
 }
 
-async function resolveVendedorNome(vendedorId?: string): Promise<string | undefined> {
+async function resolveVendedorFromId(vendedorId?: string): Promise<VendedorFilter> {
   const normalizedId = String(vendedorId || "").trim();
-  if (!normalizedId) return undefined;
+  if (!normalizedId) return {};
 
   const admin = getSupabaseAdmin();
-  if (!admin) return normalizedId;
+  if (!admin) {
+    return {
+      id: normalizedId,
+      nome: normalizedId,
+    };
+  }
 
   const { data, error } = await admin
     .from("crm_responsaveis")
@@ -150,11 +160,17 @@ async function resolveVendedorNome(vendedorId?: string): Promise<string | undefi
 
   if (error) {
     console.error("[DASHBOARD] erro ao resolver vendedor", error.message);
-    return normalizedId;
+    return {
+      id: normalizedId,
+      nome: normalizedId,
+    };
   }
 
   const nome = String(data?.nome || "").trim();
-  return nome || normalizedId;
+  return {
+    id: normalizedId,
+    nome: nome || normalizedId,
+  };
 }
 
 function isAnsweredCallStatus(status?: string | null): boolean {
@@ -348,6 +364,57 @@ function dedupeWrapups(wrapups: PostCallWrapup[]): PostCallWrapup[] {
   return deduped;
 }
 
+type WrapupExecutionIndexes = {
+  byCallId: Map<string, PostCallWrapup[]>;
+  bySessionId: Map<string, PostCallWrapup[]>;
+  byExternalCallId: Map<string, PostCallWrapup[]>;
+};
+
+function pushWrapupIndex(index: Map<string, PostCallWrapup[]>, key?: string | null, wrapup?: PostCallWrapup) {
+  const normalizedKey = normalizeLeadId(key);
+  if (!normalizedKey || !wrapup) return;
+  const current = index.get(normalizedKey) || [];
+  current.push(wrapup);
+  index.set(normalizedKey, current);
+}
+
+function buildWrapupExecutionIndexes(wrapups: PostCallWrapup[]): WrapupExecutionIndexes {
+  const byCallId = new Map<string, PostCallWrapup[]>();
+  const bySessionId = new Map<string, PostCallWrapup[]>();
+  const byExternalCallId = new Map<string, PostCallWrapup[]>();
+
+  for (const wrapup of wrapups) {
+    pushWrapupIndex(byCallId, wrapup.callId, wrapup);
+    pushWrapupIndex(bySessionId, wrapup.sessionId, wrapup);
+    pushWrapupIndex(byExternalCallId, wrapup.externalCallId, wrapup);
+  }
+
+  return {
+    byCallId,
+    bySessionId,
+    byExternalCallId,
+  };
+}
+
+function getCallRelatedWrapups(call: CallLog, indexes: WrapupExecutionIndexes): PostCallWrapup[] {
+  const matches = new Map<string, PostCallWrapup>();
+
+  const addMatches = (items: PostCallWrapup[] | undefined) => {
+    if (!items || items.length === 0) return;
+    for (const item of items) {
+      const key = normalizeLeadId(item.id);
+      if (!key || matches.has(key)) continue;
+      matches.set(key, item);
+    }
+  };
+
+  addMatches(indexes.byCallId.get(normalizeLeadId(call.id)));
+  addMatches(indexes.bySessionId.get(normalizeLeadId(call.sessionId)));
+  addMatches(indexes.byExternalCallId.get(normalizeLeadId(call.externalCallId)));
+
+  return Array.from(matches.values());
+}
+
 function getCallReferenceDate(call: CallLog): Date | null {
   return parseDateTime(call.startedAt || call.createdAt || null);
 }
@@ -370,13 +437,42 @@ function getFinalizationReferenceDate(record: LeadFinalizationRecord): Date | nu
   return parseDateTime(record.finalizedAt || null);
 }
 
-function normalizeOwnerName(value?: string | null): string {
+function normalizeIdentifier(value?: string | null): string {
   return normalizeText(value);
 }
 
-function matchesVendedor(ownerName: string | undefined, vendedorNome?: string): boolean {
-  if (!vendedorNome) return true;
-  return normalizeOwnerName(ownerName) === normalizeOwnerName(vendedorNome);
+function hasVendedorFilter(vendedor: VendedorFilter): boolean {
+  return Boolean(normalizeLeadId(vendedor.id) || normalizeIdentifier(vendedor.nome));
+}
+
+function matchesVendedorByName(value?: string | null, vendedor?: VendedorFilter): boolean {
+  if (!vendedor || !hasVendedorFilter(vendedor)) return true;
+  const vendedorName = normalizeIdentifier(vendedor.nome);
+  if (!vendedorName) return true;
+  return normalizeIdentifier(value) === vendedorName;
+}
+
+function matchesVendedorByIdOrName(
+  args: {
+    responsavelId?: string | null;
+    atendenteNome?: string | null;
+    ownerName?: string | null;
+  },
+  vendedor?: VendedorFilter,
+): boolean {
+  if (!vendedor || !hasVendedorFilter(vendedor)) return true;
+
+  const vendedorId = normalizeLeadId(vendedor.id);
+  if (vendedorId) {
+    if (normalizeLeadId(args.responsavelId) === vendedorId) return true;
+  }
+
+  const vendedorName = normalizeIdentifier(vendedor.nome);
+  if (!vendedorName) return false;
+
+  if (normalizeIdentifier(args.atendenteNome) === vendedorName) return true;
+  if (normalizeIdentifier(args.ownerName) === vendedorName) return true;
+  return false;
 }
 
 function isOutboundMeeting(meeting: Meeting, outboundLeads: Lead[], outboundLeadIds: Set<string>): boolean {
@@ -394,6 +490,7 @@ function countLeadDesqualificado(
   finalizations: LeadFinalizationRecord[],
   filters: MetricsRequestFilters,
   scopedLeadIds: Set<string>,
+  vendedorFilter: VendedorFilter,
 ): number {
   const lostLeadsCount = leads.filter((lead) => {
     if (lead.channel !== "outbound" || lead.status !== "Perdido") return false;
@@ -406,6 +503,7 @@ function countLeadDesqualificado(
     if (!isOutboundFinalization(record) || record.reason !== "apagar") return false;
     const leadId = normalizeLeadId(record.leadId);
     if (!leadId || !scopedLeadIds.has(leadId)) return false;
+    if (!matchesVendedorByName(record.finalizedBy, vendedorFilter)) return false;
     return isWithinRange(getFinalizationReferenceDate(record), filters.rangeStart, filters.rangeEnd);
   }).length;
 
@@ -465,17 +563,21 @@ function buildPayload(params: {
   filters: MetricsRequestFilters;
 }): DashboardMetrics {
   const { leads, customers, meetings, finalizations, wrapups, referenceDate, callLogs, filters } = params;
+  const vendedorFilter: VendedorFilter = {
+    id: filters.vendedorId,
+    nome: filters.vendedorNome,
+  };
 
   const outboundLeads = leads.filter(
     (lead) =>
       lead.channel === "outbound" &&
-      matchesVendedor(lead.owner, filters.vendedorNome) &&
+      matchesVendedorByName(lead.owner, vendedorFilter) &&
       isWithinRange(getLeadReferenceDate(lead), filters.rangeStart, filters.rangeEnd),
   );
   const outboundCustomers = customers.filter(
     (customer) =>
       customer.channel === "outbound" &&
-      matchesVendedor(customer.owner, filters.vendedorNome) &&
+      matchesVendedorByName(customer.owner, vendedorFilter) &&
       isWithinRange(getLeadReferenceDate(customer), filters.rangeStart, filters.rangeEnd),
   );
   const outboundOperationalLeads = [...outboundLeads, ...outboundCustomers];
@@ -484,18 +586,65 @@ function buildPayload(params: {
   );
   const scopedLeadIds = outboundOperationalLeadIds;
   const leadPhoneIndex = buildLeadPhoneIndex(outboundOperationalLeads);
+  const wrapupsInPeriod = wrapups.filter((wrapup) =>
+    isWithinRange(getWrapupReferenceDate(wrapup), filters.rangeStart, filters.rangeEnd),
+  );
+  const wrapsInScope = wrapupsInPeriod.filter((wrapup) =>
+    Boolean(resolveScopedLeadIdByWrapup(wrapup, scopedLeadIds, leadPhoneIndex)),
+  );
+  const wrapupExecutionIndexes = buildWrapupExecutionIndexes(wrapsInScope);
+  const wrapsExecutionInScope = wrapsInScope.filter((wrapup) =>
+    matchesVendedorByIdOrName(
+      {
+        responsavelId: wrapup.responsavelId,
+        atendenteNome: wrapup.atendenteNome,
+      },
+      vendedorFilter,
+    ),
+  );
   const meetingsInScope = meetings.filter(
     (meeting) =>
       isOutboundMeeting(meeting, outboundOperationalLeads, outboundOperationalLeadIds) &&
-      matchesVendedor(meeting.owner, filters.vendedorNome) &&
+      matchesVendedorByIdOrName(
+        {
+          ownerName: meeting.owner,
+        },
+        vendedorFilter,
+      ) &&
       isWithinRange(getMeetingReferenceDate(meeting), filters.rangeStart, filters.rangeEnd),
-  );
-  const wrapupsInPeriod = wrapups.filter((wrapup) =>
-    isWithinRange(getWrapupReferenceDate(wrapup), filters.rangeStart, filters.rangeEnd),
   );
   const callsInPeriod = callLogs.filter((call) =>
     isWithinRange(getCallReferenceDate(call), filters.rangeStart, filters.rangeEnd),
   );
+  const callsInScope = callsInPeriod.filter((call) => {
+    const resolvedLeadId = resolveScopedLeadIdByCall(call, scopedLeadIds, leadPhoneIndex);
+    if (!resolvedLeadId) return false;
+
+    if (!hasVendedorFilter(vendedorFilter)) return true;
+
+    if (
+      matchesVendedorByIdOrName(
+        {
+          responsavelId: call.responsavelId,
+          atendenteNome: call.atendenteNome,
+        },
+        vendedorFilter,
+      )
+    ) {
+      return true;
+    }
+
+    const relatedWrapups = getCallRelatedWrapups(call, wrapupExecutionIndexes);
+    return relatedWrapups.some((wrapup) =>
+      matchesVendedorByIdOrName(
+        {
+          responsavelId: wrapup.responsavelId,
+          atendenteNome: wrapup.atendenteNome,
+        },
+        vendedorFilter,
+      ),
+    );
+  });
   const finalizationsInPeriod = finalizations.filter((record) =>
     isWithinRange(getFinalizationReferenceDate(record), filters.rangeStart, filters.rangeEnd),
   );
@@ -535,13 +684,7 @@ function buildPayload(params: {
     };
   }
 
-  const callsInScope = callsInPeriod.filter((call) =>
-    Boolean(resolveScopedLeadIdByCall(call, scopedLeadIds, leadPhoneIndex)),
-  );
-  const wrapsInScope = wrapupsInPeriod.filter((wrapup) =>
-    Boolean(resolveScopedLeadIdByWrapup(wrapup, scopedLeadIds, leadPhoneIndex)),
-  );
-  const dedupedWrapsInScope = dedupeWrapups(wrapsInScope);
+  const dedupedWrapsInScope = dedupeWrapups(hasVendedorFilter(vendedorFilter) ? wrapsExecutionInScope : wrapsInScope);
 
   const ligacoes = callsInScope.length;
   const atendidas = callsInScope.filter((call) => isAnsweredCallStatus(call.status)).length;
@@ -563,7 +706,13 @@ function buildPayload(params: {
   const decisorPercentual = safePercent(decisor, atendidas);
   const agendamentosPercentual = safePercent(agendamentos, decisor);
 
-  const leadDesqualificado = countLeadDesqualificado(leads, finalizationsInPeriod, filters, scopedLeadIds);
+  const leadDesqualificado = countLeadDesqualificado(
+    leads,
+    finalizationsInPeriod,
+    filters,
+    scopedLeadIds,
+    vendedorFilter,
+  );
 
   const closingCallsForCpc = meetingsInScope.filter((meeting) => isClosingCallForCpc(meeting));
   const purchasedClosingCalls = closingCallsForCpc.filter((meeting) => isPurchasedClosingCall(meeting));
@@ -616,10 +765,11 @@ export async function GET(request: Request) {
 
   try {
     const baseFilters = parseFiltersFromRequest(request);
-    const vendedorNome = await resolveVendedorNome(baseFilters.vendedorId);
+    const vendedor = await resolveVendedorFromId(baseFilters.vendedorId);
     const filters: MetricsRequestFilters = {
       ...baseFilters,
-      vendedorNome,
+      vendedorId: vendedor.id,
+      vendedorNome: vendedor.nome,
     };
 
     const [callLogs, snapshot] = await Promise.all([getCallLogs(), readServerSnapshot()]);
@@ -648,10 +798,11 @@ export async function POST(request: Request) {
 
   try {
     const baseFilters = parseFiltersFromRequest(request);
-    const vendedorNome = await resolveVendedorNome(baseFilters.vendedorId);
+    const vendedor = await resolveVendedorFromId(baseFilters.vendedorId);
     const filters: MetricsRequestFilters = {
       ...baseFilters,
-      vendedorNome,
+      vendedorId: vendedor.id,
+      vendedorNome: vendedor.nome,
     };
 
     const [callLogs, snapshot] = await Promise.all([getCallLogs(), readServerSnapshot()]);
