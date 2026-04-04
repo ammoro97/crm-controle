@@ -1,3 +1,9 @@
+export type DashboardFilters = {
+  from: string;
+  to: string;
+  vendedorId?: string;
+};
+
 export type DashboardMetrics = {
   funnels: {
     absoluto: {

@@ -4,6 +4,7 @@ import { isAgendaEventLinkedToLead, normalizeAgendaEventStatus, normalizeText } 
 import { getLeadPhones } from "@/lib/lead-contact-utils";
 import { readCustomersCollection, readLeadsCollection } from "@/lib/leads-customers-store";
 import { readDataFile } from "@/lib/storage-paths";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { requireAuth } from "@/lib/require-auth";
 import type { DashboardMetrics } from "@/types/dashboard";
 import type { CallLog, Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
@@ -13,6 +14,18 @@ const MEETINGS_FILE = "crm.agenda.meetings.v1.json";
 const LEAD_FINALIZATIONS_FILE = "crm.leads.finalizations.v1.json";
 const WRAPUPS_FILE = "crm.calls.wrapups.v1.json";
 const CRM_TIMEZONE_OFFSET = "-03:00";
+const DEFAULT_PERIOD_DAYS = 7;
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const BR_DATE_PATTERN = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+
+type MetricsRequestFilters = {
+  from: string;
+  to: string;
+  rangeStart: Date;
+  rangeEnd: Date;
+  vendedorId?: string;
+  vendedorNome?: string;
+};
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
@@ -53,6 +66,95 @@ function buildLocalDateTime(date?: string | null, time?: string | null): Date | 
   if (Number.isNaN(parsed.getTime())) return null;
 
   return parsed;
+}
+
+function toDateInputValue(date: Date): string {
+  const localTimestamp = date.getTime() - date.getTimezoneOffset() * 60_000;
+  return new Date(localTimestamp).toISOString().slice(0, 10);
+}
+
+function getDefaultDateRange(): { from: string; to: string } {
+  const toDate = new Date();
+  const fromDate = new Date(toDate);
+  fromDate.setDate(fromDate.getDate() - (DEFAULT_PERIOD_DAYS - 1));
+  return {
+    from: toDateInputValue(fromDate),
+    to: toDateInputValue(toDate),
+  };
+}
+
+function parseDateOnly(value?: string | null): string | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (DATE_ONLY_PATTERN.test(raw)) return raw;
+  const brMatch = raw.match(BR_DATE_PATTERN);
+  if (!brMatch) return null;
+  return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+}
+
+function parseDateTime(value?: string | null): Date | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const dateOnly = parseDateOnly(raw);
+  if (dateOnly) {
+    const parsed = new Date(`${dateOnly}T00:00:00${CRM_TIMEZONE_OFFSET}`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function isWithinRange(referenceDate: Date | null, rangeStart: Date, rangeEnd: Date): boolean {
+  if (!referenceDate) return true;
+  const reference = referenceDate.getTime();
+  return reference >= rangeStart.getTime() && reference <= rangeEnd.getTime();
+}
+
+function parseFiltersFromRequest(request: Request): MetricsRequestFilters {
+  const url = new URL(request.url);
+  const defaults = getDefaultDateRange();
+  const fromRaw = parseDateOnly(url.searchParams.get("from")) || defaults.from;
+  const toRaw = parseDateOnly(url.searchParams.get("to")) || defaults.to;
+  const vendedorId = String(url.searchParams.get("vendedorId") || "").trim() || undefined;
+
+  const from = fromRaw <= toRaw ? fromRaw : toRaw;
+  const to = fromRaw <= toRaw ? toRaw : fromRaw;
+
+  const rangeStart = new Date(`${from}T00:00:00${CRM_TIMEZONE_OFFSET}`);
+  const rangeEnd = new Date(`${to}T23:59:59.999${CRM_TIMEZONE_OFFSET}`);
+
+  return {
+    from,
+    to,
+    rangeStart,
+    rangeEnd,
+    vendedorId,
+  };
+}
+
+async function resolveVendedorNome(vendedorId?: string): Promise<string | undefined> {
+  const normalizedId = String(vendedorId || "").trim();
+  if (!normalizedId) return undefined;
+
+  const admin = getSupabaseAdmin();
+  if (!admin) return normalizedId;
+
+  const { data, error } = await admin
+    .from("crm_responsaveis")
+    .select("nome")
+    .eq("id", normalizedId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[DASHBOARD] erro ao resolver vendedor", error.message);
+    return normalizedId;
+  }
+
+  const nome = String(data?.nome || "").trim();
+  return nome || normalizedId;
 }
 
 function isAnsweredCallStatus(status?: string | null): boolean {
@@ -246,6 +348,37 @@ function dedupeWrapups(wrapups: PostCallWrapup[]): PostCallWrapup[] {
   return deduped;
 }
 
+function getCallReferenceDate(call: CallLog): Date | null {
+  return parseDateTime(call.startedAt || call.createdAt || null);
+}
+
+function getWrapupReferenceDate(wrapup: PostCallWrapup): Date | null {
+  return parseDateTime(wrapup.createdAt || wrapup.updatedAt || null);
+}
+
+function getMeetingReferenceDate(meeting: Meeting): Date | null {
+  const bySlot = buildLocalDateTime(meeting.date, meeting.callTime);
+  if (bySlot) return bySlot;
+  return parseDateTime(meeting.createdAt || meeting.updatedAt || null);
+}
+
+function getLeadReferenceDate(lead: Lead): Date | null {
+  return parseDateTime(lead.entryDate || lead.finalizedAt || lead.convertedToCustomerAt || null);
+}
+
+function getFinalizationReferenceDate(record: LeadFinalizationRecord): Date | null {
+  return parseDateTime(record.finalizedAt || null);
+}
+
+function normalizeOwnerName(value?: string | null): string {
+  return normalizeText(value);
+}
+
+function matchesVendedor(ownerName: string | undefined, vendedorNome?: string): boolean {
+  if (!vendedorNome) return true;
+  return normalizeOwnerName(ownerName) === normalizeOwnerName(vendedorNome);
+}
+
 function isOutboundMeeting(meeting: Meeting, outboundLeads: Lead[], outboundLeadIds: Set<string>): boolean {
   const directLeadId = normalizeLeadId(meeting.leadId);
   if (directLeadId && outboundLeadIds.has(directLeadId)) return true;
@@ -256,9 +389,26 @@ function isOutboundFinalization(record: LeadFinalizationRecord): boolean {
   return record.channel === "outbound" && record.finalizationSource === "lead_profile";
 }
 
-function countLeadDesqualificado(leads: Lead[], finalizations: LeadFinalizationRecord[]): number {
-  const lostLeadsCount = leads.filter((lead) => lead.channel === "outbound" && lead.status === "Perdido").length;
-  const finalizedAsDeleted = finalizations.filter((record) => isOutboundFinalization(record) && record.reason === "apagar").length;
+function countLeadDesqualificado(
+  leads: Lead[],
+  finalizations: LeadFinalizationRecord[],
+  filters: MetricsRequestFilters,
+  scopedLeadIds: Set<string>,
+): number {
+  const lostLeadsCount = leads.filter((lead) => {
+    if (lead.channel !== "outbound" || lead.status !== "Perdido") return false;
+    const leadId = normalizeLeadId(lead.id);
+    if (!leadId || !scopedLeadIds.has(leadId)) return false;
+    return isWithinRange(getLeadReferenceDate(lead), filters.rangeStart, filters.rangeEnd);
+  }).length;
+
+  const finalizedAsDeleted = finalizations.filter((record) => {
+    if (!isOutboundFinalization(record) || record.reason !== "apagar") return false;
+    const leadId = normalizeLeadId(record.leadId);
+    if (!leadId || !scopedLeadIds.has(leadId)) return false;
+    return isWithinRange(getFinalizationReferenceDate(record), filters.rangeStart, filters.rangeEnd);
+  }).length;
+
   return lostLeadsCount + finalizedAsDeleted;
 }
 
@@ -312,19 +462,42 @@ function buildPayload(params: {
   wrapups: PostCallWrapup[];
   referenceDate: Date;
   callLogs: CallLog[];
+  filters: MetricsRequestFilters;
 }): DashboardMetrics {
-  const { leads, customers, meetings, finalizations, wrapups, referenceDate, callLogs } = params;
+  const { leads, customers, meetings, finalizations, wrapups, referenceDate, callLogs, filters } = params;
 
-  const outboundLeads = leads.filter((lead) => lead.channel === "outbound");
-  const outboundCustomers = customers.filter((customer) => customer.channel === "outbound");
+  const outboundLeads = leads.filter(
+    (lead) =>
+      lead.channel === "outbound" &&
+      matchesVendedor(lead.owner, filters.vendedorNome) &&
+      isWithinRange(getLeadReferenceDate(lead), filters.rangeStart, filters.rangeEnd),
+  );
+  const outboundCustomers = customers.filter(
+    (customer) =>
+      customer.channel === "outbound" &&
+      matchesVendedor(customer.owner, filters.vendedorNome) &&
+      isWithinRange(getLeadReferenceDate(customer), filters.rangeStart, filters.rangeEnd),
+  );
   const outboundOperationalLeads = [...outboundLeads, ...outboundCustomers];
   const outboundOperationalLeadIds = new Set(
     outboundOperationalLeads.map((lead) => normalizeLeadId(lead.id)).filter(Boolean),
   );
   const scopedLeadIds = outboundOperationalLeadIds;
   const leadPhoneIndex = buildLeadPhoneIndex(outboundOperationalLeads);
-  const meetingsInScope = meetings.filter((meeting) =>
-    isOutboundMeeting(meeting, outboundOperationalLeads, outboundOperationalLeadIds),
+  const meetingsInScope = meetings.filter(
+    (meeting) =>
+      isOutboundMeeting(meeting, outboundOperationalLeads, outboundOperationalLeadIds) &&
+      matchesVendedor(meeting.owner, filters.vendedorNome) &&
+      isWithinRange(getMeetingReferenceDate(meeting), filters.rangeStart, filters.rangeEnd),
+  );
+  const wrapupsInPeriod = wrapups.filter((wrapup) =>
+    isWithinRange(getWrapupReferenceDate(wrapup), filters.rangeStart, filters.rangeEnd),
+  );
+  const callsInPeriod = callLogs.filter((call) =>
+    isWithinRange(getCallReferenceDate(call), filters.rangeStart, filters.rangeEnd),
+  );
+  const finalizationsInPeriod = finalizations.filter((record) =>
+    isWithinRange(getFinalizationReferenceDate(record), filters.rangeStart, filters.rangeEnd),
   );
   const totalLeadsCadastrados = outboundLeads.length;
 
@@ -362,8 +535,10 @@ function buildPayload(params: {
     };
   }
 
-  const callsInScope = callLogs.filter((call) => Boolean(resolveScopedLeadIdByCall(call, scopedLeadIds, leadPhoneIndex)));
-  const wrapsInScope = wrapups.filter((wrapup) =>
+  const callsInScope = callsInPeriod.filter((call) =>
+    Boolean(resolveScopedLeadIdByCall(call, scopedLeadIds, leadPhoneIndex)),
+  );
+  const wrapsInScope = wrapupsInPeriod.filter((wrapup) =>
     Boolean(resolveScopedLeadIdByWrapup(wrapup, scopedLeadIds, leadPhoneIndex)),
   );
   const dedupedWrapsInScope = dedupeWrapups(wrapsInScope);
@@ -388,7 +563,7 @@ function buildPayload(params: {
   const decisorPercentual = safePercent(decisor, atendidas);
   const agendamentosPercentual = safePercent(agendamentos, decisor);
 
-  const leadDesqualificado = countLeadDesqualificado(leads, finalizations);
+  const leadDesqualificado = countLeadDesqualificado(leads, finalizationsInPeriod, filters, scopedLeadIds);
 
   const closingCallsForCpc = meetingsInScope.filter((meeting) => isClosingCallForCpc(meeting));
   const purchasedClosingCalls = closingCallsForCpc.filter((meeting) => isPurchasedClosingCall(meeting));
@@ -435,16 +610,24 @@ function buildPayload(params: {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
   try {
+    const baseFilters = parseFiltersFromRequest(request);
+    const vendedorNome = await resolveVendedorNome(baseFilters.vendedorId);
+    const filters: MetricsRequestFilters = {
+      ...baseFilters,
+      vendedorNome,
+    };
+
     const [callLogs, snapshot] = await Promise.all([getCallLogs(), readServerSnapshot()]);
     const payload = buildPayload({
       ...snapshot,
       callLogs,
       referenceDate: new Date(),
+      filters,
     });
 
     return NextResponse.json({
@@ -459,16 +642,24 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
   try {
+    const baseFilters = parseFiltersFromRequest(request);
+    const vendedorNome = await resolveVendedorNome(baseFilters.vendedorId);
+    const filters: MetricsRequestFilters = {
+      ...baseFilters,
+      vendedorNome,
+    };
+
     const [callLogs, snapshot] = await Promise.all([getCallLogs(), readServerSnapshot()]);
     const payload = buildPayload({
       ...snapshot,
       callLogs,
       referenceDate: new Date(),
+      filters,
     });
 
     return NextResponse.json({

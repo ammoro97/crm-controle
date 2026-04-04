@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { DashboardMetrics } from "@/types/dashboard";
+import type { DashboardFilters, DashboardMetrics } from "@/types/dashboard";
 
 type ApiSuccessResponse = {
   success: true;
@@ -64,17 +64,28 @@ const EMPTY_METRICS: DashboardMetrics = {
   },
 };
 
-export function useDashboardMetrics() {
+function buildMetricsUrl(filters: DashboardFilters) {
+  const params = new URLSearchParams();
+  params.set("from", filters.from);
+  params.set("to", filters.to);
+  if (filters.vendedorId) {
+    params.set("vendedorId", filters.vendedorId);
+  }
+  return `/api/dashboard/metrics?${params.toString()}`;
+}
+
+export function useDashboardMetrics(filters: DashboardFilters) {
   const [metrics, setMetrics] = useState<DashboardMetrics>(EMPTY_METRICS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestUrl = useMemo(() => buildMetricsUrl(filters), [filters.from, filters.to, filters.vendedorId]);
 
   const fetchMetrics = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
 
     try {
-      const response = await fetch("/api/dashboard/metrics", {
+      const response = await fetch(requestUrl, {
         method: "GET",
         cache: "no-store",
         signal,
@@ -92,7 +103,7 @@ export function useDashboardMetrics() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [requestUrl]);
 
   useEffect(() => {
     const controller = new AbortController();
