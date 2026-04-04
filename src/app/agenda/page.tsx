@@ -253,8 +253,8 @@ function getManualActionConfirmationCopy(action: AppointmentManualAction) {
   if (action === "reschedule") {
     return {
       title: "Confirmar reagendamento",
-      message: "Deseja iniciar o reagendamento deste agendamento?",
-      confirmLabel: "Confirmar reagendamento",
+      message: "Defina a nova data e horario para concluir o reagendamento.",
+      confirmLabel: "Confirmar novo horario",
       confirmClassName: "rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500",
     };
   }
@@ -1132,6 +1132,46 @@ export default function AgendaPage() {
               <p className="text-slate-300">Responsavel: {selected.owner}</p>
               <p className="text-slate-300">Motivo: {selected.reason}</p>
             </div>
+            {pendingManualAction.action === "reschedule" ? (
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="text-sm text-slate-200">
+                  Nova data
+                  <input
+                    className="field mt-1 h-10"
+                    type="date"
+                    value={selected.date}
+                    onChange={(event) =>
+                      setSelected((prev) => {
+                        if (!prev) return prev;
+                        return {
+                          ...prev,
+                          date: event.target.value,
+                        };
+                      })
+                    }
+                    required
+                  />
+                </label>
+                <label className="text-sm text-slate-200">
+                  Novo horario
+                  <input
+                    className="field mt-1 h-10"
+                    type="time"
+                    value={selected.callTime}
+                    onChange={(event) =>
+                      setSelected((prev) => {
+                        if (!prev) return prev;
+                        return {
+                          ...prev,
+                          callTime: event.target.value,
+                        };
+                      })
+                    }
+                    required
+                  />
+                </label>
+              </div>
+            ) : null}
             {pendingManualAction.action === "purchase" ? (
               <label className="block text-sm text-slate-200">
                 Valor da compra <span className="text-rose-300">*</span>
