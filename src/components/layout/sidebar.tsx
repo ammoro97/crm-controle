@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { SidebarItem } from "@/components/ui/sidebar-item";
 
 type SidebarProps = {
   onNavigate?: () => void;
@@ -10,70 +11,18 @@ type SidebarProps = {
   onPinnedChange?: (value: boolean) => void;
 };
 
-type SalesSectionButtonProps = {
-  label: string;
-  isOpen: boolean;
-  onToggle: () => void;
-  direction: "forward" | "back";
-};
+const sectionTitleClass =
+  "px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500";
 
-function SalesSectionButton({ label, isOpen, onToggle, direction }: SalesSectionButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="flex h-12 w-full items-center justify-between rounded-lg px-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800/40"
-    >
-      <span className="inline-flex items-center gap-3">
-        <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-5 w-5 shrink-0">
-          {direction === "forward" ? (
-            <path
-              d="m4.5 9 9 0M10.5 5.5 14 9l-3.5 3.5"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          ) : (
-            <path
-              d="M13.5 9h-9M7.5 5.5 4 9l3.5 3.5"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-        </svg>
-        <span>{label}</span>
-      </span>
-      <svg
-        viewBox="0 0 18 18"
-        fill="none"
-        aria-hidden="true"
-        className={`h-5 w-5 shrink-0 text-slate-400 transition-transform ${isOpen ? "rotate-0" : "-rotate-90"}`}
-      >
-        <path d="m5.5 7 3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </button>
-  );
-}
+const dividerClass = "mx-2 my-2 h-px bg-slate-800/80";
 
 export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: SidebarProps) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-
-  const dashboardActive = pathname === "/leads";
-  const leadsActive = pathname.startsWith("/leads/outbound");
-  const inboundView = searchParams.get("view");
-  const inboundDashboardActive = pathname === "/leads/inbound" && inboundView !== "leads";
-  const inboundLeadsActive = pathname === "/leads/inbound" && inboundView === "leads";
   const [isOutboundOpen, setIsOutboundOpen] = useState(true);
   const [isInboundOpen, setIsInboundOpen] = useState(false);
 
-  const linkClass = (active: boolean) =>
-    `flex items-center rounded-lg py-2 text-sm transition ${
-      isPinned ? "px-3" : "justify-center px-2"
-    } ${
+  const compactLinkClass = (active: boolean) =>
+    `flex h-10 w-full items-center justify-center rounded-lg transition ${
       active
         ? "bg-slate-800 text-slate-100"
         : "text-slate-300 hover:bg-slate-900 hover:text-slate-100"
@@ -114,167 +63,280 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
         </div>
       </div>
 
-      <nav className={`space-y-1 ${isPinned ? "px-3" : "px-2"}`}>
-        {isPinned ? (
-          <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-            Vendas
-          </p>
-        ) : null}
+      {isPinned ? (
+        <nav className="space-y-1 px-3">
+          <p className={sectionTitleClass}>Vendas</p>
 
-        {isPinned ? (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-2">
-              <SalesSectionButton
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <SidebarItem
+                variant="card"
                 label="Outbound"
-                isOpen={isOutboundOpen}
-                onToggle={() => setIsOutboundOpen((prev) => !prev)}
-                direction="forward"
+                onClick={() => setIsOutboundOpen((prev) => !prev)}
+                icon={
+                  <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                    <path
+                      d="m4.5 9 9 0M10.5 5.5 14 9l-3.5 3.5"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                }
+                rightIcon={
+                  <svg
+                    viewBox="0 0 18 18"
+                    fill="none"
+                    aria-hidden="true"
+                    className={`text-slate-400 transition-transform ${isOutboundOpen ? "rotate-90" : ""}`}
+                  >
+                    <path d="m7 5 4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                }
               />
-
               {isOutboundOpen ? (
-                <div className="mt-2 space-y-1">
-                  <Link
+                <div className="space-y-1 pl-2">
+                  <SidebarItem
+                    variant="default"
+                    label="Dashboard"
                     href="/leads"
                     onClick={onNavigate}
-                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
-                      dashboardActive
-                        ? "bg-slate-800/70 text-slate-100"
-                        : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
-                    }`}
-                  >
-                    <span className="text-slate-500">&bull;</span>
-                    <span>Dashboard</span>
-                  </Link>
-
-                  <Link
+                    icon={
+                      <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                        <circle cx="9" cy="9" r="2" fill="currentColor" />
+                      </svg>
+                    }
+                  />
+                  <SidebarItem
+                    variant="default"
+                    label="Leads"
                     href="/leads/outbound"
                     onClick={onNavigate}
-                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
-                      leadsActive
-                        ? "bg-slate-800/70 text-slate-100"
-                        : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
-                    }`}
-                  >
-                    <span className="text-slate-500">&bull;</span>
-                    <span>Leads</span>
-                  </Link>
+                    icon={
+                      <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                        <circle cx="9" cy="9" r="2" fill="currentColor" />
+                      </svg>
+                    }
+                  />
                 </div>
               ) : null}
             </div>
 
-            <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-2">
-              <SalesSectionButton
+            <div className="space-y-1">
+              <SidebarItem
+                variant="card"
                 label="Inbound"
-                isOpen={isInboundOpen}
-                onToggle={() => setIsInboundOpen((prev) => !prev)}
-                direction="back"
+                onClick={() => setIsInboundOpen((prev) => !prev)}
+                icon={
+                  <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                    <path
+                      d="M13.5 9h-9M7.5 5.5 4 9l3.5 3.5"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                }
+                rightIcon={
+                  <svg
+                    viewBox="0 0 18 18"
+                    fill="none"
+                    aria-hidden="true"
+                    className={`text-slate-400 transition-transform ${isInboundOpen ? "rotate-90" : ""}`}
+                  >
+                    <path d="m7 5 4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                }
               />
-
               {isInboundOpen ? (
-                <div className="mt-2 space-y-1">
-                  <Link
+                <div className="space-y-1 pl-2">
+                  <SidebarItem
+                    variant="default"
+                    label="Dashboard"
                     href="/leads/inbound"
                     onClick={onNavigate}
-                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
-                      inboundDashboardActive
-                        ? "text-cyan-300"
-                        : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
-                    }`}
-                  >
-                    <span className="text-slate-500">&bull;</span>
-                    <span>Dashboard</span>
-                  </Link>
-
-                  <Link
+                    icon={
+                      <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                        <circle cx="9" cy="9" r="2" fill="currentColor" />
+                      </svg>
+                    }
+                  />
+                  <SidebarItem
+                    variant="default"
+                    label="Leads"
                     href="/leads/inbound?view=leads"
                     onClick={onNavigate}
-                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
-                      inboundLeadsActive
-                        ? "text-cyan-300"
-                        : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
-                    }`}
-                  >
-                    <span className="text-slate-500">&bull;</span>
-                    <span>Leads</span>
-                  </Link>
+                    icon={
+                      <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                        <circle cx="9" cy="9" r="2" fill="currentColor" />
+                      </svg>
+                    }
+                  />
                 </div>
               ) : null}
             </div>
           </div>
-        ) : (
-          <>
-            <Link href="/leads" onClick={onNavigate} className={linkClass(dashboardActive)}>
-              <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
-                <path d="M3 14.5h12M5 12V8.5M9 12V5.5M13 12V9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+
+          <div className={dividerClass} />
+          <p className={sectionTitleClass}>Relacionamento</p>
+
+          <SidebarItem
+            variant="default"
+            label="Clientes"
+            href="/clientes"
+            onClick={onNavigate}
+            icon={
+              <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <path
+                  d="M12.5 13.5c0-1.657-1.567-3-3.5-3s-3.5 1.343-3.5 3"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+                <circle cx="9" cy="6.5" r="2.5" stroke="currentColor" strokeWidth="1.5" />
+                <path
+                  d="M15.5 13c0-1.1-.9-2-2-2m0-4.5a2 2 0 1 1 0 4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M2.5 13c0-1.1.9-2 2-2m0-4.5a2 2 0 1 0 0 4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
               </svg>
-            </Link>
+            }
+          />
 
-            <Link href="/leads/outbound" onClick={onNavigate} className={linkClass(leadsActive)}>
-              <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
-                <path d="M2.5 4h13M4.5 8h9M6.5 12h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <SidebarItem
+            variant="default"
+            label="Ligacoes"
+            href="/ligacoes"
+            onClick={onNavigate}
+            icon={
+              <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <path
+                  d="M3.5 4.5c.3 5.5 4.5 9.7 10 10l1-2.5-2.5-1-1 1.5c-2-.7-4-2.7-4.7-4.7l1.5-1-1-2.5-3.3 1Z"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                />
               </svg>
-            </Link>
-          </>
-        )}
+            }
+          />
 
-        {isPinned ? <div className="my-2 h-px bg-slate-800/80" /> : null}
-        {isPinned ? (
-          <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-            Relacionamento
-          </p>
-        ) : null}
+          <SidebarItem
+            variant="default"
+            label="Agenda"
+            href="/agenda"
+            onClick={onNavigate}
+            icon={
+              <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <rect x="2.5" y="3.5" width="13" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M6 2v3M12 2v3M2.5 7.5h13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <circle cx="6.5" cy="11" r="1" fill="currentColor" />
+                <circle cx="9" cy="11" r="1" fill="currentColor" />
+                <circle cx="11.5" cy="11" r="1" fill="currentColor" />
+              </svg>
+            }
+          />
 
-        <Link href="/clientes" onClick={onNavigate} className={linkClass(pathname === "/clientes")}>
-          <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
-            <path d="M12.5 13.5c0-1.657-1.567-3-3.5-3s-3.5 1.343-3.5 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            <circle cx="9" cy="6.5" r="2.5" stroke="currentColor" strokeWidth="1.5" />
-            <path d="M15.5 13c0-1.1-.9-2-2-2m0-4.5a2 2 0 1 1 0 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            <path d="M2.5 13c0-1.1.9-2 2-2m0-4.5a2 2 0 1 0 0 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-          {isPinned ? <span className="ml-3">Clientes</span> : null}
-        </Link>
+          <div className={dividerClass} />
+          <p className={sectionTitleClass}>Sistema</p>
 
-        <Link href="/ligacoes" onClick={onNavigate} className={linkClass(pathname === "/ligacoes")}>
-          <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
-            <path d="M3.5 4.5c.3 5.5 4.5 9.7 10 10l1-2.5-2.5-1-1 1.5c-2-.7-4-2.7-4.7-4.7l1.5-1-1-2.5-3.3 1Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-          </svg>
-          {isPinned ? <span className="ml-3">Ligacoes</span> : null}
-        </Link>
+          <SidebarItem
+            variant="default"
+            label="Assistente"
+            href="/assistente"
+            onClick={onNavigate}
+            icon={
+              <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <path
+                  d="M9 2.5 10 6h3.5l-2.8 2 1 3.5L9 9.5 6.3 11.5l1-3.5L4.5 6H8L9 2.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M4 14.5h2M7.5 14.5h2M11 14.5h3"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  opacity="0.5"
+                />
+              </svg>
+            }
+          />
 
-        <Link href="/agenda" onClick={onNavigate} className={linkClass(pathname === "/agenda")}>
-          <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
-            <rect x="2.5" y="3.5" width="13" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-            <path d="M6 2v3M12 2v3M2.5 7.5h13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            <circle cx="6.5" cy="11" r="1" fill="currentColor" />
-            <circle cx="9" cy="11" r="1" fill="currentColor" />
-            <circle cx="11.5" cy="11" r="1" fill="currentColor" />
-          </svg>
-          {isPinned ? <span className="ml-3">Agenda</span> : null}
-        </Link>
-
-        {isPinned ? <div className="my-2 h-px bg-slate-800/80" /> : null}
-        {isPinned ? (
-          <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-            Sistema
-          </p>
-        ) : null}
-
-        <Link href="/assistente" onClick={onNavigate} className={linkClass(pathname === "/assistente")}>
-          <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
-            <path d="M9 2.5 10 6h3.5l-2.8 2 1 3.5L9 9.5 6.3 11.5l1-3.5L4.5 6H8L9 2.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-            <path d="M4 14.5h2M7.5 14.5h2M11 14.5h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-          </svg>
-          {isPinned ? <span className="ml-3">Assistente</span> : null}
-        </Link>
-
-        <Link href="/configuracoes" onClick={onNavigate} className={linkClass(pathname === "/configuracoes")}>
-          <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
-            <circle cx="9" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.5" />
-            <path d="M9 2v1.5M9 14.5V16M2 9h1.5M14.5 9H16M3.93 3.93l1.06 1.06M13.01 13.01l1.06 1.06M14.07 3.93l-1.06 1.06M4.99 13.01l-1.06 1.06" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-          {isPinned ? <span className="ml-3">Configuracoes</span> : null}
-        </Link>
-      </nav>
+          <SidebarItem
+            variant="default"
+            label="Configuracoes"
+            href="/configuracoes"
+            onClick={onNavigate}
+            icon={
+              <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <circle cx="9" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.5" />
+                <path
+                  d="M9 2v1.5M9 14.5V16M2 9h1.5M14.5 9H16M3.93 3.93l1.06 1.06M13.01 13.01l1.06 1.06M14.07 3.93l-1.06 1.06M4.99 13.01l-1.06 1.06"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            }
+          />
+        </nav>
+      ) : (
+        <nav className="space-y-1 px-2">
+          <Link href="/leads" onClick={onNavigate} className={compactLinkClass(pathname === "/leads")}>
+            <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-5 w-5">
+              <path d="M3 14.5h12M5 12V8.5M9 12V5.5M13 12V9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </Link>
+          <Link href="/leads/outbound" onClick={onNavigate} className={compactLinkClass(pathname.startsWith("/leads/outbound"))}>
+            <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-5 w-5">
+              <path d="M2.5 4h13M4.5 8h9M6.5 12h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </Link>
+          <Link href="/clientes" onClick={onNavigate} className={compactLinkClass(pathname === "/clientes")}>
+            <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-5 w-5">
+              <path d="M12.5 13.5c0-1.657-1.567-3-3.5-3s-3.5 1.343-3.5 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <circle cx="9" cy="6.5" r="2.5" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          </Link>
+          <Link href="/ligacoes" onClick={onNavigate} className={compactLinkClass(pathname === "/ligacoes")}>
+            <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-5 w-5">
+              <path
+                d="M3.5 4.5c.3 5.5 4.5 9.7 10 10l1-2.5-2.5-1-1 1.5c-2-.7-4-2.7-4.7-4.7l1.5-1-1-2.5-3.3 1Z"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </Link>
+          <Link href="/agenda" onClick={onNavigate} className={compactLinkClass(pathname === "/agenda")}>
+            <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-5 w-5">
+              <rect x="2.5" y="3.5" width="13" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M6 2v3M12 2v3M2.5 7.5h13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </Link>
+          <Link href="/assistente" onClick={onNavigate} className={compactLinkClass(pathname === "/assistente")}>
+            <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-5 w-5">
+              <path d="M9 2.5 10 6h3.5l-2.8 2 1 3.5L9 9.5 6.3 11.5l1-3.5L4.5 6H8L9 2.5Z" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          </Link>
+          <Link href="/configuracoes" onClick={onNavigate} className={compactLinkClass(pathname === "/configuracoes")}>
+            <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-5 w-5">
+              <circle cx="9" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          </Link>
+        </nav>
+      )}
     </aside>
   );
 }
+
