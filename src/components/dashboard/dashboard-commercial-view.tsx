@@ -236,7 +236,7 @@ const metricGroups: MetricGroup[] = [
     cards: [
       {
         key: "percentualCpc",
-        title: "% CPC",
+        title: "% de Compras",
         description: "Formula: (compras via call de fechamento na agenda / calls de fechamento) x 100.",
         accentFrom: "#06B6D4",
         accentTo: "#0E7490",
