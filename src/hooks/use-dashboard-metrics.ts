@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardFilters, DashboardMetrics } from "@/types/dashboard";
 
 type ApiSuccessResponse = {
@@ -66,8 +66,11 @@ const EMPTY_METRICS: DashboardMetrics = {
 
 function buildMetricsUrl(filters: DashboardFilters) {
   const params = new URLSearchParams();
-  params.set("from", filters.from);
-  params.set("to", filters.to);
+  params.set("periodo", filters.periodo);
+  if (filters.periodo === "custom") {
+    if (filters.from) params.set("from", filters.from);
+    if (filters.to) params.set("to", filters.to);
+  }
   if (filters.vendedorId) {
     params.set("vendedorId", filters.vendedorId);
   }
@@ -78,53 +81,91 @@ export function useDashboardMetrics(filters: DashboardFilters) {
   const [metrics, setMetrics] = useState<DashboardMetrics>(EMPTY_METRICS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const requestUrl = useMemo(() => buildMetricsUrl(filters), [filters.from, filters.to, filters.vendedorId]);
 
-  const fetchMetrics = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    setError(null);
+  const requestUrl = useMemo(
+    () => buildMetricsUrl(filters),
+    [filters.periodo, filters.from, filters.to, filters.vendedorId],
+  );
 
-    try {
-      const response = await fetch(requestUrl, {
-        method: "GET",
-        cache: "no-store",
-        signal,
-      });
-      const data = (await response.json()) as DashboardMetricsResponse;
+  const activeRequest = useRef<AbortController | null>(null);
+  const lastRequestUrl = useRef<string>("");
 
-      if (!response.ok || !data.success) {
-        setError(data.success ? "Nao foi possivel carregar metricas do dashboard." : data.message || "Erro ao buscar metricas.");
+  const fetchMetrics = useCallback(
+    async (options?: { silent?: boolean; force?: boolean }) => {
+      const silent = Boolean(options?.silent);
+      const force = Boolean(options?.force);
+      if (!force && lastRequestUrl.current === requestUrl && silent) {
         return;
       }
 
-      setMetrics(data.metrics);
-    } catch {
-      setError("Nao foi possivel carregar metricas do dashboard.");
-    } finally {
-      setLoading(false);
-    }
-  }, [requestUrl]);
+      if (activeRequest.current) {
+        activeRequest.current.abort();
+      }
+      const controller = new AbortController();
+      activeRequest.current = controller;
+
+      if (!silent) {
+        setLoading(true);
+      }
+      setError(null);
+
+      try {
+        const response = await fetch(requestUrl, {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const data = (await response.json()) as DashboardMetricsResponse;
+
+        if (!response.ok || !data.success) {
+          if (!controller.signal.aborted) {
+            setError(
+              data.success
+                ? "Nao foi possivel carregar metricas do dashboard."
+                : data.message || "Erro ao buscar metricas.",
+            );
+          }
+          return;
+        }
+
+        if (!controller.signal.aborted) {
+          setMetrics(data.metrics);
+          lastRequestUrl.current = requestUrl;
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setError("Nao foi possivel carregar metricas do dashboard.");
+        }
+      } finally {
+        if (!controller.signal.aborted && !silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [requestUrl],
+  );
 
   useEffect(() => {
-    const controller = new AbortController();
-    void fetchMetrics(controller.signal);
-    return () => controller.abort();
+    void fetchMetrics({ silent: false, force: true });
+    return () => {
+      if (activeRequest.current) {
+        activeRequest.current.abort();
+      }
+    };
   }, [fetchMetrics]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     let debounceTimeout: number | null = null;
-    let mounted = true;
 
     const triggerRefresh = () => {
-      if (!mounted) return;
       if (debounceTimeout !== null) {
         window.clearTimeout(debounceTimeout);
       }
       debounceTimeout = window.setTimeout(() => {
-        void fetchMetrics();
-      }, 700);
+        void fetchMetrics({ silent: true, force: true });
+      }, 550);
     };
 
     const onStorage = (event: StorageEvent) => {
@@ -137,14 +178,10 @@ export function useDashboardMetrics(filters: DashboardFilters) {
       window.addEventListener(eventName, triggerRefresh);
     });
 
-    const intervalId = window.setInterval(triggerRefresh, 45000);
-
     return () => {
-      mounted = false;
       if (debounceTimeout !== null) {
         window.clearTimeout(debounceTimeout);
       }
-      window.clearInterval(intervalId);
       window.removeEventListener("storage", onStorage);
       REFRESH_EVENTS.forEach((eventName) => {
         window.removeEventListener(eventName, triggerRefresh);
@@ -153,7 +190,7 @@ export function useDashboardMetrics(filters: DashboardFilters) {
   }, [fetchMetrics]);
 
   const refresh = useCallback(() => {
-    void fetchMetrics();
+    void fetchMetrics({ silent: false, force: true });
   }, [fetchMetrics]);
 
   return useMemo(
@@ -166,3 +203,4 @@ export function useDashboardMetrics(filters: DashboardFilters) {
     [error, loading, metrics, refresh],
   );
 }
+

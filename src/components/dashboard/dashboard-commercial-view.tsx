@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useCallback, useEffect, useMemo } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DashboardFilters as DashboardFiltersPanel } from "@/components/dashboard/DashboardFilters";
 import { PageTopbar } from "@/components/layout/page-topbar";
@@ -8,7 +8,7 @@ import { DashboardFunnel } from "@/components/dashboard/dashboard-funnel";
 import { DashboardMetricCard } from "@/components/dashboard/dashboard-metric-card";
 import { useDashboardMetrics } from "@/hooks/use-dashboard-metrics";
 import { useResponsaveisRecords } from "@/lib/responsaveis-store";
-import type { DashboardFilters } from "@/types/dashboard";
+import type { DashboardFilters, PresetPeriodo } from "@/types/dashboard";
 
 type MetricCardKey =
   | "acionamentoBase"
@@ -52,10 +52,10 @@ function toDateInputValue(date: Date): string {
   return new Date(localTimestamp).toISOString().slice(0, 10);
 }
 
-function getDefaultDashboardDateRange(): Pick<DashboardFilters, "from" | "to"> {
+function getDateRange(days: number): Required<Pick<DashboardFilters, "from" | "to">> {
   const toDate = new Date();
   const fromDate = new Date(toDate);
-  fromDate.setDate(fromDate.getDate() - (DEFAULT_PERIOD_DAYS - 1));
+  fromDate.setDate(fromDate.getDate() - (days - 1));
 
   return {
     from: toDateInputValue(fromDate),
@@ -63,30 +63,95 @@ function getDefaultDashboardDateRange(): Pick<DashboardFilters, "from" | "to"> {
   };
 }
 
+function getDefaultDashboardDateRange(): Required<Pick<DashboardFilters, "from" | "to">> {
+  return getDateRange(DEFAULT_PERIOD_DAYS);
+}
+
+function sanitizePreset(value: string | null | undefined): PresetPeriodo {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "max") return "max";
+  if (normalized === "3d") return "3d";
+  if (normalized === "7d") return "7d";
+  if (normalized === "15d") return "15d";
+  if (normalized === "30d") return "30d";
+  if (normalized === "custom") return "custom";
+  return "7d";
+}
+
 function sanitizeDateParam(value: string | null | undefined): string | null {
   const raw = String(value || "").trim();
   return DATE_INPUT_PATTERN.test(raw) ? raw : null;
 }
 
-function normalizeFiltersFromSearchParams(searchParams: Pick<URLSearchParams, "get">): DashboardFilters {
+function normalizeCustomRange(from?: string | null, to?: string | null): Required<Pick<DashboardFilters, "from" | "to">> {
   const defaults = getDefaultDashboardDateRange();
-  const initialFrom = sanitizeDateParam(searchParams.get("from")) || defaults.from;
-  const initialTo = sanitizeDateParam(searchParams.get("to")) || defaults.to;
-  const vendedorIdRaw = String(searchParams.get("vendedorId") || "").trim();
+  const initialFrom = sanitizeDateParam(from) || defaults.from;
+  const initialTo = sanitizeDateParam(to) || defaults.to;
+  if (initialFrom <= initialTo) return { from: initialFrom, to: initialTo };
+  return {
+    from: initialTo,
+    to: initialFrom,
+  };
+}
 
-  if (initialFrom <= initialTo) {
+function normalizeFiltersFromSearchParams(searchParams: Pick<URLSearchParams, "get">): DashboardFilters {
+  const periodo = sanitizePreset(searchParams.get("periodo"));
+  const vendedorIdRaw = String(searchParams.get("vendedorId") || "").trim();
+  const vendedorId = vendedorIdRaw || undefined;
+
+  if (periodo === "custom") {
+    const range = normalizeCustomRange(searchParams.get("from"), searchParams.get("to"));
     return {
-      from: initialFrom,
-      to: initialTo,
-      vendedorId: vendedorIdRaw || undefined,
+      periodo,
+      vendedorId,
+      from: range.from,
+      to: range.to,
     };
   }
 
   return {
-    from: initialTo,
-    to: initialFrom,
-    vendedorId: vendedorIdRaw || undefined,
+    periodo,
+    vendedorId,
   };
+}
+
+function normalizeFiltersInput(next: DashboardFilters): DashboardFilters {
+  const periodo = sanitizePreset(next.periodo);
+  const vendedorId = String(next.vendedorId || "").trim() || undefined;
+
+  if (periodo === "custom") {
+    const range = normalizeCustomRange(next.from, next.to);
+    return {
+      periodo,
+      vendedorId,
+      from: range.from,
+      to: range.to,
+    };
+  }
+
+  return {
+    periodo,
+    vendedorId,
+  };
+}
+
+function buildFiltersSearchParams(filters: DashboardFilters): URLSearchParams {
+  const normalized = normalizeFiltersInput(filters);
+  const params = new URLSearchParams();
+  params.set("periodo", normalized.periodo);
+  if (normalized.periodo === "custom") {
+    params.set("from", normalized.from || "");
+    params.set("to", normalized.to || "");
+  }
+  if (normalized.vendedorId) {
+    params.set("vendedorId", normalized.vendedorId);
+  }
+  return params;
+}
+
+function serializeDashboardFilters(filters: DashboardFilters): string {
+  const normalized = normalizeFiltersInput(filters);
+  return [normalized.periodo, normalized.from || "", normalized.to || "", normalized.vendedorId || ""].join("|");
 }
 
 function iconPhone() {
@@ -347,8 +412,23 @@ export function DashboardCommercialView() {
   const searchParams = useSearchParams();
   const responsaveis = useResponsaveisRecords();
   const searchParamsKey = searchParams.toString();
+  const filtersFromUrl = useMemo(
+    () => normalizeFiltersFromSearchParams(searchParams),
+    [searchParams, searchParamsKey],
+  );
+  const filtersFromUrlKey = useMemo(
+    () => serializeDashboardFilters(filtersFromUrl),
+    [filtersFromUrl],
+  );
+  const [filters, setFilters] = useState<DashboardFilters>(filtersFromUrl);
 
-  const filters = useMemo(() => normalizeFiltersFromSearchParams(searchParams), [searchParams, searchParamsKey]);
+  useEffect(() => {
+    setFilters((current) =>
+      serializeDashboardFilters(current) === filtersFromUrlKey
+        ? current
+        : filtersFromUrl,
+    );
+  }, [filtersFromUrl, filtersFromUrlKey]);
 
   const vendedores = useMemo(() => {
     const vendedoresOnly = responsaveis.filter((responsavel) => responsavel.tipo === "vendedor");
@@ -363,40 +443,27 @@ export function DashboardCommercialView() {
   }, [responsaveis]);
 
   useEffect(() => {
-    const hasFrom = Boolean(sanitizeDateParam(searchParams.get("from")));
-    const hasTo = Boolean(sanitizeDateParam(searchParams.get("to")));
-    if (hasFrom && hasTo) return;
+    const normalizedQuery = buildFiltersSearchParams(filtersFromUrl).toString();
+    if (normalizedQuery === searchParamsKey) return;
+    router.replace(`${pathname}?${normalizedQuery}`, { scroll: false });
+  }, [filtersFromUrl, pathname, router, searchParamsKey]);
 
-    const params = new URLSearchParams(searchParamsKey);
-    params.set("from", filters.from);
-    params.set("to", filters.to);
-    if (!filters.vendedorId) {
-      params.delete("vendedorId");
-    }
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [filters.from, filters.to, filters.vendedorId, pathname, router, searchParams, searchParamsKey]);
+  const syncFiltersToUrl = useCallback(
+    (nextFilters: DashboardFilters) => {
+      const nextQuery = buildFiltersSearchParams(nextFilters).toString();
+      if (nextQuery === searchParamsKey) return;
+      router.replace(`${pathname}?${nextQuery}`, { scroll: false });
+    },
+    [pathname, router, searchParamsKey],
+  );
 
   const handleFiltersChange = useCallback(
     (next: DashboardFilters) => {
-      const nextFrom = sanitizeDateParam(next.from) || filters.from;
-      const nextTo = sanitizeDateParam(next.to) || filters.to;
-      const normalizedFrom = nextFrom <= nextTo ? nextFrom : nextTo;
-      const normalizedTo = nextFrom <= nextTo ? nextTo : nextFrom;
-
-      const params = new URLSearchParams(searchParamsKey);
-      params.set("from", normalizedFrom);
-      params.set("to", normalizedTo);
-
-      const nextVendedorId = String(next.vendedorId || "").trim();
-      if (nextVendedorId) {
-        params.set("vendedorId", nextVendedorId);
-      } else {
-        params.delete("vendedorId");
-      }
-
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      const normalized = normalizeFiltersInput(next);
+      setFilters(normalized);
+      syncFiltersToUrl(normalized);
     },
-    [filters.from, filters.to, pathname, router, searchParamsKey],
+    [syncFiltersToUrl],
   );
 
   const { metrics, loading, error, refresh } = useDashboardMetrics(filters);
@@ -435,7 +502,7 @@ export function DashboardCommercialView() {
         Painel comercial outbound com dois funis laterais (absoluto e conversao percentual) e metricas operacionais.
       </p>
 
-      <DashboardFiltersPanel value={filters} vendedores={vendedores} disabled={loading} onChange={handleFiltersChange} />
+      <DashboardFiltersPanel value={filters} vendedores={vendedores} loading={loading} onChange={handleFiltersChange} />
 
       <section className="rounded-3xl border border-slate-800/80 bg-[#0B1220]/95 p-3 shadow-[0_36px_90px_rgba(2,6,23,0.5)] md:p-4">
         {error ? (

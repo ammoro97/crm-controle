@@ -6,7 +6,7 @@ import { readCustomersCollection, readLeadsCollection } from "@/lib/leads-custom
 import { readDataFile } from "@/lib/storage-paths";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { requireAuth } from "@/lib/require-auth";
-import type { DashboardMetrics } from "@/types/dashboard";
+import type { DashboardMetrics, PresetPeriodo } from "@/types/dashboard";
 import type { CallLog, Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
 import type { PostCallWrapup } from "@/lib/post-call-flow";
 
@@ -17,8 +17,17 @@ const CRM_TIMEZONE_OFFSET = "-03:00";
 const DEFAULT_PERIOD_DAYS = 7;
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const BR_DATE_PATTERN = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+const MIN_HISTORY_DATE = "1970-01-01";
+const MAX_HISTORY_DATE = "9999-12-31";
+const PRESET_PERIOD_DAYS: Record<Exclude<PresetPeriodo, "max" | "custom">, number> = {
+  "3d": 3,
+  "7d": 7,
+  "15d": 15,
+  "30d": 30,
+};
 
 type MetricsRequestFilters = {
+  periodo: PresetPeriodo;
   from: string;
   to: string;
   rangeStart: Date;
@@ -78,14 +87,30 @@ function toDateInputValue(date: Date): string {
   return new Date(localTimestamp).toISOString().slice(0, 10);
 }
 
-function getDefaultDateRange(): { from: string; to: string } {
+function getDateRangeForDays(days: number): { from: string; to: string } {
   const toDate = new Date();
   const fromDate = new Date(toDate);
-  fromDate.setDate(fromDate.getDate() - (DEFAULT_PERIOD_DAYS - 1));
+  fromDate.setDate(fromDate.getDate() - (days - 1));
   return {
     from: toDateInputValue(fromDate),
     to: toDateInputValue(toDate),
   };
+}
+
+function getDefaultDateRange(): { from: string; to: string } {
+  return getDateRangeForDays(DEFAULT_PERIOD_DAYS);
+}
+
+function normalizePeriodo(rawPeriodo: string | null, hasCustomRange: boolean): PresetPeriodo {
+  const normalized = String(rawPeriodo || "").trim().toLowerCase();
+  if (normalized === "max") return "max";
+  if (normalized === "3d") return "3d";
+  if (normalized === "7d") return "7d";
+  if (normalized === "15d") return "15d";
+  if (normalized === "30d") return "30d";
+  if (normalized === "custom") return "custom";
+  if (hasCustomRange) return "custom";
+  return "7d";
 }
 
 function parseDateOnly(value?: string | null): string | null {
@@ -120,9 +145,28 @@ function isWithinRange(referenceDate: Date | null, rangeStart: Date, rangeEnd: D
 
 function parseFiltersFromRequest(request: Request): MetricsRequestFilters {
   const url = new URL(request.url);
-  const defaults = getDefaultDateRange();
-  const fromRaw = parseDateOnly(url.searchParams.get("from")) || defaults.from;
-  const toRaw = parseDateOnly(url.searchParams.get("to")) || defaults.to;
+  const fromParam = parseDateOnly(url.searchParams.get("from"));
+  const toParam = parseDateOnly(url.searchParams.get("to"));
+  const hasCustomRange = Boolean(fromParam || toParam);
+  const periodo = normalizePeriodo(url.searchParams.get("periodo"), hasCustomRange);
+
+  let fromRaw = "";
+  let toRaw = "";
+
+  if (periodo === "max") {
+    fromRaw = MIN_HISTORY_DATE;
+    toRaw = MAX_HISTORY_DATE;
+  } else if (periodo === "custom") {
+    const defaults = getDefaultDateRange();
+    fromRaw = fromParam || defaults.from;
+    toRaw = toParam || defaults.to;
+  } else {
+    const days = PRESET_PERIOD_DAYS[periodo];
+    const presetRange = getDateRangeForDays(days);
+    fromRaw = presetRange.from;
+    toRaw = presetRange.to;
+  }
+
   const vendedorId = String(url.searchParams.get("vendedorId") || "").trim() || undefined;
 
   const from = fromRaw <= toRaw ? fromRaw : toRaw;
@@ -132,6 +176,7 @@ function parseFiltersFromRequest(request: Request): MetricsRequestFilters {
   const rangeEnd = new Date(`${to}T23:59:59.999${CRM_TIMEZONE_OFFSET}`);
 
   return {
+    periodo,
     from,
     to,
     rangeStart,

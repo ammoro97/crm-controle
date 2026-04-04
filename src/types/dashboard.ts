@@ -1,6 +1,9 @@
+export type PresetPeriodo = "max" | "3d" | "7d" | "15d" | "30d" | "custom";
+
 export type DashboardFilters = {
-  from: string;
-  to: string;
+  periodo: PresetPeriodo;
+  from?: string;
+  to?: string;
   vendedorId?: string;
 };
 
