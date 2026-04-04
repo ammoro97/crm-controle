@@ -136,6 +136,7 @@ export function inferAgendaEventTypeFromReason(reason?: CallReason | string | nu
 export function inferAgendaEventTypeFromNextAction(nextAction?: string | null): AgendaEventType {
   const normalized = normalizeText(nextAction);
   if (!normalized) return "outro";
+  if (normalized === "follow-up" || normalized === "follow up") return "follow_up_ligacao";
   if (normalized.includes("whatsapp")) return "follow_up_whatsapp";
   if (normalized.includes("email") || normalized.includes("e-mail")) return "follow_up_email";
   if (

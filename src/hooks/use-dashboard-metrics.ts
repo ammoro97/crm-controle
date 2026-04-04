@@ -55,6 +55,7 @@ const EMPTY_METRICS: DashboardMetrics = {
     leadDesqualificado: 0,
     followUpsPendentes: 0,
     conversaoLigacao: 0,
+    taxaSemInteresse: 0,
     percentualAtendimento: 0,
     percentualCpc: 0,
     noShow: 0,

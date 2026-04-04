@@ -33,6 +33,7 @@ import {
   ActiveCallSession,
   PostCallWrapup,
   PostCallResultOption,
+  PostCallSubfinalizacaoOption,
   clearActiveCallSession,
   detectCallEnd,
   getActiveCallSession,
@@ -163,7 +164,7 @@ type PostCallFormState = {
   result: PostCallResultOption;
   reason: "Ja possui CRM e nao tem interesse" | "Outros" | "";
   observations: string;
-  nextAction: string;
+  nextAction: PostCallSubfinalizacaoOption | "";
   followUpDate: string;
   followUpTime: string;
   company: string;
@@ -214,8 +215,9 @@ const postCallResultOptions: Array<{ value: PostCallResultOption; label: string 
   { value: "Pessoa nao conhece", label: "Pessoa não conhece" },
   { value: "Falou com cliente", label: "Falou com cliente" },
   { value: "Falou com secretaria", label: "Falou com secretária" },
-  { value: "Cliente sem interesse", label: "Cliente sem interesse" },
 ];
+
+const POST_CALL_RESULT_VALUES = new Set<PostCallResultOption>(postCallResultOptions.map((option) => option.value));
 
 const baseFinalizacaoOptions = [
   "Todas",
@@ -226,7 +228,6 @@ const baseFinalizacaoOptions = [
   "Pessoa não conhece",
   "Falou com cliente",
   "Falou com secretária",
-  "Cliente sem interesse",
 ];
 
 const finalizacaoComProximaAcao = new Set<PostCallResultOption>([
@@ -240,11 +241,12 @@ const nextActionComFollowUp = new Set([
   "Agendar Ligação",
   "Agendar Ligacao",
   "Agendar WhatsApp",
+  "Follow-up",
   "Confirmou possibilidade de contato",
 ]);
 
 const secondaryOptionsByFinalizacao: Record<"Falou com cliente" | "Falou com secretaria", string[]> = {
-  "Falou com cliente": ["Agendar Vídeo Chamada", "Agendar Ligação", "Agendar WhatsApp"],
+  "Falou com cliente": ["Agendar Vídeo Chamada", "Agendar Ligação", "Agendar WhatsApp", "Follow-up", "Sem Interesse"],
   "Falou com secretaria": ["Confirmou possibilidade de contato", "Não houve confirmação"],
 };
 
@@ -254,6 +256,7 @@ const WRAPUP_DRAFT_STORAGE_KEY = "crm:calls:wrapup-draft:v1";
 const AGENDA_BLOCKS_STORAGE_KEY = "crm.agenda.blocks.v1";
 const WEBHOOK_OUT_LOCAL_STORAGE_KEY = "crm:webhook-out-config:v1";
 const LIGACOES_DEBUG_PREFIX = "[LIGACOES_DEBUG]";
+const SEM_INTERESSE_SUBFINALIZACAO = "Sem Interesse";
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
@@ -382,6 +385,29 @@ function normalizeText(value?: string | null) {
     .trim();
 }
 
+function normalizePostCallResultOption(value: unknown): PostCallResultOption {
+  const raw = String(value || "").trim();
+  if (POST_CALL_RESULT_VALUES.has(raw as PostCallResultOption)) return raw as PostCallResultOption;
+  if (normalizeText(raw) === "cliente sem interesse") return "Falou com cliente";
+  return "Caixa postal";
+}
+
+function normalizeSubfinalizacaoOption(value: unknown): PostCallSubfinalizacaoOption | "" {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  const normalized = normalizeText(raw);
+  if (normalized === "agendar video chamada") return "Agendar Vídeo Chamada";
+  if (normalized === "agendar ligacao") return "Agendar Ligação";
+  if (normalized === "agendar whatsapp") return "Agendar WhatsApp";
+  if (normalized === "follow-up" || normalized === "follow up") return "Follow-up";
+  if (normalized === "sem interesse" || normalized === "cliente sem interesse") return "Sem Interesse";
+  if (normalized === "confirmou possibilidade de contato") return "Confirmou possibilidade de contato";
+  if (normalized === "nao houve confirmacao") return "Não houve confirmação";
+
+  return "";
+}
+
 function isClosingNextAction(nextAction?: string | null) {
   return inferAgendaEventTypeFromNextAction(nextAction) === "call_conversao";
 }
@@ -394,7 +420,7 @@ function normalizeFinalizacaoLabel(value: string) {
   const legacyMap: Record<string, string> = {
     "falou com cliente": "Falou com cliente",
     "falou com secretaria": "Falou com secretária",
-    "cliente sem interesse": "Cliente sem interesse",
+    "cliente sem interesse": "Falou com cliente",
     "falou com a pessoa": "Falou com cliente",
     "era a pessoa errada": "Pessoa não conhece",
     "pessoa errada": "Pessoa não conhece",
@@ -419,10 +445,18 @@ function normalizeFinalizacaoLabel(value: string) {
     ligacao_muda: "Ligação muda",
     pediu_retorno: "Falou com cliente",
     deixou_recado: "Falou com secretária",
-    cliente_sem_interesse: "Cliente sem interesse",
+    cliente_sem_interesse: "Falou com cliente",
   };
 
   return legacyMap[normalized] || "-";
+}
+
+function resolveWrapupSubfinalizacaoLabel(wrapup?: PostCallWrapup): string {
+  if (!wrapup) return "-";
+  const explicit = String(wrapup.nextAction || "").trim();
+  if (explicit) return explicit;
+  if (normalizeText(wrapup.result) === "cliente sem interesse") return SEM_INTERESSE_SUBFINALIZACAO;
+  return "-";
 }
 
 function pushIndexedWrapup(index: Map<string, PostCallWrapup[]>, key: string, wrapup: PostCallWrapup) {
@@ -777,11 +811,17 @@ function readWrapupDraft(sessionId: string): PostCallFormState | null {
     const parsed = JSON.parse(raw) as Record<string, PostCallFormState | undefined>;
     const value = parsed[sessionId];
     if (!value) return null;
+    const normalizedResult = normalizePostCallResultOption(value.result);
+    const normalizedSubfinalizacao = normalizeSubfinalizacaoOption(value.nextAction);
+    const normalizedReason =
+      normalizedResult === "Falou com cliente" && normalizedSubfinalizacao === "Sem Interesse"
+        ? value.reason || ""
+        : "";
     return {
-      reason: value.reason || "",
-      result: value.result || "Caixa postal",
+      reason: normalizedReason as "Ja possui CRM e nao tem interesse" | "Outros" | "",
+      result: normalizedResult,
       observations: value.observations || "",
-      nextAction: value.nextAction || "",
+      nextAction: normalizedSubfinalizacao,
       followUpDate: value.followUpDate || "",
       followUpTime: value.followUpTime || "",
       company: String((value as { company?: string } | undefined)?.company || ""),
@@ -979,7 +1019,7 @@ function mapApiCallToRow(
   }
 
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
-  const subfinalizacao = matchedWrapup?.nextAction?.trim() ? matchedWrapup.nextAction.trim() : "-";
+  const subfinalizacao = resolveWrapupSubfinalizacaoLabel(matchedWrapup);
   const atendenteFromWrapupResponsavelId =
     matchedWrapup?.responsavelId ? context.responsavelById.get(matchedWrapup.responsavelId) : undefined;
   const atendenteFromResponsavelId = metadataResponsavelId
@@ -1110,7 +1150,7 @@ function mapInternalCallToRow(
   }
 
   const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
-  const subfinalizacao = matchedWrapup?.nextAction?.trim() ? matchedWrapup.nextAction.trim() : "-";
+  const subfinalizacao = resolveWrapupSubfinalizacaoLabel(matchedWrapup);
   const atendenteFromWrapupResponsavelId =
     matchedWrapup?.responsavelId ? context.responsavelById.get(matchedWrapup.responsavelId) : undefined;
 
@@ -1178,6 +1218,7 @@ function normalizeFinalizacaoKey(value: string) {
 
 const CPC_POSITIVE_FINALIZACOES = new Set(["falou com cliente"]);
 const CPC_NEGATIVE_FINALIZACOES = ["cliente sem interesse", "cliente nao tem interesse"];
+const CPC_NEGATIVE_SUBFINALIZACOES = new Set(["sem interesse"]);
 const IMPRODUTIVE_FINALIZACOES = new Set([
   "nao atendeu",
   "caixa postal",
@@ -1388,7 +1429,8 @@ export default function LigacoesPage() {
   const currentWrapupSessionRef = useRef<string | null>(null);
   const shouldRestoreWrapupByQuery =
     searchParams.get("restoreWrapup") === "1" || searchParams.get("postCall") === "1";
-  const showReasonField = postCallForm.result === "Cliente sem interesse";
+  const showReasonField =
+    postCallForm.result === "Falou com cliente" && normalizeText(postCallForm.nextAction) === "sem interesse";
   const showNextActionField = finalizacaoComProximaAcao.has(postCallForm.result);
   const currentSecondaryOptions =
     postCallForm.result === "Falou com cliente" || postCallForm.result === "Falou com secretaria"
@@ -2910,8 +2952,11 @@ export default function LigacoesPage() {
 
     for (const call of filteredCalls) {
       const normalized = normalizeFinalizacaoKey(call.finalizacao);
-      const isPositive = CPC_POSITIVE_FINALIZACOES.has(normalized);
-      const isNegative = hasFinalizacaoKeyword(normalized, CPC_NEGATIVE_FINALIZACOES);
+      const normalizedSubfinalizacao = normalizeFinalizacaoKey(call.subfinalizacao);
+      const isNegative =
+        hasFinalizacaoKeyword(normalized, CPC_NEGATIVE_FINALIZACOES) ||
+        CPC_NEGATIVE_SUBFINALIZACOES.has(normalizedSubfinalizacao);
+      const isPositive = CPC_POSITIVE_FINALIZACOES.has(normalized) && !isNegative;
       const classification = getFinalizacaoClassification(call.finalizacao);
       const isImprodutiva =
         !isPositive &&
@@ -3230,7 +3275,7 @@ export default function LigacoesPage() {
       setWrapupError("Selecione o resultado da ligação.");
       return;
     }
-    if (postCallForm.result === "Cliente sem interesse" && !postCallForm.reason) {
+    if (showReasonField && !postCallForm.reason) {
       setWrapupError("Selecione o motivo para cliente sem interesse.");
       return;
     }
@@ -3330,6 +3375,8 @@ export default function LigacoesPage() {
         }
       }
 
+      const wrapupClassification = getFinalizacaoClassification(safePostCallForm.result);
+      const isSemInteresseWrapup = normalizeText(safePostCallForm.nextAction) === "sem interesse";
       const savedWrapup = savePostCallWrapup({
         sessionId: activeSession.sessionId,
         externalCallId: activeSession.externalCallId,
@@ -3341,9 +3388,9 @@ export default function LigacoesPage() {
         responsavelId: ownerId,
         atendenteNome: ownerName,
         result: safePostCallForm.result,
-        connected: getFinalizacaoClassification(safePostCallForm.result)?.conectado,
-        finalizacaoTipo: getFinalizacaoClassification(safePostCallForm.result)?.tipo,
-        finalizacaoResultado: getFinalizacaoClassification(safePostCallForm.result)?.resultado,
+        connected: wrapupClassification?.conectado,
+        finalizacaoTipo: wrapupClassification?.tipo,
+        finalizacaoResultado: isSemInteresseWrapup ? "NEGATIVO" : wrapupClassification?.resultado,
         reason: safePostCallForm.reason || undefined,
         observations: safePostCallForm.observations.trim(),
         nextAction: safePostCallForm.nextAction.trim(),
@@ -4010,8 +4057,10 @@ export default function LigacoesPage() {
                     setPostCallForm((prev) => ({
                       ...prev,
                       result: value,
-                      reason: value === "Cliente sem interesse" ? prev.reason : "",
-                      nextAction: finalizacaoComProximaAcao.has(value) ? suggestedNextAction : "",
+                      reason: "",
+                      nextAction: finalizacaoComProximaAcao.has(value)
+                        ? (suggestedNextAction as PostCallSubfinalizacaoOption | "")
+                        : "",
                     }));
                   }}
                 >
@@ -4047,7 +4096,13 @@ export default function LigacoesPage() {
                   <select
                     className="field mt-1"
                     value={postCallForm.nextAction}
-                    onChange={(event) => setPostCallForm((prev) => ({ ...prev, nextAction: event.target.value }))}
+                    onChange={(event) =>
+                      setPostCallForm((prev) => ({
+                        ...prev,
+                        nextAction: event.target.value as PostCallSubfinalizacaoOption | "",
+                        reason: normalizeText(event.target.value) === "sem interesse" ? prev.reason : "",
+                      }))
+                    }
                   >
                     <option value="">Selecione...</option>
                     {currentSecondaryOptions.map((option) => (

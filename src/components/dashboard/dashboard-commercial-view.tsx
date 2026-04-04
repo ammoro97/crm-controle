@@ -10,6 +10,7 @@ type MetricCardKey =
   | "acionamentoBase"
   | "percentualAtendimento"
   | "conversaoLigacao"
+  | "taxaSemInteresse"
   | "followUpsPendentes"
   | "leadDesqualificado"
   | "noShow"
@@ -140,10 +141,20 @@ const metricGroups: MetricGroup[] = [
       {
         key: "conversaoLigacao",
         title: "Conversao Ligacao",
-        description: "Formula: (calls de fechamento agendadas / contatos com decisor) x 100.",
+        description: "Formula: (fechamentos agendados / contatos com decisor) x 100. Decisor inclui Follow-up e Sem Interesse.",
         accentFrom: "#22C55E",
         accentTo: "#15803D",
         icon: iconArrowUp(),
+        format: "percent",
+        progress: true,
+      },
+      {
+        key: "taxaSemInteresse",
+        title: "Taxa Sem Interesse",
+        description: "Formula: (total de finalizacoes Sem Interesse / contatos com decisor) x 100.",
+        accentFrom: "#F97316",
+        accentTo: "#C2410C",
+        icon: iconWarning(),
         format: "percent",
         progress: true,
       },
@@ -252,6 +263,7 @@ export function DashboardCommercialView() {
       acionamentoBase: metrics.cards.acionamentoBase,
       percentualAtendimento: metrics.cards.percentualAtendimento,
       conversaoLigacao: metrics.cards.conversaoLigacao,
+      taxaSemInteresse: metrics.cards.taxaSemInteresse,
       followUpsPendentes: metrics.cards.followUpsPendentes,
       leadDesqualificado: metrics.cards.leadDesqualificado,
       noShow: metrics.cards.noShow,

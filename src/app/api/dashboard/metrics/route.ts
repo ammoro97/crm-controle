@@ -172,9 +172,78 @@ function isFutureActiveFollowup(meeting: Meeting, referenceDate: Date): boolean 
   return dateTime.getTime() >= referenceDate.getTime();
 }
 
-function isDecisionMakerWrapup(wrapup: PostCallWrapup): boolean {
-  if (normalizeText(wrapup.rightPerson) === "sim") return true;
-  return normalizeText(wrapup.result) === "falou com cliente";
+type DecisionContactStage = "fechamento" | "follow_up" | "sem_interesse" | "outro";
+
+function normalizeWrapupResult(value?: string | null): string {
+  const normalized = normalizeText(value);
+  if (normalized === "cliente sem interesse") return "falou com cliente";
+  return normalized;
+}
+
+function normalizeWrapupSubfinalizacao(value?: string | null): string {
+  const normalized = normalizeText(value);
+  if (normalized === "cliente sem interesse") return "sem interesse";
+  return normalized;
+}
+
+function isSemInteresseWrapup(wrapup: PostCallWrapup): boolean {
+  const result = normalizeText(wrapup.result);
+  if (result === "cliente sem interesse") return true;
+
+  const normalizedResult = normalizeWrapupResult(wrapup.result);
+  const normalizedSubfinalizacao = normalizeWrapupSubfinalizacao(wrapup.nextAction);
+  if (normalizedResult !== "falou com cliente") return false;
+  return normalizedSubfinalizacao === "sem interesse" || normalizedSubfinalizacao === "sem_interesse";
+}
+
+function classifyDecisionContactWrapup(wrapup: PostCallWrapup): DecisionContactStage | null {
+  const normalizedResult = normalizeWrapupResult(wrapup.result);
+  if (normalizedResult !== "falou com cliente") return null;
+
+  const normalizedSubfinalizacao = normalizeWrapupSubfinalizacao(wrapup.nextAction);
+  if (!normalizedSubfinalizacao) return "outro";
+  if (normalizedSubfinalizacao === "sem interesse" || normalizedSubfinalizacao === "sem_interesse") return "sem_interesse";
+  if (
+    normalizedSubfinalizacao === "follow-up" ||
+    normalizedSubfinalizacao === "follow up" ||
+    normalizedSubfinalizacao === "agendar ligacao" ||
+    normalizedSubfinalizacao === "agendar whatsapp" ||
+    normalizedSubfinalizacao === "confirmou possibilidade de contato"
+  ) {
+    return "follow_up";
+  }
+  if (normalizedSubfinalizacao.includes("video")) return "fechamento";
+  return "outro";
+}
+
+function getWrapupDedupKey(wrapup: PostCallWrapup): string {
+  const callId = normalizeLeadId(wrapup.callId);
+  if (callId) return `call:${callId}`;
+
+  const sessionId = normalizeLeadId(wrapup.sessionId);
+  if (sessionId) return `session:${sessionId}`;
+
+  const wrapupId = normalizeLeadId(wrapup.id);
+  if (wrapupId) return `wrapup:${wrapupId}`;
+
+  const leadId = normalizeLeadId(wrapup.leadId);
+  const phoneDigits = normalizeDigits(wrapup.telefone);
+  const createdAt = String(wrapup.createdAt || "").trim();
+  return `fallback:${leadId}|${phoneDigits}|${createdAt}`;
+}
+
+function dedupeWrapups(wrapups: PostCallWrapup[]): PostCallWrapup[] {
+  const deduped: PostCallWrapup[] = [];
+  const seen = new Set<string>();
+
+  for (const wrapup of wrapups) {
+    const key = getWrapupDedupKey(wrapup);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(wrapup);
+  }
+
+  return deduped;
 }
 
 function isOutboundMeeting(meeting: Meeting, outboundLeads: Lead[], outboundLeadIds: Set<string>): boolean {
@@ -283,6 +352,7 @@ function buildPayload(params: {
         leadDesqualificado: 0,
         followUpsPendentes: 0,
         conversaoLigacao: 0,
+        taxaSemInteresse: 0,
         percentualAtendimento: 0,
         percentualCpc: 0,
         noShow: 0,
@@ -294,6 +364,7 @@ function buildPayload(params: {
   const wrapsInScope = wrapups.filter((wrapup) =>
     Boolean(resolveScopedLeadIdByWrapup(wrapup, scopedLeadIds, leadPhoneIndex)),
   );
+  const dedupedWrapsInScope = dedupeWrapups(wrapsInScope);
 
   const ligacoes = callsInScope.length;
   const atendidas = callsInScope.filter((call) => isAnsweredCallStatus(call.status)).length;
@@ -304,7 +375,8 @@ function buildPayload(params: {
     leadsUnicosAcionados.add(leadId);
   }
 
-  const decisorFromWrapups = wrapsInScope.filter((wrapup) => isDecisionMakerWrapup(wrapup)).length;
+  const decisorFromWrapups = dedupedWrapsInScope.filter((wrapup) => classifyDecisionContactWrapup(wrapup) !== null).length;
+  const semInteresseTotal = dedupedWrapsInScope.filter((wrapup) => isSemInteresseWrapup(wrapup)).length;
   const agendamentosFromMeetings = meetingsInScope.filter((meeting) => isAgendaScheduledCall(meeting)).length;
 
   const decisor = Math.max(decisorFromWrapups, 0);
@@ -351,6 +423,7 @@ function buildPayload(params: {
       leadDesqualificado,
       followUpsPendentes,
       conversaoLigacao: safePercent(agendamentos, decisor),
+      taxaSemInteresse: safePercent(semInteresseTotal, decisor),
       percentualAtendimento: atendidasPercentual,
       percentualCpc,
       noShow,

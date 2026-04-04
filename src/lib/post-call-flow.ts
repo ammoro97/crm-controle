@@ -38,8 +38,21 @@ export type PostCallResultOption =
   | "Numero invalido"
   | "Pessoa nao conhece"
   | "Falou com cliente"
-  | "Falou com secretaria"
-  | "Cliente sem interesse";
+  | "Falou com secretaria";
+
+// Mantem tipagem explicita da subfinalizacao para o fluxo de wrap-up.
+export type PostCallSubfinalizacaoOption =
+  | "Agendar Vídeo Chamada"
+  | "Agendar Ligação"
+  | "Agendar WhatsApp"
+  | "Follow-up"
+  | "Sem Interesse"
+  | "Confirmou possibilidade de contato"
+  | "Não houve confirmação";
+
+// Compatibilidade com historico legado salvo antes da migracao de "Sem Interesse"
+// para subfinalizacao dentro de "Falou com cliente".
+export type LegacyPostCallResultOption = PostCallResultOption | "Cliente sem interesse";
 
 export type PostCallWrapup = {
   id: string;
@@ -54,13 +67,13 @@ export type PostCallWrapup = {
   atendenteNome?: string;
   spokeWithPerson?: "sim" | "nao";
   rightPerson?: "sim" | "nao";
-  result: PostCallResultOption;
+  result: LegacyPostCallResultOption;
   connected?: boolean;
   finalizacaoTipo?: "NAO_CONECTOU" | "PROBLEMA_BASE" | "CONECTOU";
   finalizacaoResultado?: "POSITIVO" | "NEGATIVO" | "NEUTRO";
   reason?: string;
   observations: string;
-  nextAction: string;
+  nextAction: PostCallSubfinalizacaoOption | string;
   followUpDate?: string;
   followUpTime?: string;
   callId?: string;
