@@ -19,7 +19,6 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
   const inboundView = searchParams.get("view");
   const inboundDashboardActive = pathname === "/leads/inbound" && inboundView !== "leads";
   const inboundLeadsActive = pathname === "/leads/inbound" && inboundView === "leads";
-  const outboundActive = dashboardActive || leadsActive;
   const inboundActive = pathname.startsWith("/leads/inbound");
 
   const [isOutboundOpen, setIsOutboundOpen] = useState(true);
@@ -78,13 +77,7 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
 
         {isPinned ? (
           <div className="space-y-3">
-            <div
-              className={`rounded-xl border px-3 py-2 ${
-                outboundActive
-                  ? "border-emerald-500/40 bg-gradient-to-r from-emerald-500/15 to-emerald-500/5"
-                  : "border-slate-800 bg-slate-900/50"
-              }`}
-            >
+            <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-3 py-2">
               <button
                 type="button"
                 onClick={() => setIsOutboundOpen((prev) => !prev)}
@@ -119,7 +112,7 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
                     onClick={onNavigate}
                     className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
                       dashboardActive
-                        ? "text-emerald-300"
+                        ? "bg-slate-800/70 text-slate-100"
                         : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
                     }`}
                   >
@@ -132,7 +125,7 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
                     onClick={onNavigate}
                     className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
                       leadsActive
-                        ? "text-emerald-300"
+                        ? "bg-slate-800/70 text-slate-100"
                         : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
                     }`}
                   >
