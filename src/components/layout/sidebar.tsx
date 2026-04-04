@@ -10,6 +10,54 @@ type SidebarProps = {
   onPinnedChange?: (value: boolean) => void;
 };
 
+type SalesSectionButtonProps = {
+  label: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  direction: "forward" | "back";
+};
+
+function SalesSectionButton({ label, isOpen, onToggle, direction }: SalesSectionButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex h-12 w-full items-center justify-between rounded-lg px-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800/40"
+    >
+      <span className="inline-flex items-center gap-3">
+        <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-5 w-5 shrink-0">
+          {direction === "forward" ? (
+            <path
+              d="m4.5 9 9 0M10.5 5.5 14 9l-3.5 3.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ) : (
+            <path
+              d="M13.5 9h-9M7.5 5.5 4 9l3.5 3.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
+        </svg>
+        <span>{label}</span>
+      </span>
+      <svg
+        viewBox="0 0 18 18"
+        fill="none"
+        aria-hidden="true"
+        className={`h-5 w-5 shrink-0 text-slate-400 transition-transform ${isOpen ? "rotate-0" : "-rotate-90"}`}
+      >
+        <path d="m5.5 7 3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  );
+}
+
 export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -19,8 +67,6 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
   const inboundView = searchParams.get("view");
   const inboundDashboardActive = pathname === "/leads/inbound" && inboundView !== "leads";
   const inboundLeadsActive = pathname === "/leads/inbound" && inboundView === "leads";
-  const inboundActive = pathname.startsWith("/leads/inbound");
-
   const [isOutboundOpen, setIsOutboundOpen] = useState(true);
   const [isInboundOpen, setIsInboundOpen] = useState(false);
 
@@ -77,33 +123,13 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
 
         {isPinned ? (
           <div className="space-y-3">
-            <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-3 py-2">
-              <button
-                type="button"
-                onClick={() => setIsOutboundOpen((prev) => !prev)}
-                className="flex w-full items-center justify-between text-slate-200"
-              >
-                <span className="inline-flex items-center gap-2 text-sm">
-                  <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-4 w-4">
-                    <path
-                      d="m4.5 9 9 0M10.5 5.5 14 9l-3.5 3.5"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  Outbound
-                </span>
-                <svg
-                  viewBox="0 0 18 18"
-                  fill="none"
-                  aria-hidden="true"
-                  className={`h-4 w-4 text-slate-400 transition-transform ${isOutboundOpen ? "rotate-0" : "-rotate-90"}`}
-                >
-                  <path d="m5.5 7 3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
+            <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-2">
+              <SalesSectionButton
+                label="Outbound"
+                isOpen={isOutboundOpen}
+                onToggle={() => setIsOutboundOpen((prev) => !prev)}
+                direction="forward"
+              />
 
               {isOutboundOpen ? (
                 <div className="mt-2 space-y-1">
@@ -136,33 +162,13 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
               ) : null}
             </div>
 
-            <div
-              className={`rounded-xl border px-3 py-2 ${
-                inboundActive
-                  ? "border-cyan-500/40 bg-gradient-to-r from-cyan-500/15 to-cyan-500/5"
-                  : "border-slate-800 bg-slate-900/50"
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => setIsInboundOpen((prev) => !prev)}
-                className="flex w-full items-center justify-between text-slate-300"
-              >
-                <span className="inline-flex items-center gap-2 text-sm">
-                  <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-4 w-4">
-                    <path d="M13.5 9h-9M7.5 5.5 4 9l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Inbound
-                </span>
-                <svg
-                  viewBox="0 0 18 18"
-                  fill="none"
-                  aria-hidden="true"
-                  className={`h-4 w-4 text-slate-400 transition-transform ${isInboundOpen ? "rotate-0" : "-rotate-90"}`}
-                >
-                  <path d="m5.5 7 3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
+            <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-2">
+              <SalesSectionButton
+                label="Inbound"
+                isOpen={isInboundOpen}
+                onToggle={() => setIsInboundOpen((prev) => !prev)}
+                direction="back"
+              />
 
               {isInboundOpen ? (
                 <div className="mt-2 space-y-1">
