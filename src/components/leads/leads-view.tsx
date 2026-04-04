@@ -23,7 +23,7 @@ import {
   LeadOwnerDistributionError,
   distributeLeadOwners,
 } from "@/lib/lead-owner-distribution";
-import { useResponsaveis } from "@/lib/responsaveis-store";
+import { useResponsaveis, useResponsaveisRecords } from "@/lib/responsaveis-store";
 import { getPostCallWrapups, subscribePostCallFlow, type PostCallWrapup } from "@/lib/post-call-flow";
 import { formatSaleValueCents, isValidSaleValueCents } from "@/lib/sale-value";
 import { buildOutboundDashboardMetrics } from "@/lib/leads-outbound-dashboard";
@@ -890,6 +890,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const isDashboardMode = filter === "all" && !forceLeadDetailsMode;
   const { currentUser } = useAuth();
   const responsaveis = useResponsaveis();
+  const responsaveisRecords = useResponsaveisRecords();
   const ownerFilterOptions = useMemo(() => ["Todos", ...responsaveis], [responsaveis]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const openedFromQueryRef = useRef<string | null>(null);
@@ -929,6 +930,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [importDestination, setImportDestination] = useState<ImportDestination>("");
   const [importError, setImportError] = useState("");
   const [createError, setCreateError] = useState("");
+  const [assignError, setAssignError] = useState("");
+  const [isAssigningOwners, setIsAssigningOwners] = useState(false);
 
   const addMenuRef = useRef<HTMLDivElement | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -1163,6 +1166,69 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     setDashboardActiveWidgetId(null);
     setDashboardIsInteracting(false);
   }, [isDashboardMode]);
+
+  const vendorOwnerNames = useMemo(
+    () =>
+      responsaveisRecords
+        .filter((record) => record.tipo === "vendedor")
+        .map((record) => String(record.nome || "").trim())
+        .filter(Boolean),
+    [responsaveisRecords],
+  );
+
+  const isLeadInCurrentScope = useCallback(
+    (lead: Lead) => (filter === "all" ? true : lead.channel === filter),
+    [filter],
+  );
+
+  const unassignedScopedLeadsCount = useMemo(
+    () =>
+      leads.filter((lead) => isLeadInCurrentScope(lead) && !String(lead.owner || "").trim())
+        .length,
+    [isLeadInCurrentScope, leads],
+  );
+
+  const hasUnassignedScopedLeads = unassignedScopedLeadsCount > 0;
+
+  const assignUnassignedLeads = () => {
+    if (isAssigningOwners || !hasUnassignedScopedLeads) return;
+    setAssignError("");
+    setIsAssigningOwners(true);
+    try {
+      const eligibleOwners = vendorOwnerNames;
+      if (eligibleOwners.length === 0) {
+        throw new LeadOwnerDistributionError(
+          "Nao existe vendedor elegivel cadastrado para distribuicao automatica de leads.",
+        );
+      }
+
+      const scopedLeads = leads
+        .filter((lead) => isLeadInCurrentScope(lead))
+        .map((lead) => ({ ...lead }));
+
+      const distributed = distributeLeadOwners({
+        incomingLeads: scopedLeads,
+        existingLeads: [],
+        eligibleOwners,
+      });
+
+      const distributedById = new Map(
+        distributed.leads.map((lead) => [lead.id, lead] as const),
+      );
+
+      setLeads((prev) =>
+        prev.map((lead) => {
+          if (!isLeadInCurrentScope(lead)) return lead;
+          const updated = distributedById.get(lead.id);
+          return updated ? updated : lead;
+        }),
+      );
+    } catch (error) {
+      setAssignError(resolveLeadDistributionErrorMessage(error));
+    } finally {
+      setIsAssigningOwners(false);
+    }
+  };
 
   const effectiveOwnerFilter = ownerFilterOptions.includes(ownerFilter) ? ownerFilter : "Todos";
 
@@ -2390,6 +2456,19 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               </label>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
+              {hasUnassignedScopedLeads ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn-ghost h-9 px-3 text-xs"
+                    onClick={assignUnassignedLeads}
+                    disabled={isAssigningOwners}
+                  >
+                    {isAssigningOwners ? "Atribuindo..." : "Atribuir"}
+                  </button>
+                  <div className="h-4 w-px bg-border" />
+                </>
+              ) : null}
               <button
                 type="button"
                 className="btn-ghost h-9 px-3 text-xs"
@@ -2405,6 +2484,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               </button>
             </div>
           </section>
+
+          {assignError ? (
+            <p className="mb-3 rounded-md border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+              {assignError}
+            </p>
+          ) : null}
 
           {filter === "outbound" ? (
             <OutboundLeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onDeleteLeads={deleteLeadsById} />
