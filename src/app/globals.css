@@ -16,6 +16,24 @@ body {
   scrollbar-color: #32405f #0d1321;
 }
 
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0d1321;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #32405f;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3d5070;
+}
+
 .panel {
   @apply rounded-2xl border border-border bg-panel/90 shadow-panel;
 }

@@ -38,16 +38,16 @@ export function AgendaMonthView({
   const meetingsByDate = useMemo(() => buildMeetingsByDateIndex(meetings), [meetings]);
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="grid grid-cols-7 border-b border-slate-200">
+    <section className="rounded-2xl border border-border bg-panel shadow-panel">
+      <div className="grid grid-cols-7 border-b border-border px-1">
         {weekLabels.map((label) => (
-          <div key={label} className="px-2 py-2 text-xs font-semibold text-slate-500">
+          <div key={label} className="px-2 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
             {label}
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-7">
+      <div className="grid grid-cols-7 p-1 gap-px bg-border rounded-b-2xl overflow-hidden">
         {days.map((day) => {
           const iso = toIsoDate(day);
           const dayMeetings = getDayMeetingsFromIndex(meetingsByDate, day);
@@ -66,19 +66,19 @@ export function AgendaMonthView({
                   onCreateOnDate(iso);
                 }
               }}
-              className={`min-h-32 border p-2 text-left transition ${
+              className={`min-h-32 p-2 text-left transition ${
                 isPast
-                  ? "cursor-not-allowed border-slate-300 bg-slate-200/80 hover:bg-slate-200/80"
+                  ? "cursor-not-allowed bg-slate-950/60"
                   : blocked
-                  ? "border-slate-200 bg-rose-50/70 hover:bg-rose-50/80"
+                  ? "bg-rose-500/5 hover:bg-rose-500/10"
                   : isOutsideMonth
-                    ? "border-slate-200 bg-slate-50 hover:bg-slate-100/70"
-                    : "border-slate-200 bg-white hover:bg-slate-50"
+                  ? "bg-bg/60 hover:bg-slate-900/60"
+                  : "bg-bg hover:bg-slate-900/80"
               }`}
             >
               <p
                 className={`mb-2 text-sm font-semibold ${
-                  isPast ? "text-slate-500" : isOutsideMonth ? "text-slate-400" : "text-slate-700"
+                  isPast ? "text-slate-600" : isOutsideMonth ? "text-slate-600" : "text-slate-200"
                 }`}
               >
                 {day.getDate()}
@@ -86,7 +86,7 @@ export function AgendaMonthView({
               {blocked ? (
                 <p
                   className={`mb-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                    isPast ? "bg-rose-100/70 text-rose-500" : "bg-rose-100 text-rose-700"
+                    isPast ? "bg-rose-500/10 text-rose-600" : "bg-rose-500/15 text-rose-400"
                   }`}
                 >
                   Dia bloqueado
@@ -94,10 +94,10 @@ export function AgendaMonthView({
               ) : hasTimeBlock ? (
                 <p
                   className={`mb-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                    isPast ? "bg-amber-100/70 text-amber-600" : "bg-amber-100 text-amber-700"
+                    isPast ? "bg-amber-500/10 text-amber-600" : "bg-amber-500/15 text-amber-400"
                   }`}
                 >
-                  Horarios bloqueados
+                  Horários bloqueados
                 </p>
               ) : null}
               <div className="space-y-1.5">

@@ -36,7 +36,7 @@ export function DashboardMetricCard({
     typeof progress === "number" && Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : null;
 
   return (
-    <article className="relative h-full overflow-hidden rounded-2xl border border-slate-800/80 bg-[#0F172A]/95 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02),0_18px_42px_rgba(2,6,23,0.34)] transition-all duration-200 hover:-translate-y-[2px] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),0_24px_48px_rgba(2,6,23,0.42)]">
+    <article className="relative h-full overflow-hidden rounded-2xl border border-slate-800/80 bg-panel/95 p-4 shadow-card transition-all duration-200 hover:-translate-y-[2px] hover:shadow-card-hover">
       <div
         className="pointer-events-none absolute inset-0 opacity-50"
         style={{
