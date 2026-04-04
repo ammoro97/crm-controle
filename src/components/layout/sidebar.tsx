@@ -2,11 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
-
-const leadChildren = [
-  { href: "/leads/outbound", label: "Outbound" },
-];
 
 type SidebarProps = {
   onNavigate?: () => void;
@@ -16,16 +11,8 @@ type SidebarProps = {
 
 export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: SidebarProps) {
   const pathname = usePathname();
-  const leadsActive = pathname.startsWith("/leads");
-  const [leadsExpanded, setLeadsExpanded] = useState(leadsActive);
-
-  useEffect(() => {
-    if (isPinned) {
-      setLeadsExpanded(leadsActive);
-      return;
-    }
-    setLeadsExpanded(false);
-  }, [isPinned, leadsActive]);
+  const dashboardActive = pathname === "/leads";
+  const leadsActive = pathname.startsWith("/leads/outbound");
 
   const linkClass = (active: boolean) =>
     `flex items-center rounded-lg py-2 text-sm transition ${
@@ -70,58 +57,28 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
           ) : null}
         </div>
       </div>
+
       <nav className={`space-y-1 ${isPinned ? "px-3" : "px-2"}`}>
-        <div className="rounded-lg">
-          <Link
-            href="/leads"
-            onClick={(event) => {
-              if (isPinned) {
-                setLeadsExpanded((prev) => !prev);
-                if (pathname === "/leads") {
-                  event.preventDefault();
-                }
-              }
-              onNavigate?.();
-            }}
-            className={linkClass(leadsActive)}
-          >
-            <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
-              <path d="M2 4h14M4 8h10M6.5 12h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            {isPinned ? <span className="ml-3">Leads</span> : null}
-            {isPinned ? (
-              <span className="ml-auto text-[10px] text-slate-500">{leadsExpanded ? "▾" : "▸"}</span>
-            ) : null}
-          </Link>
+        {isPinned ? <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Vendas</p> : null}
 
-          {isPinned && leadsExpanded ? (
-            <div className="mt-1 space-y-1 pl-3">
-              {leadChildren.map((item) => {
-                const active = pathname === item.href;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={onNavigate}
-                    className={`block rounded-lg px-3 py-2 text-sm transition ${
-                      active
-                        ? "bg-slate-800 text-slate-100"
-                        : "text-slate-300 hover:bg-slate-900 hover:text-slate-100"
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
+        <Link href="/leads" onClick={onNavigate} className={linkClass(dashboardActive)}>
+          <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
+            <path d="M3 14.5h12M5 12V8.5M9 12V5.5M13 12V9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+          {isPinned ? <span className="ml-3">Dashboard</span> : null}
+        </Link>
 
-        <Link
-          href="/clientes"
-          onClick={onNavigate}
-          className={linkClass(pathname === "/clientes")}
-        >
+        <Link href="/leads/outbound" onClick={onNavigate} className={linkClass(leadsActive)}>
+          <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
+            <path d="M2.5 4h13M4.5 8h9M6.5 12h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+          {isPinned ? <span className="ml-3">Leads</span> : null}
+        </Link>
+
+        {isPinned ? <div className="my-2 h-px bg-slate-800/80" /> : null}
+        {isPinned ? <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Relacionamento</p> : null}
+
+        <Link href="/clientes" onClick={onNavigate} className={linkClass(pathname === "/clientes")}>
           <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
             <path d="M12.5 13.5c0-1.657-1.567-3-3.5-3s-3.5 1.343-3.5 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             <circle cx="9" cy="6.5" r="2.5" stroke="currentColor" strokeWidth="1.5" />
@@ -131,22 +88,14 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
           {isPinned ? <span className="ml-3">Clientes</span> : null}
         </Link>
 
-        <Link
-          href="/ligacoes"
-          onClick={onNavigate}
-          className={linkClass(pathname === "/ligacoes")}
-        >
+        <Link href="/ligacoes" onClick={onNavigate} className={linkClass(pathname === "/ligacoes")}>
           <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
             <path d="M3.5 4.5c.3 5.5 4.5 9.7 10 10l1-2.5-2.5-1-1 1.5c-2-.7-4-2.7-4.7-4.7l1.5-1-1-2.5-3.3 1Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
           </svg>
-          {isPinned ? <span className="ml-3">Ligações</span> : null}
+          {isPinned ? <span className="ml-3">Ligacoes</span> : null}
         </Link>
 
-        <Link
-          href="/agenda"
-          onClick={onNavigate}
-          className={linkClass(pathname === "/agenda")}
-        >
+        <Link href="/agenda" onClick={onNavigate} className={linkClass(pathname === "/agenda")}>
           <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
             <rect x="2.5" y="3.5" width="13" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
             <path d="M6 2v3M12 2v3M2.5 7.5h13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -157,11 +106,10 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
           {isPinned ? <span className="ml-3">Agenda</span> : null}
         </Link>
 
-        <Link
-          href="/assistente"
-          onClick={onNavigate}
-          className={linkClass(pathname === "/assistente")}
-        >
+        {isPinned ? <div className="my-2 h-px bg-slate-800/80" /> : null}
+        {isPinned ? <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Sistema</p> : null}
+
+        <Link href="/assistente" onClick={onNavigate} className={linkClass(pathname === "/assistente")}>
           <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
             <path d="M9 2.5 10 6h3.5l-2.8 2 1 3.5L9 9.5 6.3 11.5l1-3.5L4.5 6H8L9 2.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
             <path d="M4 14.5h2M7.5 14.5h2M11 14.5h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
@@ -169,16 +117,12 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
           {isPinned ? <span className="ml-3">Assistente</span> : null}
         </Link>
 
-        <Link
-          href="/configuracoes"
-          onClick={onNavigate}
-          className={linkClass(pathname === "/configuracoes")}
-        >
+        <Link href="/configuracoes" onClick={onNavigate} className={linkClass(pathname === "/configuracoes")}>
           <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
             <circle cx="9" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.5" />
             <path d="M9 2v1.5M9 14.5V16M2 9h1.5M14.5 9H16M3.93 3.93l1.06 1.06M13.01 13.01l1.06 1.06M14.07 3.93l-1.06 1.06M4.99 13.01l-1.06 1.06" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
-          {isPinned ? <span className="ml-3">Configurações</span> : null}
+          {isPinned ? <span className="ml-3">Configuracoes</span> : null}
         </Link>
       </nav>
     </aside>
