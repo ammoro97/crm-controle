@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { savePendingAutomatedLeads } from "@/lib/leads-automatizado-store";
+import {
+  LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE,
+  LeadOwnerDistributionError,
+} from "@/lib/lead-owner-distribution";
+import { distributeLeadOwnersFromDatabase } from "@/lib/lead-owner-distribution-server";
 import { resolveLeadExpedienteStatusFromHorario } from "@/lib/lead-expediente";
+import { readLeadsCollection } from "@/lib/leads-customers-store";
 import { Lead } from "@/types/crm";
 
 export type OutboundLeadPayload = {
@@ -192,17 +198,37 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
+    const currentLeads = await readLeadsCollection();
+    const distributed = await distributeLeadOwnersFromDatabase({
+      incomingLeads: leads,
+      existingLeads: currentLeads,
+    });
+
     await savePendingAutomatedLeads({
       requestId,
       tipoAutomacao,
-      leads,
+      leads: distributed.leads,
       savedAt: new Date().toISOString(),
     });
 
     console.log("[RETORNO] salvo_pendente", { requestId, count: leads.length });
 
-    return NextResponse.json({ success: true, count: leads.length });
+    return NextResponse.json({ success: true, count: distributed.leads.length });
   } catch (error) {
+    if (
+      error instanceof LeadOwnerDistributionError &&
+      error.code === LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE,
+          message:
+            "Nao existe responsavel elegivel cadastrado para distribuir os leads automatizados. Cadastre ao menos um responsavel.",
+        },
+        { status: 422 },
+      );
+    }
     console.error(
       "[LEADS_AUTOMATIZADO][RETORNO] Erro:",
       error instanceof Error ? error.message : "Erro desconhecido",

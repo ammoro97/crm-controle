@@ -3,6 +3,12 @@ import { requireAuth } from "@/lib/require-auth";
 import { getWebhookOutConfig, isWebhookOutConfigured } from "@/lib/webhook-out-config-store";
 import { CALL_ANALYSIS_SECRET_HEADER } from "@/types/call-analysis";
 import { Lead } from "@/types/crm";
+import { readLeadsCollection } from "@/lib/leads-customers-store";
+import {
+  LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE,
+  LeadOwnerDistributionError,
+} from "@/lib/lead-owner-distribution";
+import { distributeLeadOwnersFromDatabase } from "@/lib/lead-owner-distribution-server";
 
 const CRM_EVENT_OUTBOUND = "outbound" as const;
 
@@ -209,11 +215,25 @@ export async function POST(request: Request): Promise<NextResponse> {
           ? ((n8nData as N8nRetornoBody).data as N8nLeadItem[])
           : [];
 
-    const leads: Lead[] = rawLeads
+    const extractedLeads: Lead[] = rawLeads
       .map((raw) => buildOutboundLead(raw, body.tipoAutomacao))
       .filter((lead): lead is Lead => lead !== null);
 
-    console.log("[SOLICITAR] leads_extraidos", { count: leads.length, pending: leads.length === 0, empresas: leads.map((l) => l.company) });
+    let leads = extractedLeads;
+    if (leads.length > 0) {
+      const currentLeads = await readLeadsCollection();
+      const distributed = await distributeLeadOwnersFromDatabase({
+        incomingLeads: leads,
+        existingLeads: currentLeads,
+      });
+      leads = distributed.leads;
+    }
+
+    console.log("[SOLICITAR] leads_extraidos", {
+      count: leads.length,
+      pending: leads.length === 0,
+      empresas: leads.map((l) => l.company),
+    });
 
     // Se n8n respondeu com leads sincronamente, retorna direto.
     // Se retornou vazio (respond immediately / async), sinaliza pending
@@ -225,6 +245,20 @@ export async function POST(request: Request): Promise<NextResponse> {
       pending: leads.length === 0,
     });
   } catch (error) {
+    if (
+      error instanceof LeadOwnerDistributionError &&
+      error.code === LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE
+    ) {
+      return NextResponse.json<SolicitacaoResponse>(
+        {
+          success: false,
+          message:
+            "Nao existe responsavel elegivel cadastrado para distribuir os leads automatizados. Cadastre ao menos um responsavel.",
+          pending: false,
+        },
+        { status: 422 },
+      );
+    }
     console.error(
       "[LEADS_AUTOMATIZADO][SOLICITAR] Erro:",
       error instanceof Error ? error.message : "Erro desconhecido",

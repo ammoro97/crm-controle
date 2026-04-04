@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, DragEvent, FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
 import { PageTopbar } from "@/components/layout/page-topbar";
@@ -18,6 +18,11 @@ import {
   subscribeMeetingsSnapshot,
 } from "@/lib/crm-data-store";
 import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
+import {
+  LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE,
+  LeadOwnerDistributionError,
+  distributeLeadOwners,
+} from "@/lib/lead-owner-distribution";
 import { useResponsaveis } from "@/lib/responsaveis-store";
 import { getPostCallWrapups, subscribePostCallFlow, type PostCallWrapup } from "@/lib/post-call-flow";
 import { formatSaleValueCents, isValidSaleValueCents } from "@/lib/sale-value";
@@ -865,6 +870,16 @@ function buildRowIdentity(row: Pick<ImportedLeadRow, "email" | "phone">): string
   return "";
 }
 
+function resolveLeadDistributionErrorMessage(error: unknown) {
+  if (
+    error instanceof LeadOwnerDistributionError &&
+    error.code === LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE
+  ) {
+    return "Cadastre ao menos um responsavel elegivel em Configuracoes para distribuir os leads.";
+  }
+  return "Nao foi possivel distribuir automaticamente os leads entre os responsaveis.";
+}
+
 export function LeadsView({ title, filter }: LeadsViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -875,6 +890,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const isDashboardMode = filter === "all" && !forceLeadDetailsMode;
   const { currentUser } = useAuth();
   const responsaveis = useResponsaveis();
+  const ownerFilterOptions = useMemo(() => ["Todos", ...responsaveis], [responsaveis]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const openedFromQueryRef = useRef<string | null>(null);
   const hasSyncedLeadsRef = useRef(false);
@@ -907,10 +923,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [detailInitialObservationId, setDetailInitialObservationId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [ownerFilter, setOwnerFilter] = useState("Todos");
 
   const [importOpen, setImportOpen] = useState(false);
   const [importDestination, setImportDestination] = useState<ImportDestination>("");
   const [importError, setImportError] = useState("");
+  const [createError, setCreateError] = useState("");
 
   const addMenuRef = useRef<HTMLDivElement | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -1146,8 +1164,14 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     setDashboardIsInteracting(false);
   }, [isDashboardMode]);
 
+  const effectiveOwnerFilter = ownerFilterOptions.includes(ownerFilter) ? ownerFilter : "Todos";
+
   const visibleLeads = useMemo(() => {
-    const base = filter === "all" ? leads : leads.filter((lead) => lead.channel === filter);
+    const channelScoped = filter === "all" ? leads : leads.filter((lead) => lead.channel === filter);
+    const base =
+      effectiveOwnerFilter === "Todos"
+        ? channelScoped
+        : channelScoped.filter((lead) => normalizeQueryText(lead.owner) === normalizeQueryText(effectiveOwnerFilter));
     const sorted = [...base].sort((a, b) => a.name.localeCompare(b.name));
     const normalizedSearch = normalizeQueryText(deferredSearchTerm);
     if (!normalizedSearch) return sorted;
@@ -1164,7 +1188,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       ];
       return haystack.some((value) => value.includes(normalizedSearch));
     });
-  }, [deferredSearchTerm, filter, leads]);
+  }, [deferredSearchTerm, effectiveOwnerFilter, filter, leads]);
 
   const dashboardMetrics = useMemo(() => {
     return buildOutboundDashboardMetrics({
@@ -1707,8 +1731,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const handleCreateLead = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draftLead) return;
+    setCreateError("");
     const stamp = nowStamp();
-    const leadToInsert: Lead = {
+    const leadToInsertBase: Lead = {
       ...draftLead,
       history: [
         {
@@ -1725,10 +1750,58 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       observationLog: draftLead.observationLog,
     };
 
-    setLeads((prev) => [...prev, leadToInsert]);
+    try {
+      const distributed = distributeLeadOwners({
+        incomingLeads: [leadToInsertBase],
+        existingLeads: leads,
+        eligibleOwners: responsaveis,
+      });
+      const leadToInsert = distributed.leads[0];
+      if (!leadToInsert) return;
+      setLeads((prev) => [...prev, leadToInsert]);
+    } catch (error) {
+      setCreateError(resolveLeadDistributionErrorMessage(error));
+      return;
+    }
+
     setCreateOpen(false);
     setDraftLead(null);
   };
+
+  const mergeIncomingAutomatedLeads = useCallback((currentLeads: Lead[], incomingRawLeads: Lead[]) => {
+    const existingIds = new Set(currentLeads.map((lead) => lead.id));
+    const existingPhones = new Set(currentLeads.filter((lead) => lead.phone).map((lead) => lead.phone));
+    const incoming = incomingRawLeads
+      .map(normalizeLead)
+      .filter((lead) => !existingIds.has(lead.id) && (!lead.phone || !existingPhones.has(lead.phone)));
+
+    if (incoming.length === 0) {
+      return {
+        nextLeads: currentLeads,
+        insertedCount: 0,
+        error: "",
+      };
+    }
+
+    try {
+      const distributed = distributeLeadOwners({
+        incomingLeads: incoming,
+        existingLeads: currentLeads,
+        eligibleOwners: responsaveis,
+      });
+      return {
+        nextLeads: [...currentLeads, ...distributed.leads],
+        insertedCount: distributed.leads.length,
+        error: "",
+      };
+    } catch (error) {
+      return {
+        nextLeads: currentLeads,
+        insertedCount: 0,
+        error: resolveLeadDistributionErrorMessage(error),
+      };
+    }
+  }, [responsaveis]);
 
   const resetAutomation = () => {
     setAutomationStep("tipo");
@@ -1789,12 +1862,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       if (returnedLeads.length > 0) {
         // n8n respondeu sincronamente com leads
         setLeads((prev) => {
-          const existingIds = new Set(prev.map((l) => l.id));
-          const existingPhones = new Set(prev.filter((l) => l.phone).map((l) => l.phone));
-          const incoming = returnedLeads
-            .map(normalizeLead)
-            .filter((l) => !existingIds.has(l.id) && (!l.phone || !existingPhones.has(l.phone)));
-          return incoming.length > 0 ? [...prev, ...incoming] : prev;
+          const merged = mergeIncomingAutomatedLeads(prev, returnedLeads);
+          if (merged.error) {
+            setAutomationError(merged.error);
+            return prev;
+          }
+          return merged.nextLeads;
         });
         setAutomationLeadsCount(returnedLeads.length);
         setAutomationStep("sucesso");
@@ -1879,9 +1952,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     }
 
     const stamp = nowStamp();
-    const imported = validRows.map((row, index) => {
+    const importedBase = validRows.map((row, index) => {
       const id = `L-IMP-${Date.now()}-${index + 1}`;
-      const owner = row.owner || responsaveis[0] || "";
       const base = createEmptyLead(importDestination);
       return {
         ...base,
@@ -1891,7 +1963,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         phone: row.phone,
         email: row.email,
         source: row.source || "Importacao",
-        owner,
+        owner: "",
         city: row.city,
         niche: row.niche,
         status: row.status,
@@ -1904,14 +1976,32 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             time: stamp.time,
             eventType: "LEAD_CRIADO",
             description: buildLeadCreatedDescription(importDestination, row.source || "Importacao de lista"),
-            owner: owner || "Time Comercial",
+            owner: "Time Comercial",
           },
         ],
         lastInteraction: stamp.datetime,
       };
     });
 
-    setLeads((prev) => [...prev, ...imported]);
+    try {
+      const distributed = distributeLeadOwners({
+        incomingLeads: importedBase,
+        existingLeads: leads,
+        eligibleOwners: responsaveis,
+      });
+      const imported = distributed.leads.map((lead) => ({
+        ...lead,
+        history:
+          lead.history?.map((item, index) =>
+            index === 0 ? { ...item, owner: lead.owner || item.owner || "Time Comercial" } : item,
+          ) || [],
+      }));
+      setLeads((prev) => [...prev, ...imported]);
+    } catch (error) {
+      setImportError(resolveLeadDistributionErrorMessage(error));
+      return;
+    }
+
     closeImport();
   };
 
@@ -1943,12 +2033,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         const data = (await response.json()) as AutomationApiResponse;
         if (response.ok && data.success && data.leads && data.leads.length > 0) {
           setLeads((prev) => {
-            const existingIds = new Set(prev.map((l) => l.id));
-            const existingPhones = new Set(prev.filter((l) => l.phone).map((l) => l.phone));
-            const incoming = data.leads!
-              .map(normalizeLead)
-              .filter((l) => !existingIds.has(l.id) && (!l.phone || !existingPhones.has(l.phone)));
-            return incoming.length > 0 ? [...prev, ...incoming] : prev;
+            const merged = mergeIncomingAutomatedLeads(prev, data.leads || []);
+            if (merged.error) {
+              setAutomationError(merged.error);
+              return prev;
+            }
+            return merged.nextLeads;
           });
           setAutomationLeadsCount(data.leads.length);
           setAutomationStep("sucesso");
@@ -1966,7 +2056,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     }, 5000);
 
     return () => clearInterval(intervalId);
-  }, [automationStep]);
+  }, [automationStep, mergeIncomingAutomatedLeads]);
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -1996,12 +2086,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           const data = (await response.json()) as AutomationApiResponse;
           if (response.ok && data.success && data.leads && data.leads.length > 0) {
             setLeads((prev) => {
-              const existingIds = new Set(prev.map((l) => l.id));
-              const existingPhones = new Set(prev.filter((l) => l.phone).map((l) => l.phone));
-              const incoming = data.leads!
-                .map(normalizeLead)
-                .filter((l) => !existingIds.has(l.id) && (!l.phone || !existingPhones.has(l.phone)));
-              return incoming.length > 0 ? [...prev, ...incoming] : prev;
+              const merged = mergeIncomingAutomatedLeads(prev, data.leads || []);
+              if (merged.error) return prev;
+              return merged.nextLeads;
             });
           }
         } catch {
@@ -2015,7 +2102,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       active = false;
       controller.abort();
     };
-  }, []);
+  }, [mergeIncomingAutomatedLeads]);
 
   return (
     <section>
@@ -2066,6 +2153,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                     onClick={() => {
                       setAddMenuOpen(false);
                       setDraftLead(createEmptyLead(filter));
+                      setCreateError("");
                       setCreateOpen(true);
                     }}
                   >
@@ -2267,23 +2355,39 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       ) : (
         <>
           <section className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div className="relative w-full md:max-w-lg">
-              <svg
-                className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <circle cx="6.5" cy="6.5" r="4.5" />
-                <path d="M10.5 10.5l3 3" strokeLinecap="round" />
-              </svg>
-              <input
-                className="field h-9 w-full pl-8 pr-3 text-[13px]"
-                placeholder="Buscar por nome, empresa, telefone ou email..."
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-              />
+            <div className="flex w-full flex-col gap-2 md:max-w-3xl md:flex-row">
+              <div className="relative w-full md:max-w-lg">
+                <svg
+                  className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <circle cx="6.5" cy="6.5" r="4.5" />
+                  <path d="M10.5 10.5l3 3" strokeLinecap="round" />
+                </svg>
+                <input
+                  className="field h-9 w-full pl-8 pr-3 text-[13px]"
+                  placeholder="Buscar por nome, empresa, telefone ou email..."
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                />
+              </div>
+              <label className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted md:min-w-[13rem]">
+                Responsavel
+                <select
+                  className="field mt-1 h-9 px-2.5 py-1.5 text-xs xl:text-[13px]"
+                  value={effectiveOwnerFilter}
+                  onChange={(event) => setOwnerFilter(event.target.value)}
+                >
+                  {ownerFilterOptions.map((owner) => (
+                    <option key={owner} value={owner}>
+                      {owner}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               <button
@@ -2575,6 +2679,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       <Modal title="Novo Lead" open={createOpen} onClose={() => {
         setCreateOpen(false);
         setDraftLead(null);
+        setCreateError("");
       }}>
         {draftLead ? (
           <form className="space-y-4" onSubmit={handleCreateLead}>
@@ -2590,6 +2695,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               <label className="text-sm">Canal<select className="field mt-1" value={draftLead.channel} onChange={(e) => setDraftLead({ ...draftLead, channel: e.target.value as LeadChannel })}><option value="inbound">Inbound</option><option value="outbound">Outbound</option></select></label>
               <label className="text-sm">Status<select className="field mt-1" value={draftLead.status} onChange={(e) => setDraftLead({ ...draftLead, status: e.target.value as LeadStatus })}>{statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
             </div>
+            {createError ? (
+              <p className="rounded-md border border-rose-400/40 bg-rose-500/10 px-2 py-1.5 text-xs text-rose-200">
+                {createError}
+              </p>
+            ) : null}
             <button type="submit" className="btn-primary">Criar lead</button>
           </form>
         ) : null}
