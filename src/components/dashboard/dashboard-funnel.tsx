@@ -3,16 +3,18 @@
 import { useMemo } from "react";
 import { FunnelChart, type FunnelChartStep } from "@/components/dashboard/funnel-chart";
 
-type FunnelStepId = "ligacoes" | "atendidas" | "decisor" | "agendamentos";
+type FunnelStepId = "ligacoes" | "atendidas" | "decisor" | "agendamentos" | "compras";
 
 type DashboardFunnelProps = {
   ligacoes: number;
   atendidas: number;
   decisor: number;
   agendamentos: number;
+  compras: number;
   atendidasPercentual: number;
   decisorPercentual: number;
   agendamentosPercentual: number;
+  comprasPercentual: number;
 };
 
 function iconForStep(stepId: FunnelStepId) {
@@ -42,6 +44,14 @@ function iconForStep(stepId: FunnelStepId) {
     );
   }
 
+  if (stepId === "compras") {
+    return (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="m5 12.4 4.2 4.2L19 6.9" />
+      </svg>
+    );
+  }
+
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
       <path d="M5 12.4 10 17l9-9" />
@@ -65,9 +75,11 @@ export function DashboardFunnel({
   atendidas,
   decisor,
   agendamentos,
+  compras,
   atendidasPercentual,
   decisorPercentual,
   agendamentosPercentual,
+  comprasPercentual,
 }: DashboardFunnelProps) {
   const absoluteSteps: FunnelChartStep[] = useMemo(
     () => [
@@ -83,7 +95,7 @@ export function DashboardFunnel({
         id: "abs_atendidas",
         label: "Atendidas",
         value: formatMetricNumber(atendidas),
-        widthPercent: 78,
+        widthPercent: 80,
         variant: "purple",
         icon: iconForStep("atendidas"),
       },
@@ -91,7 +103,7 @@ export function DashboardFunnel({
         id: "abs_decisor",
         label: "Decisor",
         value: formatMetricNumber(decisor),
-        widthPercent: 58,
+        widthPercent: 64,
         variant: "green",
         icon: iconForStep("decisor"),
       },
@@ -99,12 +111,20 @@ export function DashboardFunnel({
         id: "abs_agendamentos",
         label: "Fechamento",
         value: formatMetricNumber(agendamentos),
-        widthPercent: 42,
+        widthPercent: 50,
         variant: "orange",
         icon: iconForStep("agendamentos"),
       },
+      {
+        id: "abs_compras",
+        label: "Compras",
+        value: formatMetricNumber(compras),
+        widthPercent: 38,
+        variant: "green",
+        icon: iconForStep("compras"),
+      },
     ],
-    [agendamentos, atendidas, decisor, ligacoes],
+    [agendamentos, atendidas, compras, decisor, ligacoes],
   );
 
   const percentSteps: FunnelChartStep[] = useMemo(
@@ -121,7 +141,7 @@ export function DashboardFunnel({
         id: "pct_decisor",
         label: "Decisor",
         value: formatMetricPercent(decisorPercentual),
-        widthPercent: 72,
+        widthPercent: 80,
         variant: "green",
         icon: iconForStep("decisor"),
       },
@@ -129,12 +149,20 @@ export function DashboardFunnel({
         id: "pct_agendamentos",
         label: "Fechamento",
         value: formatMetricPercent(agendamentosPercentual),
-        widthPercent: 48,
+        widthPercent: 68,
         variant: "orange",
         icon: iconForStep("agendamentos"),
       },
+      {
+        id: "pct_compras",
+        label: "Compras",
+        value: formatMetricPercent(comprasPercentual),
+        widthPercent: 56,
+        variant: "green",
+        icon: iconForStep("compras"),
+      },
     ],
-    [agendamentosPercentual, atendidasPercentual, decisorPercentual],
+    [agendamentosPercentual, atendidasPercentual, comprasPercentual, decisorPercentual],
   );
 
   return (
@@ -144,13 +172,13 @@ export function DashboardFunnel({
       <div className="relative space-y-4">
         <FunnelChart
           title="Funil Principal (Valores Absolutos)"
-          subtitle="Fonte real da tela de Ligacoes: Ligacoes -> Atendidas -> Decisor -> Fechamento (agenda)."
+          subtitle="Fonte real da tela de Ligacoes: Ligacoes -> Atendidas -> Decisor -> Fechamento (agenda) -> Compras."
           steps={absoluteSteps}
         />
 
         <FunnelChart
           title="Funil de Conversao (%)"
-          subtitle="Atendidas = atendidas/ligacoes, Decisor = decisor/atendidas, Fechamento = agendamentos de fechamento/decisor."
+          subtitle="Atendidas = atendidas/ligacoes, Decisor = decisor/atendidas, Fechamento = agendamentos de fechamento/decisor, Compras = compras/fechamento."
           steps={percentSteps}
         />
       </div>

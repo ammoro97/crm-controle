@@ -39,11 +39,13 @@ const EMPTY_METRICS: DashboardMetrics = {
       atendidas: 0,
       decisor: 0,
       agendamentos: 0,
+      compras: 0,
     },
     conversao: {
       atendidasPercentual: 0,
       decisorPercentual: 0,
       agendamentosPercentual: 0,
+      comprasPercentual: 0,
     },
   },
   cards: {

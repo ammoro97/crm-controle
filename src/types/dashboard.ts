@@ -5,11 +5,13 @@ export type DashboardMetrics = {
       atendidas: number;
       decisor: number;
       agendamentos: number;
+      compras: number;
     };
     conversao: {
       atendidasPercentual: number;
       decisorPercentual: number;
       agendamentosPercentual: number;
+      comprasPercentual: number;
     };
   };
   cards: {

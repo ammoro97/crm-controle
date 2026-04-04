@@ -267,11 +267,13 @@ function buildPayload(params: {
           atendidas: 0,
           decisor: 0,
           agendamentos: 0,
+          compras: 0,
         },
         conversao: {
           atendidasPercentual: 0,
           decisorPercentual: 0,
           agendamentosPercentual: 0,
+          comprasPercentual: 0,
         },
       },
       cards: {
@@ -317,6 +319,8 @@ function buildPayload(params: {
   const closingCallsForCpc = meetingsInScope.filter((meeting) => isClosingCallForCpc(meeting));
   const purchasedClosingCalls = closingCallsForCpc.filter((meeting) => isPurchasedClosingCall(meeting));
   const vendasRealizadas = purchasedClosingCalls.length;
+  const compras = Math.max(vendasRealizadas, 0);
+  const comprasPercentual = safePercent(compras, agendamentos);
   const faturamento =
     purchasedClosingCalls.reduce((total, meeting) => total + getMeetingSaleValueCents(meeting), 0) / 100;
   const percentualCpc = safePercent(vendasRealizadas, closingCallsForCpc.length);
@@ -331,11 +335,13 @@ function buildPayload(params: {
         atendidas,
         decisor,
         agendamentos,
+        compras,
       },
       conversao: {
         atendidasPercentual,
         decisorPercentual,
         agendamentosPercentual,
+        comprasPercentual,
       },
     },
     cards: {

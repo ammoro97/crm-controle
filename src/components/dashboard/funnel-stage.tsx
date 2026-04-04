@@ -39,12 +39,14 @@ const VARIANT_STYLES: Record<FunnelStageVariant, { from: string; to: string; glo
 
 function clampWidthPercent(value: number) {
   if (!Number.isFinite(value)) return 100;
-  return Math.max(36, Math.min(100, value));
+  return Math.max(46, Math.min(100, value));
 }
 
 export function FunnelStage({ label, value, widthPercent, variant, icon, animateIn, index }: FunnelStageProps) {
   const style = VARIANT_STYLES[variant];
   const safeWidth = clampWidthPercent(widthPercent);
+  const valueText = String(value);
+  const compactValue = valueText.length >= 6;
 
   return (
     <div className="relative mx-auto w-full max-w-[680px]">
@@ -70,8 +72,14 @@ export function FunnelStage({ label, value, widthPercent, variant, icon, animate
             {label}
           </p>
           <div className="mt-1.5 inline-flex max-w-full items-center justify-center gap-1.5 text-white">
-            {icon ? <span className="opacity-85">{icon}</span> : null}
-            <span className="truncate text-[30px] font-semibold tracking-[-0.03em] sm:text-[34px] md:text-[38px]">{value}</span>
+            {icon ? <span className="shrink-0 opacity-85">{icon}</span> : null}
+            <span
+              className={`whitespace-nowrap font-semibold tracking-[-0.03em] ${
+                compactValue ? "text-[26px] sm:text-[30px] md:text-[34px]" : "text-[30px] sm:text-[34px] md:text-[38px]"
+              }`}
+            >
+              {value}
+            </span>
           </div>
         </div>
       </div>

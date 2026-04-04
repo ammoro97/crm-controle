@@ -295,9 +295,11 @@ export function DashboardCommercialView() {
             atendidas={metrics.funnels.absoluto.atendidas}
             decisor={metrics.funnels.absoluto.decisor}
             agendamentos={metrics.funnels.absoluto.agendamentos}
+            compras={metrics.funnels.absoluto.compras}
             atendidasPercentual={metrics.funnels.conversao.atendidasPercentual}
             decisorPercentual={metrics.funnels.conversao.decisorPercentual}
             agendamentosPercentual={metrics.funnels.conversao.agendamentosPercentual}
+            comprasPercentual={metrics.funnels.conversao.comprasPercentual}
           />
 
           <div className="space-y-3">
