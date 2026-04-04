@@ -83,7 +83,7 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
                 onClick={() => setIsOutboundOpen((prev) => !prev)}
                 className="flex w-full items-center justify-between text-slate-200"
               >
-                <span className="inline-flex items-center gap-2 text-base font-medium">
+                <span className="inline-flex items-center gap-2 text-sm">
                   <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-4 w-4">
                     <path
                       d="m4.5 9 9 0M10.5 5.5 14 9l-3.5 3.5"
@@ -148,7 +148,7 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
                 onClick={() => setIsInboundOpen((prev) => !prev)}
                 className="flex w-full items-center justify-between text-slate-300"
               >
-                <span className="inline-flex items-center gap-2 text-base font-medium">
+                <span className="inline-flex items-center gap-2 text-sm">
                   <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-4 w-4">
                     <path d="M13.5 9h-9M7.5 5.5 4 9l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
