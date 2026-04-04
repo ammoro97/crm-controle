@@ -747,7 +747,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
         onMouseDown={handleMouseDown}
         className={`overflow-x-auto ${isDragging ? "cursor-grabbing select-none" : "cursor-grab"}`}
       >
-        <table ref={tableRef} className="w-full min-w-[2860px] text-left">
+        <table ref={tableRef} className="w-full min-w-[3000px] text-left">
           <thead className="border-b border-border bg-slate-900/60 text-[11px] uppercase tracking-[0.08em] text-muted">
             <tr>
               <th className="w-9 px-3 py-2.5 xl:px-3.5 2xl:py-2">
@@ -762,6 +762,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
               </th>
               <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Empresa</th>
               <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Responsavel</th>
+              <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Vendedor</th>
               <th className="w-[19rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Telefone</th>
               <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Email</th>
               <th className="w-[16rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Site</th>
@@ -812,6 +813,9 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
                     value={lead.name !== lead.company ? lead.name : ""}
                     widthClass="w-[12rem] max-w-[12rem]"
                   />
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  <TruncatedCellText value={lead.owner} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
                 </td>
                 <td className="px-3 py-2.5 xl:px-3.5 2xl:py-2">
                   <div className="w-[19rem] max-w-[19rem] space-y-1.5">
