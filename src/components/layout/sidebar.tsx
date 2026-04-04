@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 type SidebarProps = {
   onNavigate?: () => void;
@@ -11,9 +12,18 @@ type SidebarProps = {
 
 export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: SidebarProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const dashboardActive = pathname === "/leads";
   const leadsActive = pathname.startsWith("/leads/outbound");
+  const inboundView = searchParams.get("view");
+  const inboundDashboardActive = pathname === "/leads/inbound" && inboundView !== "leads";
+  const inboundLeadsActive = pathname === "/leads/inbound" && inboundView === "leads";
   const outboundActive = dashboardActive || leadsActive;
+  const inboundActive = pathname.startsWith("/leads/inbound");
+
+  const [isOutboundOpen, setIsOutboundOpen] = useState(true);
+  const [isInboundOpen, setIsInboundOpen] = useState(false);
 
   const linkClass = (active: boolean) =>
     `flex items-center rounded-lg py-2 text-sm transition ${
@@ -75,65 +85,121 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
                   : "border-slate-800 bg-slate-900/50"
               }`}
             >
-              <div className="flex items-center justify-between text-slate-200">
+              <button
+                type="button"
+                onClick={() => setIsOutboundOpen((prev) => !prev)}
+                className="flex w-full items-center justify-between text-slate-200"
+              >
                 <span className="inline-flex items-center gap-2 text-base font-medium">
                   <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-4 w-4">
-                    <path d="m4.5 9 9 0M10.5 5.5 14 9l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    <path
+                      d="m4.5 9 9 0M10.5 5.5 14 9l-3.5 3.5"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
                   </svg>
                   Outbound
                 </span>
-                <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-4 w-4 text-slate-400">
+                <svg
+                  viewBox="0 0 18 18"
+                  fill="none"
+                  aria-hidden="true"
+                  className={`h-4 w-4 text-slate-400 transition-transform ${isOutboundOpen ? "rotate-0" : "-rotate-90"}`}
+                >
                   <path d="m5.5 7 3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-              </div>
+              </button>
 
-              <div className="mt-2 space-y-1">
-                <Link
-                  href="/leads"
-                  onClick={onNavigate}
-                  className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
-                    dashboardActive
-                      ? "text-emerald-300"
-                      : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
-                  }`}
-                >
-                  <span className="text-slate-500">•</span>
-                  <span>Dashboard</span>
-                </Link>
+              {isOutboundOpen ? (
+                <div className="mt-2 space-y-1">
+                  <Link
+                    href="/leads"
+                    onClick={onNavigate}
+                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
+                      dashboardActive
+                        ? "text-emerald-300"
+                        : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
+                    }`}
+                  >
+                    <span className="text-slate-500">&bull;</span>
+                    <span>Dashboard</span>
+                  </Link>
 
-                <Link
-                  href="/leads/outbound"
-                  onClick={onNavigate}
-                  className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
-                    leadsActive
-                      ? "text-emerald-300"
-                      : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
-                  }`}
-                >
-                  <span className="text-slate-500">•</span>
-                  <span>Leads</span>
-                </Link>
-              </div>
+                  <Link
+                    href="/leads/outbound"
+                    onClick={onNavigate}
+                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
+                      leadsActive
+                        ? "text-emerald-300"
+                        : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
+                    }`}
+                  >
+                    <span className="text-slate-500">&bull;</span>
+                    <span>Leads</span>
+                  </Link>
+                </div>
+              ) : null}
             </div>
 
-            <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-3 py-2">
-              <div className="flex items-center justify-between text-slate-300">
+            <div
+              className={`rounded-xl border px-3 py-2 ${
+                inboundActive
+                  ? "border-cyan-500/40 bg-gradient-to-r from-cyan-500/15 to-cyan-500/5"
+                  : "border-slate-800 bg-slate-900/50"
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setIsInboundOpen((prev) => !prev)}
+                className="flex w-full items-center justify-between text-slate-300"
+              >
                 <span className="inline-flex items-center gap-2 text-base font-medium">
                   <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-4 w-4">
                     <path d="M13.5 9h-9M7.5 5.5 4 9l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                   Inbound
                 </span>
+                <svg
+                  viewBox="0 0 18 18"
+                  fill="none"
+                  aria-hidden="true"
+                  className={`h-4 w-4 text-slate-400 transition-transform ${isInboundOpen ? "rotate-0" : "-rotate-90"}`}
+                >
+                  <path d="m5.5 7 3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
 
-                <div className="inline-flex items-center gap-2">
-                  <span className="rounded-full border border-amber-400/30 bg-amber-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200">
-                    Em breve
-                  </span>
-                  <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-4 w-4 text-slate-500">
-                    <path d="m5.5 7 3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+              {isInboundOpen ? (
+                <div className="mt-2 space-y-1">
+                  <Link
+                    href="/leads/inbound"
+                    onClick={onNavigate}
+                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
+                      inboundDashboardActive
+                        ? "text-cyan-300"
+                        : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
+                    }`}
+                  >
+                    <span className="text-slate-500">&bull;</span>
+                    <span>Dashboard</span>
+                  </Link>
+
+                  <Link
+                    href="/leads/inbound?view=leads"
+                    onClick={onNavigate}
+                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition ${
+                      inboundLeadsActive
+                        ? "text-cyan-300"
+                        : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
+                    }`}
+                  >
+                    <span className="text-slate-500">&bull;</span>
+                    <span>Leads</span>
+                  </Link>
                 </div>
-              </div>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -142,20 +208,22 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
               <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
                 <path d="M3 14.5h12M5 12V8.5M9 12V5.5M13 12V9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
-              {isPinned ? <span className="ml-3">Dashboard</span> : null}
             </Link>
 
             <Link href="/leads/outbound" onClick={onNavigate} className={linkClass(leadsActive)}>
               <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
                 <path d="M2.5 4h13M4.5 8h9M6.5 12h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
-              {isPinned ? <span className="ml-3">Leads</span> : null}
             </Link>
           </>
         )}
 
         {isPinned ? <div className="my-2 h-px bg-slate-800/80" /> : null}
-        {isPinned ? <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Relacionamento</p> : null}
+        {isPinned ? (
+          <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Relacionamento
+          </p>
+        ) : null}
 
         <Link href="/clientes" onClick={onNavigate} className={linkClass(pathname === "/clientes")}>
           <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
@@ -186,7 +254,11 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
         </Link>
 
         {isPinned ? <div className="my-2 h-px bg-slate-800/80" /> : null}
-        {isPinned ? <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Sistema</p> : null}
+        {isPinned ? (
+          <p className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Sistema
+          </p>
+        ) : null}
 
         <Link href="/assistente" onClick={onNavigate} className={linkClass(pathname === "/assistente")}>
           <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" className="h-[18px] w-[18px] shrink-0">
