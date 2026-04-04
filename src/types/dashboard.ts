@@ -21,6 +21,8 @@ export type DashboardMetrics = {
     leadDesqualificado: number;
     followUpsPendentes: number;
     conversaoLigacao: number;
+    taxaContatoDecisor: number;
+    agendamentosPorLigacoes: number;
     taxaSemInteresse: number;
     percentualAtendimento: number;
     percentualCpc: number;

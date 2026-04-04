@@ -10,6 +10,8 @@ type MetricCardKey =
   | "acionamentoBase"
   | "percentualAtendimento"
   | "conversaoLigacao"
+  | "taxaContatoDecisor"
+  | "agendamentosPorLigacoes"
   | "taxaSemInteresse"
   | "followUpsPendentes"
   | "leadDesqualificado"
@@ -158,6 +160,26 @@ const metricGroups: MetricGroup[] = [
         format: "percent",
         progress: true,
       },
+      {
+        key: "taxaContatoDecisor",
+        title: "Taxa Contato Decisor",
+        description: "Formula: (contatos com decisor / ligacoes atendidas) x 100.",
+        accentFrom: "#0EA5E9",
+        accentTo: "#0369A1",
+        icon: iconUsers(),
+        format: "percent",
+        progress: true,
+      },
+      {
+        key: "agendamentosPorLigacoes",
+        title: "Agendamentos/Ligacoes",
+        description: "Formula: (agendamentos de fechamento / ligacoes feitas) x 100.",
+        accentFrom: "#A855F7",
+        accentTo: "#7E22CE",
+        icon: iconChart(),
+        format: "percent",
+        progress: true,
+      },
     ],
   },
   {
@@ -263,6 +285,8 @@ export function DashboardCommercialView() {
       acionamentoBase: metrics.cards.acionamentoBase,
       percentualAtendimento: metrics.cards.percentualAtendimento,
       conversaoLigacao: metrics.cards.conversaoLigacao,
+      taxaContatoDecisor: metrics.cards.taxaContatoDecisor,
+      agendamentosPorLigacoes: metrics.cards.agendamentosPorLigacoes,
       taxaSemInteresse: metrics.cards.taxaSemInteresse,
       followUpsPendentes: metrics.cards.followUpsPendentes,
       leadDesqualificado: metrics.cards.leadDesqualificado,
