@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getApi4ComConfig } from "@/lib/api4com-config-store";
+import { resolveApi4ComIntegracaoForResponsavel } from "@/lib/api4com-config-store";
 import { requireAuth } from "@/lib/require-auth";
 
 type DialRequestBody = {
@@ -55,17 +55,29 @@ export async function POST(request: Request) {
 
   try {
     const body = (await request.json()) as DialRequestBody;
-    const config = await getApi4ComConfig();
+    const responsavelId = (body.responsavelId || "").trim();
+    const atendenteNome = (body.atendenteNome || "").trim();
+    const integration = await resolveApi4ComIntegracaoForResponsavel(responsavelId || null);
 
-    const token = config.token.trim();
-    const extension = config.extension.trim();
-    const gateway = config.gateway.trim();
+    if (!integration) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Nenhum ramal da API4COM foi cadastrado. Acesse Configuracoes > Integracoes > API4.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const token = String(integration.token || "").trim();
+    const extension = String(integration.ramal || "").trim();
+    const gateway = String(integration.gateway || "").trim();
 
     if (!token) {
       return NextResponse.json(
         {
           success: false,
-          message: "Token da API4COM nao configurado. Acesse Configuracoes > Integracoes.",
+          message: "Token da API4COM nao configurado. Acesse Configuracoes > Integracoes > API4.",
         },
         { status: 400 },
       );
@@ -75,7 +87,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: "Ramal da API4COM nao configurado. Acesse Configuracoes > Integracoes.",
+          message: "Ramal da API4COM nao configurado. Acesse Configuracoes > Integracoes > API4.",
         },
         { status: 400 },
       );
@@ -88,8 +100,6 @@ export async function POST(request: Request) {
     const nome = (body.nome || body.name || "").trim();
     const empresa = (body.empresa || body.company || "").trim();
     const userId = (body.userId || "").trim();
-    const responsavelId = (body.responsavelId || "").trim();
-    const atendenteNome = (body.atendenteNome || "").trim();
 
     if (!normalizedPhone || !leadId || !nome) {
       return NextResponse.json(

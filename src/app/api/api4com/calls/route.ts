@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createHash } from "crypto";
-import { getApi4ComConfig } from "@/lib/api4com-config-store";
+import { getActiveApi4ComIntegracao } from "@/lib/api4com-config-store";
 import { mapWebhookStatus, upsertCallLogs } from "@/lib/calls-store";
 import { requireAuth } from "@/lib/require-auth";
 import type { CallLog } from "@/types/crm";
@@ -198,13 +198,15 @@ export async function GET(request: Request) {
     const page = toNumberSafe(searchParams.get("page"), 1);
     const filter = (searchParams.get("filter") || "").trim();
 
-    const config = await getApi4ComConfig();
-    const token = config.token.trim();
+    const integration = await getActiveApi4ComIntegracao();
+    const token = String(integration?.token || "").trim();
 
     if (!token) {
       return NextResponse.json({
         ok: false,
-        error: "Token da API4COM nao configurado.",
+        error: integration
+          ? "Token da API4COM nao configurado."
+          : "Nenhum ramal da API4COM foi cadastrado.",
       });
     }
 

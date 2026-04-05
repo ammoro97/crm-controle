@@ -1,13 +1,46 @@
 import { NextResponse } from "next/server";
-import { getApi4ComConfig, toPublicApi4ComConfig, updateApi4ComConnectionStatus } from "@/lib/api4com-config-store";
+import { getApi4ComConfig, getApi4ComIntegracaoById, toPublicApi4ComConfig, updateApi4ComConnectionStatus } from "@/lib/api4com-config-store";
+import type { Api4ComConfig } from "@/lib/api4com-config-store";
 import { requireAuth } from "@/lib/require-auth";
 
-export async function POST() {
+type TestPayload = {
+  integrationId?: string;
+};
+
+export async function POST(request: Request) {
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
   try {
-    const config = await getApi4ComConfig();
+    const body = (await request.json().catch(() => ({}))) as TestPayload;
+    const integrationId = String(body.integrationId || "").trim();
+    let config = await getApi4ComConfig();
+
+    if (integrationId) {
+      const selected = await getApi4ComIntegracaoById(integrationId);
+      if (!selected) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Ramal nao encontrado para teste.",
+          },
+          { status: 404 },
+        );
+      }
+      const selectedConfig: Api4ComConfig = {
+        integrationId: selected.id,
+        nome: selected.nome,
+        token: selected.token || "",
+        extension: selected.ramal,
+        gateway: selected.gateway || "",
+        status: selected.status,
+        isConnected: selected.status === "ativo",
+        responsavelId: selected.responsavelId,
+        createdAt: selected.createdAt,
+        updatedAt: selected.updatedAt,
+      };
+      config = selectedConfig;
+    }
 
     if (!config.token.trim()) {
       return NextResponse.json(
@@ -42,7 +75,7 @@ export async function POST() {
       );
     }
 
-    const updated = await updateApi4ComConnectionStatus(true);
+    const updated = await updateApi4ComConnectionStatus(true, config.integrationId || undefined);
 
     return NextResponse.json({
       success: true,
