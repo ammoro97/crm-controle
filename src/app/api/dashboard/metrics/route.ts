@@ -7,11 +7,10 @@ import { readDataFile } from "@/lib/storage-paths";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { requireAuth } from "@/lib/require-auth";
 import type { DashboardMetrics, PresetPeriodo } from "@/types/dashboard";
-import type { CallLog, Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
+import type { CallLog, Lead, Meeting } from "@/types/crm";
 import type { PostCallWrapup } from "@/lib/post-call-flow";
 
 const MEETINGS_FILE = "crm.agenda.meetings.v1.json";
-const LEAD_FINALIZATIONS_FILE = "crm.leads.finalizations.v1.json";
 const WRAPUPS_FILE = "crm.calls.wrapups.v1.json";
 const CRM_TIMEZONE_OFFSET = "-03:00";
 const DEFAULT_PERIOD_DAYS = 7;
@@ -481,10 +480,6 @@ function getLeadReferenceDate(lead: Lead): Date | null {
   return parseDateTime(lead.entryDate || lead.finalizedAt || lead.convertedToCustomerAt || null);
 }
 
-function getFinalizationReferenceDate(record: LeadFinalizationRecord): Date | null {
-  return parseDateTime(record.finalizedAt || null);
-}
-
 function normalizeIdentifier(value?: string | null): string {
   return normalizeText(value);
 }
@@ -498,6 +493,22 @@ function matchesVendedorByName(value?: string | null, vendedor?: VendedorFilter)
   const vendedorName = normalizeIdentifier(vendedor.nome);
   if (!vendedorName) return true;
   return normalizeIdentifier(value) === vendedorName;
+}
+
+function matchesLeadOwnerToVendedor(owner?: string | null, vendedor?: VendedorFilter): boolean {
+  if (!vendedor || !hasVendedorFilter(vendedor)) return true;
+
+  const ownerRaw = String(owner || "").trim();
+  if (!ownerRaw) return false;
+
+  const vendedorId = normalizeLeadId(vendedor.id);
+  if (vendedorId && normalizeLeadId(ownerRaw) === vendedorId) {
+    return true;
+  }
+
+  const vendedorName = normalizeIdentifier(vendedor.nome);
+  if (!vendedorName) return false;
+  return normalizeIdentifier(ownerRaw) === vendedorName;
 }
 
 function matchesVendedorByIdOrName(
@@ -529,33 +540,17 @@ function isOutboundMeeting(meeting: Meeting, outboundLeads: Lead[], outboundLead
   return outboundLeads.some((lead) => isAgendaEventLinkedToLead(meeting, lead));
 }
 
-function isOutboundFinalization(record: LeadFinalizationRecord): boolean {
-  return record.channel === "outbound" && record.finalizationSource === "lead_profile";
-}
-
 function countLeadDesqualificado(
   leads: Lead[],
-  finalizations: LeadFinalizationRecord[],
   filters: MetricsRequestFilters,
   scopedLeadIds: Set<string>,
-  vendedorFilter: VendedorFilter,
 ): number {
-  const lostLeadsCount = leads.filter((lead) => {
+  return leads.filter((lead) => {
     if (lead.channel !== "outbound" || lead.status !== "Perdido") return false;
     const leadId = normalizeLeadId(lead.id);
     if (!leadId || !scopedLeadIds.has(leadId)) return false;
     return isWithinRange(getLeadReferenceDate(lead), filters.rangeStart, filters.rangeEnd);
   }).length;
-
-  const finalizedAsDeleted = finalizations.filter((record) => {
-    if (!isOutboundFinalization(record) || record.reason !== "apagar") return false;
-    const leadId = normalizeLeadId(record.leadId);
-    if (!leadId || !scopedLeadIds.has(leadId)) return false;
-    if (!matchesVendedorByName(record.finalizedBy, vendedorFilter)) return false;
-    return isWithinRange(getFinalizationReferenceDate(record), filters.rangeStart, filters.rangeEnd);
-  }).length;
-
-  return lostLeadsCount + finalizedAsDeleted;
 }
 
 function isClosingCallForCpc(meeting: Meeting): boolean {
@@ -583,11 +578,10 @@ function getMeetingSaleValueCents(meeting: Meeting): number {
 }
 
 async function readServerSnapshot() {
-  const [leads, meetings, customers, finalizations, wrapups] = await Promise.all([
+  const [leads, meetings, customers, wrapups] = await Promise.all([
     readLeadsCollection(),
     readDataFile<Meeting[]>(MEETINGS_FILE, []),
     readCustomersCollection(),
-    readDataFile<LeadFinalizationRecord[]>(LEAD_FINALIZATIONS_FILE, []),
     readDataFile<PostCallWrapup[]>(WRAPUPS_FILE, []),
   ]);
 
@@ -595,7 +589,6 @@ async function readServerSnapshot() {
     leads: asArray<Lead>(leads),
     meetings: asArray<Meeting>(meetings),
     customers: asArray<Lead>(customers),
-    finalizations: asArray<LeadFinalizationRecord>(finalizations),
     wrapups: asArray<PostCallWrapup>(wrapups),
   };
 }
@@ -604,13 +597,12 @@ function buildPayload(params: {
   leads: Lead[];
   customers: Lead[];
   meetings: Meeting[];
-  finalizations: LeadFinalizationRecord[];
   wrapups: PostCallWrapup[];
   referenceDate: Date;
   callLogs: CallLog[];
   filters: MetricsRequestFilters;
 }): DashboardMetrics {
-  const { leads, customers, meetings, finalizations, wrapups, referenceDate, callLogs, filters } = params;
+  const { leads, customers, meetings, wrapups, referenceDate, callLogs, filters } = params;
   const vendedorFilter: VendedorFilter = {
     id: filters.vendedorId,
     nome: filters.vendedorNome,
@@ -621,10 +613,10 @@ function buildPayload(params: {
   // Filtering by entry date would cause acionamentoBase to use only "new this period" leads as
   // denominator, silently excluding the vendor's older pipeline from all funnel metrics.
   const outboundLeads = leads.filter(
-    (lead) => lead.channel === "outbound" && matchesVendedorByName(lead.owner, vendedorFilter),
+    (lead) => lead.channel === "outbound" && matchesLeadOwnerToVendedor(lead.owner, vendedorFilter),
   );
   const outboundCustomers = customers.filter(
-    (customer) => customer.channel === "outbound" && matchesVendedorByName(customer.owner, vendedorFilter),
+    (customer) => customer.channel === "outbound" && matchesLeadOwnerToVendedor(customer.owner, vendedorFilter),
   );
   const outboundOperationalLeads = [...outboundLeads, ...outboundCustomers];
   const outboundOperationalLeadIds = new Set(
@@ -691,9 +683,6 @@ function buildPayload(params: {
       ),
     );
   });
-  const finalizationsInPeriod = finalizations.filter((record) =>
-    isWithinRange(getFinalizationReferenceDate(record), filters.rangeStart, filters.rangeEnd),
-  );
   // Active lead IDs (excludes converted customers). Used to restrict acionamentoBase numerator:
   // calls linked to a customer record must not count as "lead acionado" since customers are
   // already closed deals and don't appear in the leads table, creating a phantom activation %.
@@ -763,10 +752,8 @@ function buildPayload(params: {
 
   const leadDesqualificado = countLeadDesqualificado(
     leads,
-    finalizationsInPeriod,
     filters,
     scopedLeadIds,
-    vendedorFilter,
   );
 
   const closingCallsForCpc = meetingsInScope.filter((meeting) => isClosingCallForCpc(meeting));
