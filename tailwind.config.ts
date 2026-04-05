@@ -14,6 +14,13 @@ const config: Config = {
         muted: "#8f9bb8",
         border: "#263047",
         accent: "#32d2a2",
+        funnel: {
+          ligacoes:   "#3B82F6", // blue-500   — topo, neutro/informativo
+          atendidas:  "#8B5CF6", // violet-500 — qualificação inicial
+          decisor:    "#22C55E", // green-500  — contato qualificado
+          fechamento: "#F97316", // orange-500 — oportunidade aquecida
+          compras:    "#16A34A", // green-600  — conversão / sucesso
+        },
       },
       boxShadow: {
         panel: "0 1px 3px rgba(0,0,0,0.3), 0 8px 24px rgba(2,6,23,0.32)",

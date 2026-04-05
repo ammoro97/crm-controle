@@ -2,7 +2,9 @@
 
 import type { ReactNode } from "react";
 
-type FunnelStageVariant = "blue" | "purple" | "green" | "orange";
+// Variants map 1:1 to funnel stage semantics.
+// Values mirror the `funnel.*` tokens in tailwind.config.ts — keep in sync.
+type FunnelStageVariant = "blue" | "violet" | "green" | "orange" | "emerald";
 
 type FunnelStageProps = {
   label: string;
@@ -15,25 +17,35 @@ type FunnelStageProps = {
 };
 
 const VARIANT_STYLES: Record<FunnelStageVariant, { from: string; to: string; glow: string }> = {
+  // Ligações — topo, informativo
   blue: {
     from: "#3B82F6",
-    to: "#1D4ED8",
-    glow: "rgba(59,130,246,0.28)",
+    to: "#2563EB",
+    glow: "rgba(59,130,246,0.30)",
   },
-  purple: {
+  // Atendidas — qualificação inicial
+  violet: {
     from: "#8B5CF6",
-    to: "#6D28D9",
-    glow: "rgba(139,92,246,0.28)",
+    to: "#7C3AED",
+    glow: "rgba(139,92,246,0.30)",
   },
+  // Decisor — contato qualificado
   green: {
     from: "#22C55E",
-    to: "#15803D",
-    glow: "rgba(34,197,94,0.25)",
+    to: "#16A34A",
+    glow: "rgba(34,197,94,0.28)",
   },
+  // Fechamento — oportunidade aquecida
   orange: {
     from: "#F97316",
-    to: "#DC2626",
-    glow: "rgba(249,115,22,0.25)",
+    to: "#EA580C",
+    glow: "rgba(249,115,22,0.28)",
+  },
+  // Compras — conversão / sucesso (verde mais forte)
+  emerald: {
+    from: "#16A34A",
+    to: "#15803D",
+    glow: "rgba(22,163,74,0.32)",
   },
 };
 

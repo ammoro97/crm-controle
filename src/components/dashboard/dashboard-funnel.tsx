@@ -85,7 +85,7 @@ export function DashboardFunnel({
     () => [
       {
         id: "abs_ligacoes",
-        label: "Ligacoes",
+        label: "Ligações",
         value: formatMetricNumber(ligacoes),
         widthPercent: 100,
         variant: "blue",
@@ -96,7 +96,7 @@ export function DashboardFunnel({
         label: "Atendidas",
         value: formatMetricNumber(atendidas),
         widthPercent: 80,
-        variant: "purple",
+        variant: "violet",
         icon: iconForStep("atendidas"),
       },
       {
@@ -120,7 +120,7 @@ export function DashboardFunnel({
         label: "Compras",
         value: formatMetricNumber(compras),
         widthPercent: 40,
-        variant: "green",
+        variant: "emerald",
         icon: iconForStep("compras"),
       },
     ],
@@ -134,7 +134,7 @@ export function DashboardFunnel({
         label: "Atendidas",
         value: formatMetricPercent(atendidasPercentual),
         widthPercent: 100,
-        variant: "purple",
+        variant: "violet",
         icon: iconForStep("atendidas"),
       },
       {
@@ -158,7 +158,7 @@ export function DashboardFunnel({
         label: "Compras",
         value: formatMetricPercent(comprasPercentual),
         widthPercent: 56,
-        variant: "green",
+        variant: "emerald",
         icon: iconForStep("compras"),
       },
     ],
@@ -167,18 +167,18 @@ export function DashboardFunnel({
 
   return (
     <section className="relative overflow-hidden rounded-3xl border border-slate-800/80 bg-[#0F172A]/95 p-5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03),0_28px_68px_rgba(2,6,23,0.45)] md:p-6">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_0%,rgba(59,130,246,0.24),transparent_38%),radial-gradient(circle_at_90%_100%,rgba(244,63,94,0.18),transparent_44%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_0%,rgba(59,130,246,0.22),transparent_38%),radial-gradient(circle_at_90%_100%,rgba(22,163,74,0.16),transparent_44%)]" />
 
       <div className="relative space-y-4">
         <FunnelChart
           title="Funil Principal (Valores Absolutos)"
-          subtitle="Fonte real da tela de Ligacoes: Ligacoes -> Atendidas -> Decisor -> Fechamento (agenda) -> Compras."
+          subtitle="Fonte real da tela de Ligações: Ligações → Atendidas → Decisor → Fechamento (agenda) → Compras."
           steps={absoluteSteps}
         />
 
         <FunnelChart
-          title="Funil de Conversao (%)"
-          subtitle="Atendidas = atendidas/ligacoes, Decisor = decisor/atendidas, Fechamento = agendamentos de fechamento/decisor, Compras = compras/fechamento."
+          title="Funil de Conversão (%)"
+          subtitle="Atendidas = atendidas/ligações, Decisor = decisor/atendidas, Fechamento = agendamentos de fechamento/decisor, Compras = compras/fechamento."
           steps={percentSteps}
         />
       </div>
