@@ -12,7 +12,6 @@ type DialRequestBody = {
   name?: string;
   empresa?: string;
   company?: string;
-  responsavelId?: string;
   atendenteNome?: string;
 };
 
@@ -32,12 +31,12 @@ export async function POST(request: Request) {
       sessionId: normalizeText(body.sessionId) || undefined,
       nome: normalizeText(body.nome || body.name) || undefined,
       empresa: normalizeText(body.empresa || body.company) || undefined,
-      responsavelId: normalizeText(body.responsavelId) || undefined,
       atendenteNome: normalizeText(body.atendenteNome) || undefined,
     };
 
     const result = await startApi4CallByAuthenticatedUser({
-      userId: auth.user.id,
+      authUserId: auth.user.id,
+      authEmail: auth.user.email,
       input,
     });
 

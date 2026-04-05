@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
 import { upsertCallLog } from "@/lib/calls-store";
-import { getApi4ComIntegracaoByRamal } from "@/lib/api4com-config-store";
-import { assertUserHasActiveExtension } from "@/lib/ramais/get-user-extension";
+import { resolveCallContext, ResolveCallContextError } from "@/lib/telefonia/resolve-call-context";
 import type { Api4StartCallPayload, ResolvedCallContext, StartCallInput } from "@/types/ligacoes";
 
 const API4_DIALER_ENDPOINT = "https://api.api4com.com/api/v1/dialer";
@@ -95,11 +94,12 @@ function buildSessionId(inputSessionId?: string): string | null {
 }
 
 export async function startApi4CallByAuthenticatedUser(params: {
-  userId: string;
+  authUserId: string;
+  authEmail?: string | null;
   input: StartCallInput;
 }): Promise<StartCallResult> {
-  const userId = normalizeText(params.userId);
-  if (!userId) {
+  const authUserId = normalizeText(params.authUserId);
+  if (!authUserId) {
     throw new StartCallError(401, "CALL_USER_NOT_AUTHENTICATED", "Usuario autenticado nao encontrado.");
   }
 
@@ -108,8 +108,7 @@ export async function startApi4CallByAuthenticatedUser(params: {
   const numero = normalizePhone(numeroRaw);
   const nome = normalizeText(params.input.nome);
   const empresa = normalizeText(params.input.empresa);
-  const responsavelId = normalizeText(params.input.responsavelId) || null;
-  const atendenteNome = normalizeText(params.input.atendenteNome) || null;
+  const atendenteNomeInput = normalizeText(params.input.atendenteNome) || null;
   const sessionId = buildSessionId(params.input.sessionId);
 
   if (!leadId) {
@@ -120,59 +119,34 @@ export async function startApi4CallByAuthenticatedUser(params: {
     throw new StartCallError(400, "CALL_NUMBER_REQUIRED", "Numero de telefone invalido para discagem.");
   }
 
-  const userExtension = await assertUserHasActiveExtension(userId).catch((error) => {
-    const message = error instanceof Error ? error.message : "Falha ao carregar ramal do usuario.";
-    if (message === "USER_EXTENSIONS_TABLE_MISSING") {
-      throw new StartCallError(
-        500,
-        "CALL_USER_EXTENSION_TABLE_MISSING",
-        "Tabela de ramais de usuario nao encontrada no banco. Execute as migracoes.",
-      );
+  const context = await resolveCallContext({
+    authUserId,
+    authEmail: params.authEmail,
+  }).catch((error) => {
+    if (error instanceof ResolveCallContextError) {
+      throw new StartCallError(error.status, error.code, error.message);
     }
-    if (message === "USER_EXTENSION_INACTIVE") {
-      throw new StartCallError(
-        409,
-        "CALL_USER_EXTENSION_INACTIVE",
-        "Seu usuario possui ramal vinculado, mas ele esta inativo. Fale com o administrador.",
-      );
-    }
-    if (message === "USER_EXTENSION_INVALID") {
-      throw new StartCallError(
-        409,
-        "CALL_USER_EXTENSION_INVALID",
-        "O ramal vinculado ao seu usuario esta invalido. Fale com o administrador.",
-      );
-    }
-    if (message === "USER_EXTENSION_NOT_CONFIGURED") {
-      throw new StartCallError(
-        409,
-        "CALL_USER_EXTENSION_NOT_CONFIGURED",
-        "Seu usuario nao possui um ramal vinculado. Fale com o administrador.",
-      );
-    }
-    throw new StartCallError(500, "CALL_USER_EXTENSION_LOOKUP_FAILED", "Nao foi possivel carregar o ramal do usuario.");
+    throw new StartCallError(
+      500,
+      "CALL_CONTEXT_RESOLVE_FAILED",
+      "Nao foi possivel resolver contexto de ligacao para o usuario autenticado.",
+    );
   });
 
-  const ramal = normalizeText(userExtension.ramal);
-  if (!ramal) {
+  const ramal = normalizeText(context.ramal);
+  const token = normalizeText(context.token);
+  const gateway = normalizeText(context.gateway);
+  const responsavelId = normalizeText(context.responsavelId);
+  const atendenteNome = atendenteNomeInput || normalizeText(context.responsavelNome) || null;
+
+  if (!responsavelId) {
     throw new StartCallError(
       409,
-      "CALL_USER_EXTENSION_INVALID",
-      "O ramal vinculado ao seu usuario esta invalido. Fale com o administrador.",
+      "CALL_RESPONSAVEL_NOT_RESOLVED",
+      "Nao foi possivel resolver o Responsavel vinculado ao usuario autenticado.",
     );
   }
 
-  const integration = await getApi4ComIntegracaoByRamal(ramal);
-  if (!integration) {
-    throw new StartCallError(
-      409,
-      "CALL_API4_INTEGRATION_NOT_FOUND",
-      `Nao existe configuracao API4 cadastrada para o ramal ${ramal}.`,
-    );
-  }
-
-  const token = normalizeText(integration.token);
-  const gateway = normalizeText(integration.gateway);
   if (!token) {
     throw new StartCallError(
       409,
@@ -195,7 +169,7 @@ export async function startApi4CallByAuthenticatedUser(params: {
       nome,
       empresa,
       telefone: numero,
-      userId,
+      authUserId,
       ramal,
       responsavelId,
       atendenteNome,
@@ -207,11 +181,13 @@ export async function startApi4CallByAuthenticatedUser(params: {
     ramal,
   };
   console.log("[CALL_START] request", {
-    user_id: userId,
+    auth_user_id: authUserId,
+    responsavel_id: responsavelId,
     ramal_resolvido: ramal,
     numero,
     lead_id: leadId,
     api_payload: apiPayloadLog,
+    source: "auth_user -> responsavel -> ramal",
   });
 
   const response = await fetch(API4_DIALER_ENDPOINT, {
@@ -235,7 +211,8 @@ export async function startApi4CallByAuthenticatedUser(params: {
   if (response.status !== 200) {
     const apiMessage = resolveApi4ErrorMessage(responseBody);
     console.log("[CALL_START] api4_error", {
-      user_id: userId,
+      auth_user_id: authUserId,
+      responsavel_id: responsavelId,
       ramal_resolvido: ramal,
       numero,
       status: response.status,
@@ -252,7 +229,7 @@ export async function startApi4CallByAuthenticatedUser(params: {
     externalCallId: externalCallId || null,
     sessionId,
     leadId,
-    userId,
+    userId: authUserId,
     responsavelId,
     atendenteNome,
     nome,
@@ -266,7 +243,8 @@ export async function startApi4CallByAuthenticatedUser(params: {
   });
 
   console.log("[CALL_START] success", {
-    user_id: userId,
+    auth_user_id: authUserId,
+    responsavel_id: responsavelId,
     ramal_resolvido: ramal,
     numero,
     external_call_id: externalCallId,
@@ -278,7 +256,7 @@ export async function startApi4CallByAuthenticatedUser(params: {
     externalCallId,
     data: responseBody,
     context: {
-      userId,
+      authUserId,
       ramal,
       numero,
       leadId,
@@ -286,6 +264,7 @@ export async function startApi4CallByAuthenticatedUser(params: {
       nome,
       empresa,
       responsavelId,
+      responsavelNome: context.responsavelNome,
       atendenteNome,
     },
   };

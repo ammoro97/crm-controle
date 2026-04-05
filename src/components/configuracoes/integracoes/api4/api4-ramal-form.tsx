@@ -13,14 +13,15 @@ export type Api4RamalFormValues = {
   gateway: string;
   token: string;
   status: StatusIntegracao;
-  userId: string;
+  responsavelId: string;
   setAsPrimary: boolean;
 };
 
-export type Api4RamalUserOption = {
+export type Api4RamalResponsavelOption = {
   id: string;
-  email: string;
   nome: string;
+  emailLogin: string | null;
+  authLinked: boolean;
 };
 
 export type Api4TemplateView = {
@@ -37,7 +38,7 @@ type Api4RamalFormProps = {
   saving: boolean;
   initialValues: Api4RamalFormValues;
   template: Api4TemplateView | null;
-  users: Api4RamalUserOption[];
+  responsaveis: Api4RamalResponsavelOption[];
   onClose: () => void;
   onSubmit: (values: Api4RamalFormValues) => void;
 };
@@ -52,7 +53,7 @@ export function Api4RamalForm({
   saving,
   initialValues,
   template,
-  users,
+  responsaveis,
   onClose,
   onSubmit,
 }: Api4RamalFormProps) {
@@ -112,7 +113,7 @@ export function Api4RamalForm({
       ramal,
       gateway,
       token,
-      userId: normalizeText(values.userId),
+      responsavelId: normalizeText(values.responsavelId),
     });
   };
 
@@ -193,17 +194,19 @@ export function Api4RamalForm({
         </label>
 
         <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-          Usuario vinculado ao ramal
+          Responsavel vinculado ao ramal
           <select
             className="field mt-1"
-            value={values.userId}
-            onChange={(event) => setValues((prev) => ({ ...prev, userId: event.target.value }))}
+            value={values.responsavelId}
+            onChange={(event) => setValues((prev) => ({ ...prev, responsavelId: event.target.value }))}
             disabled={saving}
           >
             <option value="">Sem vinculo</option>
-            {users.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.nome} - {user.email}
+            {responsaveis.map((responsavel) => (
+              <option key={responsavel.id} value={responsavel.id}>
+                {responsavel.nome}
+                {responsavel.emailLogin ? ` - ${responsavel.emailLogin}` : ""}
+                {!responsavel.authLinked ? " (sem login vinculado)" : ""}
               </option>
             ))}
           </select>

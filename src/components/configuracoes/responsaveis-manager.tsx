@@ -232,6 +232,9 @@ export function ResponsaveisManager() {
                         <div>
                           <span className="text-sm text-slate-100">{record.nome}</span>
                           {record.email ? <p className="text-xs text-slate-400">{record.email}</p> : null}
+                          <p className={`text-[11px] ${record.authUserId ? "text-emerald-300" : "text-amber-300"}`}>
+                            {record.authUserId ? "Login autenticado vinculado" : "Sem login autenticado vinculado"}
+                          </p>
                         </div>
                         <span className="rounded-md border border-slate-600 bg-slate-800/70 px-2 py-0.5 text-[11px] font-semibold text-slate-200">
                           {record.tipo === "gestor" ? "Gestor" : "Vendedor"}

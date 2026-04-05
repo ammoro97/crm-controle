@@ -13,6 +13,7 @@ export type ResponsavelRecord = {
   nome: string;
   tipo: ResponsavelTipo;
   email?: string;
+  authUserId?: string;
 };
 
 let responsaveisCache: ResponsavelRecord[] = [];
@@ -35,17 +36,25 @@ function normalizeEmail(value?: string): string {
   return String(value || "").trim().toLowerCase();
 }
 
+function isMissingAuthUserIdColumn(error: { code?: string; message?: string } | null | undefined): boolean {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42703" || message.includes("auth_user_id");
+}
+
 function toRecord(raw: Record<string, unknown>): ResponsavelRecord | null {
   const id = String(raw.id || "").trim();
   const nome = normalizeNome(String(raw.nome || ""));
   if (!id || !nome) return null;
   const tipo = normalizeTipo(String(raw.tipo || ""));
   const email = normalizeEmail(String(raw.email || ""));
+  const authUserId = String(raw.auth_user_id || "").trim();
   return {
     id,
     nome,
     tipo,
     email: email || undefined,
+    authUserId: authUserId || undefined,
   };
 }
 
@@ -68,6 +77,7 @@ function uniqueResponsaveis(records: ResponsavelRecord[]): ResponsavelRecord[] {
       nome,
       tipo: normalizeTipo(item.tipo),
       email: safeEmail,
+      authUserId: String(item.authUserId || "").trim() || undefined,
     });
   }
 
@@ -83,13 +93,26 @@ function publishResponsaveis(records: ResponsavelRecord[]) {
 }
 
 async function fetchResponsaveisFromSupabase(): Promise<ResponsavelRecord[]> {
-  const { data, error } = await supabase
+  let data: unknown[] | null = null;
+
+  const withAuth = await supabase
     .from(RESPONSAVEIS_TABLE)
-    .select("id, nome, tipo, email")
+    .select("id, nome, tipo, email, auth_user_id")
     .order("nome", { ascending: true });
 
-  if (error) {
-    throw new Error(error.message || "Nao foi possivel carregar responsaveis.");
+  if (withAuth.error && isMissingAuthUserIdColumn(withAuth.error)) {
+    const legacy = await supabase
+      .from(RESPONSAVEIS_TABLE)
+      .select("id, nome, tipo, email")
+      .order("nome", { ascending: true });
+    if (legacy.error) {
+      throw new Error(legacy.error.message || "Nao foi possivel carregar responsaveis.");
+    }
+    data = Array.isArray(legacy.data) ? (legacy.data as unknown[]) : [];
+  } else if (withAuth.error) {
+    throw new Error(withAuth.error.message || "Nao foi possivel carregar responsaveis.");
+  } else {
+    data = Array.isArray(withAuth.data) ? (withAuth.data as unknown[]) : [];
   }
 
   const parsed = Array.isArray(data)
@@ -141,14 +164,24 @@ export async function addResponsavel(
   const tipo = typeof input === "string" ? "vendedor" : normalizeTipo(input.tipo);
   const email = typeof input === "string" ? "" : normalizeEmail(input.email);
 
-  const { error } = await supabase.from(RESPONSAVEIS_TABLE).insert({
-    nome,
-    tipo,
-    email: email || null,
-  });
+  const { data, error } = await supabase
+    .from(RESPONSAVEIS_TABLE)
+    .insert({
+      nome,
+      tipo,
+      email: email || null,
+    })
+    .select("id")
+    .limit(1)
+    .maybeSingle();
 
   if (error) {
     throw new Error(error.message || "Nao foi possivel adicionar responsavel.");
+  }
+
+  const insertedId = String((data as Record<string, unknown> | null)?.id || "").trim();
+  if (insertedId) {
+    await syncResponsavelAuthLink(insertedId);
   }
 
   await reloadResponsaveisGlobal();
@@ -171,6 +204,7 @@ export async function updateResponsavel(
     throw new Error(error.message || "Nao foi possivel atualizar responsavel.");
   }
 
+  await syncResponsavelAuthLink(id);
   await reloadResponsaveisGlobal();
 }
 
@@ -238,12 +272,28 @@ export async function getResponsavelByEmail(email?: string | null): Promise<Resp
   const normalized = normalizeEmail(email || "");
   if (!normalized) return null;
 
-  const { data, error } = await supabase
+  const withAuth = await supabase
     .from(RESPONSAVEIS_TABLE)
-    .select("id, nome, tipo, email")
+    .select("id, nome, tipo, email, auth_user_id")
     .eq("email", normalized)
     .limit(1)
     .maybeSingle();
+
+  let data: unknown = withAuth.data as unknown;
+  let error: { code?: string; message?: string } | null = withAuth.error
+    ? { code: withAuth.error.code, message: withAuth.error.message }
+    : null;
+
+  if (error && isMissingAuthUserIdColumn(error)) {
+    const legacy = await supabase
+      .from(RESPONSAVEIS_TABLE)
+      .select("id, nome, tipo, email")
+      .eq("email", normalized)
+      .limit(1)
+      .maybeSingle();
+    data = legacy.data as unknown;
+    error = legacy.error ? { code: legacy.error.code, message: legacy.error.message } : null;
+  }
 
   if (!error && data) {
     const parsed = toRecord(data as Record<string, unknown>);
@@ -260,3 +310,16 @@ export function getResponsavelByEmailSnapshot(email?: string | null): Responsave
   return responsaveisCache.find((item) => normalizeEmail(item.email) === normalized) || null;
 }
 
+async function syncResponsavelAuthLink(responsavelId: string) {
+  const targetId = String(responsavelId || "").trim();
+  if (!targetId) return;
+  try {
+    await fetch("/api/responsaveis/sync-auth-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ responsavelId: targetId }),
+    });
+  } catch {
+    // Sync de auth_user_id e best-effort para nao bloquear fluxo principal.
+  }
+}

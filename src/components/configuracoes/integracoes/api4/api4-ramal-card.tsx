@@ -9,9 +9,10 @@ export type Api4RamalView = {
   hasToken: boolean;
   status: StatusIntegracao;
   isConnected: boolean;
-  userId: string | null;
-  userEmail: string | null;
-  userNome: string | null;
+  responsavelId: string | null;
+  responsavelEmail: string | null;
+  responsavelNome: string | null;
+  responsavelAuthLinked?: boolean;
   createdAt: string | null;
   updatedAt: string | null;
   isPrimary: boolean;
@@ -119,11 +120,14 @@ export function Api4RamalCard({ item, testingId, onEdit, onTest }: Api4RamalCard
         </div>
 
         <div className="md:col-span-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Usuario vinculado</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Responsavel vinculado</p>
           <p className="mt-1 rounded-lg border border-border bg-slate-950/40 px-3 py-2 text-sm text-slate-200">
-            {item.userNome || item.userEmail || "-"}
-            {item.userNome && item.userEmail ? (
-              <span className="ml-1 text-xs text-slate-400">({item.userEmail})</span>
+            {item.responsavelNome || item.responsavelEmail || "-"}
+            {item.responsavelNome && item.responsavelEmail ? (
+              <span className="ml-1 text-xs text-slate-400">({item.responsavelEmail})</span>
+            ) : null}
+            {item.responsavelId && item.responsavelAuthLinked === false ? (
+              <span className="ml-2 text-xs text-amber-300">sem login vinculado</span>
             ) : null}
           </p>
         </div>

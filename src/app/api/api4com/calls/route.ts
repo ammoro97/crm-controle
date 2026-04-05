@@ -138,7 +138,7 @@ function mapApiItemToCallInput(item: Api4ComCallItem, index: number): Partial<Ca
     externalCallId: callId || metadataCallId || null,
     sessionId: toStringSafe(metadata.sessionId) || null,
     leadId: toStringSafe(metadata.leadId) || null,
-    userId: toStringSafe(metadata.userId) || null,
+    userId: toStringSafe(metadata.authUserId || metadata.userId) || null,
     responsavelId: toStringSafe(metadata.responsavelId) || null,
     atendenteNome: toStringSafe(metadata.atendenteNome) || null,
     nome: toStringSafe(metadata.nome || item.first_name || item.nome),

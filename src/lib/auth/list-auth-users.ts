@@ -71,3 +71,10 @@ export async function listAuthUsers(): Promise<AuthUserOption[]> {
   users.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
   return users;
 }
+
+export async function findAuthUserByEmail(email: string): Promise<AuthUserOption | null> {
+  const normalizedEmail = normalizeText(email).toLowerCase();
+  if (!normalizedEmail) return null;
+  const users = await listAuthUsers();
+  return users.find((user) => normalizeText(user.email).toLowerCase() === normalizedEmail) || null;
+}

@@ -4,19 +4,19 @@ export type StartCallInput = {
   sessionId?: string;
   nome?: string;
   empresa?: string;
-  responsavelId?: string;
   atendenteNome?: string;
 };
 
 export type ResolvedCallContext = {
-  userId: string;
+  authUserId: string;
   ramal: string;
   numero: string;
   leadId: string;
   sessionId: string | null;
   nome: string;
   empresa: string;
-  responsavelId: string | null;
+  responsavelId: string;
+  responsavelNome: string;
   atendenteNome: string | null;
 };
 

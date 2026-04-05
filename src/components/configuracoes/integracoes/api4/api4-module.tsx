@@ -5,7 +5,7 @@ import { Api4RamaisList } from "./api4-ramais-list";
 import {
   Api4RamalForm,
   type Api4RamalFormValues,
-  type Api4RamalUserOption,
+  type Api4RamalResponsavelOption,
   type Api4TemplateView,
 } from "./api4-ramal-form";
 import type { Api4RamalView } from "./api4-ramal-card";
@@ -16,7 +16,7 @@ type Api4RamaisResponse = {
   error?: string;
   items?: Api4RamalView[];
   template?: Api4TemplateView;
-  users?: Api4RamalUserOption[];
+  responsaveis?: Api4RamalResponsavelOption[];
 };
 
 const EMPTY_FORM_VALUES: Api4RamalFormValues = {
@@ -25,7 +25,7 @@ const EMPTY_FORM_VALUES: Api4RamalFormValues = {
   gateway: "",
   token: "",
   status: "inativo",
-  userId: "",
+  responsavelId: "",
   setAsPrimary: false,
 };
 
@@ -36,7 +36,7 @@ function normalizeText(value: unknown): string {
 export function Api4Module() {
   const [items, setItems] = useState<Api4RamalView[]>([]);
   const [template, setTemplate] = useState<Api4TemplateView | null>(null);
-  const [users, setUsers] = useState<Api4RamalUserOption[]>([]);
+  const [responsaveis, setResponsaveis] = useState<Api4RamalResponsavelOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -64,7 +64,7 @@ export function Api4Module() {
       }
       setItems(Array.isArray(data.items) ? data.items : []);
       setTemplate(data.template || null);
-      setUsers(Array.isArray(data.users) ? data.users : []);
+      setResponsaveis(Array.isArray(data.responsaveis) ? data.responsaveis : []);
     } catch {
       setError("Nao foi possivel carregar ramais da API4.");
     } finally {
@@ -99,7 +99,7 @@ export function Api4Module() {
       gateway: item.gateway,
       token: "",
       status: item.status,
-      userId: item.userId || "",
+      responsavelId: item.responsavelId || "",
       setAsPrimary: item.isPrimary,
     });
     setFormOpen(true);
@@ -126,7 +126,7 @@ export function Api4Module() {
           gateway: values.gateway,
           token: values.token,
           status: values.status,
-          userId: values.userId || null,
+          responsavelId: values.responsavelId || null,
           setAsPrimary: values.setAsPrimary,
           baseIntegrationId: template?.baseIntegrationId || null,
         }),
@@ -139,7 +139,7 @@ export function Api4Module() {
 
       setItems(Array.isArray(data.items) ? data.items : []);
       setTemplate(data.template || null);
-      setUsers(Array.isArray(data.users) ? data.users : []);
+      setResponsaveis(Array.isArray(data.responsaveis) ? data.responsaveis : []);
       setMessage(data.message || "Ramal salvo com sucesso.");
       setFormOpen(false);
     } catch {
@@ -212,7 +212,7 @@ export function Api4Module() {
         saving={saving}
         initialValues={formValues}
         template={template}
-        users={users}
+        responsaveis={responsaveis}
         onClose={() => setFormOpen(false)}
         onSubmit={(nextValues) => void handleSubmit(nextValues)}
       />

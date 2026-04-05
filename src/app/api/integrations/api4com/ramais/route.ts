@@ -3,17 +3,11 @@ import {
   createApi4ComIntegracao,
   getApi4ComIntegracaoById,
   getApi4ComIntegracaoTemplate,
+  listApi4ComIntegracoes,
   listPublicApi4ComIntegracoes,
   updateApi4ComIntegracao,
 } from "@/lib/api4com-config-store";
-import { listAuthUsers } from "@/lib/auth/list-auth-users";
-import {
-  assignUserExtensionLink,
-  clearUserExtensionLinkByRamal,
-  getActiveUserExtensionLinkByRamal,
-  listActiveUserExtensionLinks,
-  UserExtensionLinkError,
-} from "@/lib/ramais/user-extension-links";
+import { listResponsaveisForVinculo, ResponsavelByAuthError } from "@/lib/responsaveis/get-responsavel-by-auth-user";
 import type { StatusIntegracao } from "@/types/integrations";
 import { requireAuth } from "@/lib/require-auth";
 
@@ -23,7 +17,7 @@ type CreateRamalPayload = {
   gateway?: string | null;
   token?: string | null;
   status?: StatusIntegracao;
-  userId?: string | null;
+  responsavelId?: string | null;
   baseIntegrationId?: string | null;
   setAsPrimary?: boolean;
 };
@@ -35,51 +29,108 @@ type UpdateRamalPayload = {
   gateway?: string | null;
   token?: string | null;
   status?: StatusIntegracao;
-  userId?: string | null;
+  responsavelId?: string | null;
   setAsPrimary?: boolean;
 };
+
+type RamalPayload = {
+  items: Awaited<ReturnType<typeof listPublicApi4ComIntegracoes>>;
+  template: Awaited<ReturnType<typeof getApi4ComIntegracaoTemplate>>;
+  responsaveis: Awaited<ReturnType<typeof listResponsaveisForVinculo>>;
+};
+
+class RamalValidationError extends Error {
+  public readonly status: number;
+  public readonly code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "RamalValidationError";
+    this.status = status;
+    this.code = code;
+  }
+}
 
 function normalizeText(value: unknown): string {
   return String(value || "").trim();
 }
 
-async function assertAuthUserExists(userId: string): Promise<void> {
-  const normalized = normalizeText(userId);
-  if (!normalized) return;
-  const users = await listAuthUsers();
-  const exists = users.some((user) => normalizeText(user.id) === normalized);
-  if (!exists) {
-    throw new UserExtensionLinkError(400, "USER_EXTENSION_USER_NOT_FOUND", "Usuario selecionado nao encontrado.");
-  }
+function normalizeStatus(value: unknown, fallback: StatusIntegracao = "inativo"): StatusIntegracao {
+  const parsed = normalizeText(value).toLowerCase();
+  if (parsed === "ativo") return "ativo";
+  if (parsed === "inativo") return "inativo";
+  if (parsed === "erro") return "erro";
+  return fallback;
 }
 
-async function buildRamaisPayload() {
-  const [items, template, users, links] = await Promise.all([
+async function buildRamaisPayload(): Promise<RamalPayload> {
+  const [items, template, responsaveis] = await Promise.all([
     listPublicApi4ComIntegracoes(),
     getApi4ComIntegracaoTemplate(),
-    listAuthUsers(),
-    listActiveUserExtensionLinks(),
+    listResponsaveisForVinculo().catch((error) => {
+      console.error(
+        "[API4_RAMAIS] falha ao carregar responsaveis para vinculo",
+        error instanceof Error ? error.message : error,
+      );
+      return [];
+    }),
   ]);
 
-  const byRamal = new Map(links.map((item) => [item.ramal, item]));
-  const usersById = new Map(users.map((user) => [user.id, user]));
-
+  const responsaveisMap = new Map(responsaveis.map((item) => [item.id, item]));
   const enrichedItems = items.map((item) => {
-    const link = byRamal.get(item.ramal);
-    const linkedUser = link ? usersById.get(link.userId) : null;
+    const responsavel = item.responsavelId ? responsaveisMap.get(item.responsavelId) : null;
     return {
       ...item,
-      userId: link?.userId || null,
-      userEmail: linkedUser?.email || null,
-      userNome: linkedUser?.nome || null,
+      responsavelNome: responsavel?.nome || null,
+      responsavelEmail: responsavel?.emailLogin || null,
+      responsavelAuthLinked: Boolean(responsavel?.authLinked),
     };
   });
 
   return {
     items: enrichedItems,
     template,
-    users,
+    responsaveis,
   };
+}
+
+async function assertResponsavelExists(responsavelId: string | null): Promise<void> {
+  const normalizedResponsavelId = normalizeText(responsavelId);
+  if (!normalizedResponsavelId) return;
+  const responsaveis = await listResponsaveisForVinculo().catch(() => []);
+  const exists = responsaveis.some((item) => item.id === normalizedResponsavelId);
+  if (!exists) {
+    throw new RamalValidationError(400, "RAMAL_RESPONSAVEL_NOT_FOUND", "Responsavel selecionado nao encontrado.");
+  }
+}
+
+async function assertActiveResponsavelUniqueness(input: {
+  responsavelId: string | null;
+  status: StatusIntegracao;
+  ignoreIntegrationId?: string;
+}): Promise<void> {
+  const responsavelId = normalizeText(input.responsavelId);
+  if (!responsavelId) return;
+  if (input.status !== "ativo") return;
+
+  const integrations = await listApi4ComIntegracoes();
+  const conflict = integrations.find((item) => {
+    if (normalizeText(item.id) === normalizeText(input.ignoreIntegrationId)) return false;
+    return normalizeText(item.responsavelId) === responsavelId && normalizeStatus(item.status) === "ativo";
+  });
+
+  if (conflict) {
+    throw new RamalValidationError(
+      409,
+      "RAMAL_RESPONSAVEL_ACTIVE_CONFLICT",
+      "Este Responsavel ja possui um ramal ativo vinculado.",
+    );
+  }
+}
+
+function normalizeOptionalResponsavelId(value: unknown): string | null {
+  const normalized = normalizeText(value);
+  return normalized || null;
 }
 
 export async function GET() {
@@ -87,12 +138,12 @@ export async function GET() {
   if (!auth.authenticated) return auth.response;
 
   try {
-    const { items, template, users } = await buildRamaisPayload();
+    const { items, template, responsaveis } = await buildRamaisPayload();
     return NextResponse.json({
       success: true,
       items,
       template,
-      users,
+      responsaveis,
     });
   } catch {
     return NextResponse.json(
@@ -136,36 +187,35 @@ export async function POST(request: Request) {
       );
     }
 
-    const created = await createApi4ComIntegracao({
+    const responsavelId = normalizeOptionalResponsavelId(body.responsavelId);
+    const status = normalizeStatus(body.status, "inativo");
+    await assertResponsavelExists(responsavelId);
+    await assertActiveResponsavelUniqueness({
+      responsavelId,
+      status,
+    });
+
+    await createApi4ComIntegracao({
       nome: normalizeText(body.nome) || `API4COM - Ramal ${ramal}`,
       ramal,
       gateway: gatewayInput || undefined,
       token: tokenInput || undefined,
-      status: body.status,
-      responsavelId: null,
+      status,
+      responsavelId,
       baseIntegrationId: body.baseIntegrationId || template.baseIntegrationId,
       setAsPrimary: Boolean(body.setAsPrimary),
     });
 
-    const userId = normalizeText(body.userId);
-    if (userId) {
-      await assertAuthUserExists(userId);
-      await assignUserExtensionLink({
-        userId,
-        ramal: created.ramal,
-      });
-    }
-
-    const { items, template: nextTemplate, users } = await buildRamaisPayload();
+    const { items, template: nextTemplate, responsaveis } = await buildRamaisPayload();
     return NextResponse.json({
       success: true,
       message: "Novo ramal cadastrado com sucesso.",
       items,
       template: nextTemplate,
-      users,
+      responsaveis,
     });
   } catch (error) {
-    if (error instanceof UserExtensionLinkError) {
+    if (error instanceof RamalValidationError || error instanceof ResponsavelByAuthError) {
       return NextResponse.json(
         { success: false, error: error.message, code: error.code },
         { status: error.status },
@@ -200,7 +250,6 @@ export async function PUT(request: Request) {
       );
     }
 
-    const currentRamal = normalizeText(current.ramal);
     const ramalInput = body.ramal !== undefined ? normalizeText(body.ramal) : undefined;
     if (body.ramal !== undefined && !ramalInput) {
       return NextResponse.json(
@@ -229,16 +278,30 @@ export async function PUT(request: Request) {
       );
     }
 
+    const responsavelId =
+      body.responsavelId === undefined
+        ? normalizeOptionalResponsavelId(current.responsavelId)
+        : normalizeOptionalResponsavelId(body.responsavelId);
+    const status = body.status === undefined ? normalizeStatus(current.status) : normalizeStatus(body.status);
+
+    await assertResponsavelExists(responsavelId);
+    await assertActiveResponsavelUniqueness({
+      responsavelId,
+      status,
+      ignoreIntegrationId: id,
+    });
+
     const updated = await updateApi4ComIntegracao({
       id,
       nome: body.nome,
       ramal: ramalInput,
       gateway: gatewayInput,
       token: tokenInput,
-      status: body.status,
-      responsavelId: null,
+      status,
+      responsavelId,
       setAsPrimary: Boolean(body.setAsPrimary),
     });
+
     if (!updated) {
       return NextResponse.json(
         { success: false, error: "Ramal nao encontrado para atualizacao." },
@@ -246,40 +309,16 @@ export async function PUT(request: Request) {
       );
     }
 
-    const nextRamal = normalizeText(updated.ramal);
-    const userId = body.userId === undefined ? undefined : normalizeText(body.userId);
-
-    if (userId !== undefined) {
-      if (userId) {
-        await assertAuthUserExists(userId);
-        const oldLink = currentRamal && currentRamal !== nextRamal
-          ? await getActiveUserExtensionLinkByRamal(currentRamal)
-          : null;
-        if (oldLink && oldLink.userId === userId) {
-          await clearUserExtensionLinkByRamal(currentRamal);
-        }
-        await assignUserExtensionLink({
-          userId,
-          ramal: nextRamal,
-        });
-      } else {
-        await clearUserExtensionLinkByRamal(currentRamal);
-        if (nextRamal !== currentRamal) {
-          await clearUserExtensionLinkByRamal(nextRamal);
-        }
-      }
-    }
-
-    const { items, template, users } = await buildRamaisPayload();
+    const { items, template, responsaveis } = await buildRamaisPayload();
     return NextResponse.json({
       success: true,
       message: "Ramal atualizado com sucesso.",
       items,
       template,
-      users,
+      responsaveis,
     });
   } catch (error) {
-    if (error instanceof UserExtensionLinkError) {
+    if (error instanceof RamalValidationError || error instanceof ResponsavelByAuthError) {
       return NextResponse.json(
         { success: false, error: error.message, code: error.code },
         { status: error.status },
