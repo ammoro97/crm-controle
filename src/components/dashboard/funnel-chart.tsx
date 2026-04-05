@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { FunnelStage } from "./funnel-stage";
 
-type FunnelChartVariant = "blue" | "violet" | "green" | "orange" | "emerald";
+type FunnelChartVariant = "blue" | "violet" | "amber" | "orange" | "emerald";
 
 export type FunnelChartStep = {
   id: string;

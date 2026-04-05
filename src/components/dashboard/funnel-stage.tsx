@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 // Variants map 1:1 to funnel stage semantics.
 // Values mirror the `funnel.*` tokens in tailwind.config.ts — keep in sync.
-type FunnelStageVariant = "blue" | "violet" | "green" | "orange" | "emerald";
+type FunnelStageVariant = "blue" | "violet" | "amber" | "orange" | "emerald";
 
 type FunnelStageProps = {
   label: string;
@@ -30,10 +30,10 @@ const VARIANT_STYLES: Record<FunnelStageVariant, { from: string; to: string; glo
     glow: "rgba(139,92,246,0.30)",
   },
   // Decisor — contato qualificado
-  green: {
-    from: "#22C55E",
-    to: "#16A34A",
-    glow: "rgba(34,197,94,0.28)",
+  amber: {
+    from: "#FACC15",
+    to: "#F97316",
+    glow: "rgba(251,191,36,0.32)",
   },
   // Fechamento — oportunidade aquecida
   orange: {

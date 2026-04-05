@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { FunnelChart, type FunnelChartStep } from "@/components/dashboard/funnel-chart";
 
 type FunnelStepId = "ligacoes" | "atendidas" | "decisor" | "agendamentos" | "compras";
+type FunnelStepColor = "blue" | "violet" | "amber" | "orange" | "emerald";
 
 type DashboardFunnelProps = {
   ligacoes: number;
@@ -70,6 +71,14 @@ function formatMetricPercent(value: number) {
   }).format(Math.max(0, value))}%`;
 }
 
+const FUNIL_STEP_COLORS: Record<FunnelStepId, FunnelStepColor> = {
+  ligacoes: "blue",
+  atendidas: "violet",
+  decisor: "amber",
+  agendamentos: "orange",
+  compras: "emerald",
+};
+
 export function DashboardFunnel({
   ligacoes,
   atendidas,
@@ -88,7 +97,7 @@ export function DashboardFunnel({
         label: "Ligações",
         value: formatMetricNumber(ligacoes),
         widthPercent: 100,
-        variant: "blue",
+        variant: FUNIL_STEP_COLORS.ligacoes,
         icon: iconForStep("ligacoes"),
       },
       {
@@ -96,7 +105,7 @@ export function DashboardFunnel({
         label: "Atendidas",
         value: formatMetricNumber(atendidas),
         widthPercent: 80,
-        variant: "violet",
+        variant: FUNIL_STEP_COLORS.atendidas,
         icon: iconForStep("atendidas"),
       },
       {
@@ -104,7 +113,7 @@ export function DashboardFunnel({
         label: "Decisor",
         value: formatMetricNumber(decisor),
         widthPercent: 64,
-        variant: "green",
+        variant: FUNIL_STEP_COLORS.decisor,
         icon: iconForStep("decisor"),
       },
       {
@@ -112,7 +121,7 @@ export function DashboardFunnel({
         label: "Fechamento",
         value: formatMetricNumber(agendamentos),
         widthPercent: 50,
-        variant: "orange",
+        variant: FUNIL_STEP_COLORS.agendamentos,
         icon: iconForStep("agendamentos"),
       },
       {
@@ -120,7 +129,7 @@ export function DashboardFunnel({
         label: "Compras",
         value: formatMetricNumber(compras),
         widthPercent: 40,
-        variant: "emerald",
+        variant: FUNIL_STEP_COLORS.compras,
         icon: iconForStep("compras"),
       },
     ],
@@ -134,7 +143,7 @@ export function DashboardFunnel({
         label: "Atendidas",
         value: formatMetricPercent(atendidasPercentual),
         widthPercent: 100,
-        variant: "violet",
+        variant: FUNIL_STEP_COLORS.atendidas,
         icon: iconForStep("atendidas"),
       },
       {
@@ -142,7 +151,7 @@ export function DashboardFunnel({
         label: "Decisor",
         value: formatMetricPercent(decisorPercentual),
         widthPercent: 80,
-        variant: "green",
+        variant: FUNIL_STEP_COLORS.decisor,
         icon: iconForStep("decisor"),
       },
       {
@@ -150,7 +159,7 @@ export function DashboardFunnel({
         label: "Fechamento",
         value: formatMetricPercent(agendamentosPercentual),
         widthPercent: 68,
-        variant: "orange",
+        variant: FUNIL_STEP_COLORS.agendamentos,
         icon: iconForStep("agendamentos"),
       },
       {
@@ -158,7 +167,7 @@ export function DashboardFunnel({
         label: "Compras",
         value: formatMetricPercent(comprasPercentual),
         widthPercent: 56,
-        variant: "emerald",
+        variant: FUNIL_STEP_COLORS.compras,
         icon: iconForStep("compras"),
       },
     ],
