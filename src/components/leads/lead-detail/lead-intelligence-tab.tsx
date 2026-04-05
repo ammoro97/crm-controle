@@ -216,6 +216,30 @@ export function LeadIntelligenceTab({
               }
             />
           </label>
+
+          <label className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted md:col-span-2">
+            Informacoes adicionais
+            <textarea
+              className="field mt-1 min-h-24 px-2.5 py-2 text-xs xl:text-[13px]"
+              value={form.informacoesAdicionaisNegocio}
+              placeholder="Adicione observacoes complementares da qualificacao..."
+              onFocus={() => {
+                onActivateEdit();
+                onEditingStateChange?.(true);
+              }}
+              onBlur={() => onEditingStateChange?.(false)}
+              onChange={(event) =>
+                applyAndPersist(
+                  draftLead,
+                  {
+                    informacoesAdicionaisNegocio: event.target.value,
+                  },
+                  onDraftChange,
+                  onPersist,
+                )
+              }
+            />
+          </label>
         </div>
 
         {!validation.valid ? (

@@ -154,6 +154,7 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
       fazTrafegoPago: null,
       quantidadeProfissionaisClinica: null,
       nomeDecisor: "",
+      informacoesAdicionaisNegocio: "",
     },
   };
 }

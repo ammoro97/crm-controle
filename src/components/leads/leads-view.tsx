@@ -793,6 +793,7 @@ function createEmptyLead(filter: LeadFilter): Lead {
             fazTrafegoPago: null,
             quantidadeProfissionaisClinica: null,
             nomeDecisor: "",
+            informacoesAdicionaisNegocio: "",
           },
   };
 }

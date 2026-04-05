@@ -112,6 +112,7 @@ export type OutboundQualification = {
   fazTrafegoPago?: "sim" | "nao" | null;
   quantidadeProfissionaisClinica?: number | null;
   nomeDecisor?: string;
+  informacoesAdicionaisNegocio?: string;
 };
 
 export type Lead = {

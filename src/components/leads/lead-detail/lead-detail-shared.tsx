@@ -9,6 +9,7 @@ export type QualificacaoNegocioForm = {
   fazTrafegoPago: "sim" | "nao" | null;
   quantidadeProfissionaisClinica: number | null;
   nomeDecisor: string;
+  informacoesAdicionaisNegocio: string;
 };
 
 export const statusOptions: Lead["status"][] = [
@@ -216,6 +217,7 @@ export function getLeadQualificacaoNegocioForm(lead: Lead): QualificacaoNegocioF
     outbound?.quantidadeProfissionaisClinica ?? outbound?.teamSize,
   );
   const nomeDecisor = normalizeText(outbound?.nomeDecisor ?? outbound?.decisionContacts?.[0]?.name);
+  const informacoesAdicionaisNegocio = normalizeText(outbound?.informacoesAdicionaisNegocio);
 
   return {
     jaUtilizaCrm,
@@ -224,6 +226,7 @@ export function getLeadQualificacaoNegocioForm(lead: Lead): QualificacaoNegocioF
     fazTrafegoPago,
     quantidadeProfissionaisClinica,
     nomeDecisor,
+    informacoesAdicionaisNegocio,
   };
 }
 
@@ -254,6 +257,7 @@ export function updateLeadQualificacaoNegocio(
     fazTrafegoPago: merged.fazTrafegoPago,
     quantidadeProfissionaisClinica: merged.quantidadeProfissionaisClinica,
     nomeDecisor: merged.nomeDecisor,
+    informacoesAdicionaisNegocio: merged.informacoesAdicionaisNegocio,
   };
 
   return {

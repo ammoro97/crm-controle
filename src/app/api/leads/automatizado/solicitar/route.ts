@@ -134,6 +134,7 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
       fazTrafegoPago: null,
       quantidadeProfissionaisClinica: null,
       nomeDecisor: "",
+      informacoesAdicionaisNegocio: "",
     },
   };
 }
