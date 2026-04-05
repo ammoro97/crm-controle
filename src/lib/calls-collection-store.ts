@@ -4,7 +4,6 @@ import { getSupabaseAdmin } from "./supabase-admin";
 
 const CALLS_TABLE = "crm_calls";
 const UPSERT_BATCH_SIZE = 500;
-const DELETE_BATCH_SIZE = 500;
 
 type CallTableRow = {
   call_id: string;
@@ -87,42 +86,6 @@ function toCallsFromRows(rows: CallTableRow[]): CallLog[] {
   return dedupeByCallId(calls);
 }
 
-function parseCallIdRows(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((entry) => {
-      if (!isObjectRecord(entry)) return "";
-      const callId = entry.call_id;
-      return typeof callId === "string" ? callId.trim() : "";
-    })
-    .filter(Boolean);
-}
-
-async function listCallIds() {
-  const admin = getSupabaseAdmin();
-  if (!admin) return null;
-  const { data, error } = await admin.from(CALLS_TABLE).select("call_id");
-  if (error) {
-    console.error("[CALLS_TABLE] list ids error", error.message);
-    return null;
-  }
-  return parseCallIdRows(data as unknown);
-}
-
-async function deleteCallIds(ids: string[]) {
-  if (ids.length === 0) return;
-  const admin = getSupabaseAdmin();
-  if (!admin) return;
-
-  for (let index = 0; index < ids.length; index += DELETE_BATCH_SIZE) {
-    const chunk = ids.slice(index, index + DELETE_BATCH_SIZE);
-    const { error } = await admin.from(CALLS_TABLE).delete().in("call_id", chunk);
-    if (error) {
-      console.error("[CALLS_TABLE] delete stale rows error", error.message);
-      return;
-    }
-  }
-}
 
 export async function readCallLogsCollection(): Promise<CallLog[]> {
   const admin = getSupabaseAdmin();
@@ -170,12 +133,5 @@ export async function writeCallLogsCollection(calls: CallLog[]) {
         throw new Error("CALLS_TABLE_UPSERT_FAILED");
       }
     }
-  }
-
-  const existingIds = await listCallIds();
-  if (existingIds) {
-    const keepIds = new Set(normalized.map((call) => call.id));
-    const staleIds = existingIds.filter((callId) => !keepIds.has(callId));
-    await deleteCallIds(staleIds);
   }
 }
