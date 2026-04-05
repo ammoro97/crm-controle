@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { upsertCallLog } from "@/lib/calls-store";
 import { getApi4ComIntegracaoByRamal } from "@/lib/api4com-config-store";
-import { getUserExtension } from "@/lib/ramais/get-user-extension";
+import { assertUserHasActiveExtension } from "@/lib/ramais/get-user-extension";
 import type { Api4StartCallPayload, ResolvedCallContext, StartCallInput } from "@/types/ligacoes";
 
 const API4_DIALER_ENDPOINT = "https://api.api4com.com/api/v1/dialer";
@@ -120,7 +120,7 @@ export async function startApi4CallByAuthenticatedUser(params: {
     throw new StartCallError(400, "CALL_NUMBER_REQUIRED", "Numero de telefone invalido para discagem.");
   }
 
-  const userExtension = await getUserExtension(userId).catch((error) => {
+  const userExtension = await assertUserHasActiveExtension(userId).catch((error) => {
     const message = error instanceof Error ? error.message : "Falha ao carregar ramal do usuario.";
     if (message === "USER_EXTENSIONS_TABLE_MISSING") {
       throw new StartCallError(
@@ -129,16 +129,29 @@ export async function startApi4CallByAuthenticatedUser(params: {
         "Tabela de ramais de usuario nao encontrada no banco. Execute as migracoes.",
       );
     }
+    if (message === "USER_EXTENSION_INACTIVE") {
+      throw new StartCallError(
+        409,
+        "CALL_USER_EXTENSION_INACTIVE",
+        "Seu usuario possui ramal vinculado, mas ele esta inativo. Fale com o administrador.",
+      );
+    }
+    if (message === "USER_EXTENSION_INVALID") {
+      throw new StartCallError(
+        409,
+        "CALL_USER_EXTENSION_INVALID",
+        "O ramal vinculado ao seu usuario esta invalido. Fale com o administrador.",
+      );
+    }
+    if (message === "USER_EXTENSION_NOT_CONFIGURED") {
+      throw new StartCallError(
+        409,
+        "CALL_USER_EXTENSION_NOT_CONFIGURED",
+        "Seu usuario nao possui um ramal vinculado. Fale com o administrador.",
+      );
+    }
     throw new StartCallError(500, "CALL_USER_EXTENSION_LOOKUP_FAILED", "Nao foi possivel carregar o ramal do usuario.");
   });
-
-  if (!userExtension) {
-    throw new StartCallError(
-      409,
-      "CALL_USER_EXTENSION_NOT_CONFIGURED",
-      "Seu usuario nao possui um ramal configurado. Fale com o administrador.",
-    );
-  }
 
   const ramal = normalizeText(userExtension.ramal);
   if (!ramal) {

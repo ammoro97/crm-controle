@@ -9,7 +9,9 @@ export type Api4RamalView = {
   hasToken: boolean;
   status: StatusIntegracao;
   isConnected: boolean;
-  responsavelId: string | null;
+  userId: string | null;
+  userEmail: string | null;
+  userNome: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   isPrimary: boolean;
@@ -113,6 +115,16 @@ export function Api4RamalCard({ item, testingId, onEdit, onTest }: Api4RamalCard
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Atualizado em</p>
           <p className="mt-1 rounded-lg border border-border bg-slate-950/40 px-3 py-2 text-sm text-slate-200">
             {formatDateTime(item.updatedAt)}
+          </p>
+        </div>
+
+        <div className="md:col-span-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Usuario vinculado</p>
+          <p className="mt-1 rounded-lg border border-border bg-slate-950/40 px-3 py-2 text-sm text-slate-200">
+            {item.userNome || item.userEmail || "-"}
+            {item.userNome && item.userEmail ? (
+              <span className="ml-1 text-xs text-slate-400">({item.userEmail})</span>
+            ) : null}
           </p>
         </div>
       </div>

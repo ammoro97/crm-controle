@@ -13,8 +13,14 @@ export type Api4RamalFormValues = {
   gateway: string;
   token: string;
   status: StatusIntegracao;
-  responsavelId: string;
+  userId: string;
   setAsPrimary: boolean;
+};
+
+export type Api4RamalUserOption = {
+  id: string;
+  email: string;
+  nome: string;
 };
 
 export type Api4TemplateView = {
@@ -31,6 +37,7 @@ type Api4RamalFormProps = {
   saving: boolean;
   initialValues: Api4RamalFormValues;
   template: Api4TemplateView | null;
+  users: Api4RamalUserOption[];
   onClose: () => void;
   onSubmit: (values: Api4RamalFormValues) => void;
 };
@@ -45,6 +52,7 @@ export function Api4RamalForm({
   saving,
   initialValues,
   template,
+  users,
   onClose,
   onSubmit,
 }: Api4RamalFormProps) {
@@ -104,7 +112,7 @@ export function Api4RamalForm({
       ramal,
       gateway,
       token,
-      responsavelId: normalizeText(values.responsavelId),
+      userId: normalizeText(values.userId),
     });
   };
 
@@ -185,14 +193,20 @@ export function Api4RamalForm({
         </label>
 
         <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-          Responsavel (futuro vinculo)
-          <input
+          Usuario vinculado ao ramal
+          <select
             className="field mt-1"
-            value={values.responsavelId}
-            onChange={(event) => setValues((prev) => ({ ...prev, responsavelId: event.target.value }))}
-            placeholder="ID do responsavel (opcional)"
+            value={values.userId}
+            onChange={(event) => setValues((prev) => ({ ...prev, userId: event.target.value }))}
             disabled={saving}
-          />
+          >
+            <option value="">Sem vinculo</option>
+            {users.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.nome} - {user.email}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="flex items-center gap-2 text-sm text-slate-300">
