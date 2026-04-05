@@ -106,6 +106,12 @@ export type OutboundQualification = {
   buyingMoment: BuyingMoment;
   icpFit: "alto" | "medio" | "baixo";
   teamSize?: string;
+  jaUtilizaCrm?: "sim" | "nao" | null;
+  qualCrmUtiliza?: string;
+  quantoPagaCrm?: string;
+  fazTrafegoPago?: "sim" | "nao" | null;
+  quantidadeProfissionaisClinica?: number | null;
+  nomeDecisor?: string;
 };
 
 export type Lead = {

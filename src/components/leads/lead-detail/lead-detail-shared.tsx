@@ -2,6 +2,15 @@ import { Lead, LeadHistoryEvent, LeadObservationType, PainPoint } from "@/types/
 
 export type EditableFieldType = "input" | "textarea" | "select" | "date";
 
+export type QualificacaoNegocioForm = {
+  jaUtilizaCrm: "sim" | "nao" | null;
+  qualCrmUtiliza: string;
+  quantoPagaCrm: string;
+  fazTrafegoPago: "sim" | "nao" | null;
+  quantidadeProfissionaisClinica: number | null;
+  nomeDecisor: string;
+};
+
 export const statusOptions: Lead["status"][] = [
   "Novo",
   "Contato iniciado",
@@ -173,4 +182,106 @@ export function updateCommercialField(draftLead: Lead, key: string, value: strin
   }
 
   return nextLead;
+}
+
+function normalizeText(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function normalizeChoice(value: unknown): "sim" | "nao" | null {
+  const normalized = normalizeText(value).toLowerCase();
+  if (normalized === "sim") return "sim";
+  if (normalized === "nao") return "nao";
+  return null;
+}
+
+function normalizePositiveInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+  const digitsOnly = normalizeText(value).replace(/\D/g, "");
+  if (!digitsOnly) return null;
+  const parsed = Number(digitsOnly);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
+export function getLeadQualificacaoNegocioForm(lead: Lead): QualificacaoNegocioForm {
+  const outbound = lead.outboundQualification;
+  const jaUtilizaCrm = normalizeChoice(outbound?.jaUtilizaCrm ?? outbound?.usesCrm);
+  const qualCrmUtiliza = normalizeText(outbound?.qualCrmUtiliza ?? outbound?.crmName);
+  const quantoPagaCrm = normalizeText(outbound?.quantoPagaCrm);
+  const fazTrafegoPago = normalizeChoice(outbound?.fazTrafegoPago);
+  const quantidadeProfissionaisClinica = normalizePositiveInteger(
+    outbound?.quantidadeProfissionaisClinica ?? outbound?.teamSize,
+  );
+  const nomeDecisor = normalizeText(outbound?.nomeDecisor ?? outbound?.decisionContacts?.[0]?.name);
+
+  return {
+    jaUtilizaCrm,
+    qualCrmUtiliza,
+    quantoPagaCrm,
+    fazTrafegoPago,
+    quantidadeProfissionaisClinica,
+    nomeDecisor,
+  };
+}
+
+export function updateLeadQualificacaoNegocio(
+  lead: Lead,
+  patch: Partial<QualificacaoNegocioForm>,
+): Lead {
+  if (lead.channel !== "outbound" || !lead.outboundQualification) {
+    return lead;
+  }
+
+  const current = getLeadQualificacaoNegocioForm(lead);
+  const merged: QualificacaoNegocioForm = {
+    ...current,
+    ...patch,
+  };
+
+  if (merged.jaUtilizaCrm === "nao") {
+    merged.qualCrmUtiliza = "";
+    merged.quantoPagaCrm = "";
+  }
+
+  const nextOutbound = {
+    ...lead.outboundQualification,
+    jaUtilizaCrm: merged.jaUtilizaCrm,
+    qualCrmUtiliza: merged.qualCrmUtiliza,
+    quantoPagaCrm: merged.quantoPagaCrm,
+    fazTrafegoPago: merged.fazTrafegoPago,
+    quantidadeProfissionaisClinica: merged.quantidadeProfissionaisClinica,
+    nomeDecisor: merged.nomeDecisor,
+  };
+
+  return {
+    ...lead,
+    outboundQualification: nextOutbound,
+  };
+}
+
+export function validateQualificacaoNegocio(form: QualificacaoNegocioForm): {
+  valid: boolean;
+  missingRequiredFields: string[];
+} {
+  const missing: string[] = [];
+
+  if (!form.jaUtilizaCrm) missing.push("Já utiliza CRM?");
+  if (!form.fazTrafegoPago) missing.push("Faz tráfego pago?");
+  if (!form.quantidadeProfissionaisClinica || form.quantidadeProfissionaisClinica <= 0) {
+    missing.push("Quantos profissionais existem na clínica?");
+  }
+  if (!normalizeText(form.nomeDecisor)) missing.push("Qual o nome do decisor?");
+
+  if (form.jaUtilizaCrm === "sim") {
+    if (!normalizeText(form.qualCrmUtiliza)) missing.push("Qual CRM utiliza?");
+    if (!normalizeText(form.quantoPagaCrm)) missing.push("Quanto paga?");
+  }
+
+  return {
+    valid: missing.length === 0,
+    missingRequiredFields: missing,
+  };
 }

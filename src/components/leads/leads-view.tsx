@@ -787,6 +787,12 @@ function createEmptyLead(filter: LeadFilter): Lead {
             buyingMoment: "pesquisando",
             icpFit: "medio",
             teamSize: "",
+            jaUtilizaCrm: null,
+            qualCrmUtiliza: "",
+            quantoPagaCrm: "",
+            fazTrafegoPago: null,
+            quantidadeProfissionaisClinica: null,
+            nomeDecisor: "",
           },
   };
 }

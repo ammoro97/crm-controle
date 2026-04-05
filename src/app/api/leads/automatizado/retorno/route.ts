@@ -148,6 +148,12 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
       buyingMoment: "pesquisando",
       icpFit: "medio",
       teamSize: "",
+      jaUtilizaCrm: null,
+      qualCrmUtiliza: "",
+      quantoPagaCrm: "",
+      fazTrafegoPago: null,
+      quantidadeProfissionaisClinica: null,
+      nomeDecisor: "",
     },
   };
 }

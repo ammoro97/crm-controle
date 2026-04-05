@@ -128,6 +128,12 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
       buyingMoment: "pesquisando",
       icpFit: "medio",
       teamSize: "",
+      jaUtilizaCrm: null,
+      qualCrmUtiliza: "",
+      quantoPagaCrm: "",
+      fazTrafegoPago: null,
+      quantidadeProfissionaisClinica: null,
+      nomeDecisor: "",
     },
   };
 }
