@@ -270,13 +270,23 @@ function toLegacyConfig(integration: Api4Integracao | null): Api4ComConfig {
 
 function pickPrimaryIntegration(storage: Api4ComIntegracoesStorage): Api4Integracao | null {
   if (storage.items.length === 0) return null;
-  const selected = storage.selectedId
-    ? storage.items.find((item) => item.id === storage.selectedId) || null
-    : null;
+  const selected = storage.selectedId ? storage.items.find((item) => item.id === storage.selectedId) || null : null;
+  const active = storage.items.find((item) => item.status === "ativo") || null;
+
+  const isDialReady = (item: Api4Integracao | null) => {
+    if (!item) return false;
+    return Boolean(normalizeText(item.token) && normalizeText(item.ramal));
+  };
+
+  if (isDialReady(selected)) return selected;
+  if (isDialReady(active)) return active;
+
+  const firstDialReady = storage.items.find((item) => isDialReady(item)) || null;
+  if (firstDialReady) return firstDialReady;
+
   if (selected) return selected;
-  const active = storage.items.find((item) => item.status === "ativo");
   if (active) return active;
-  return storage.items[0];
+  return storage.items[0] || null;
 }
 
 function mergeIntegration(
@@ -391,13 +401,31 @@ export async function resolveApi4ComIntegracaoForResponsavel(
 ): Promise<Api4Integracao | null> {
   const normalizedResponsavelId = normalizeText(responsavelId);
   const storage = await readStorage();
+  const isDialReady = (item: Api4Integracao | null) => {
+    if (!item) return false;
+    return Boolean(normalizeText(item.token) && normalizeText(item.ramal));
+  };
 
   if (normalizedResponsavelId) {
-    const byResponsavel = storage.items.find((item) => normalizeText(item.responsavelId) === normalizedResponsavelId);
-    if (byResponsavel) return byResponsavel;
+    const byResponsavel =
+      storage.items.find(
+        (item) => normalizeText(item.responsavelId) === normalizedResponsavelId && isDialReady(item),
+      ) ||
+      storage.items.find((item) => normalizeText(item.responsavelId) === normalizedResponsavelId) ||
+      null;
+    if (byResponsavel && isDialReady(byResponsavel)) return byResponsavel;
   }
 
-  return pickPrimaryIntegration(storage);
+  const primary = pickPrimaryIntegration(storage);
+  if (isDialReady(primary)) return primary;
+
+  const activeReady = storage.items.find((item) => item.status === "ativo" && isDialReady(item)) || null;
+  if (activeReady) return activeReady;
+
+  const anyReady = storage.items.find((item) => isDialReady(item)) || null;
+  if (anyReady) return anyReady;
+
+  return primary;
 }
 
 export async function createApi4ComIntegracao(input: CreateApi4ComIntegracaoInput): Promise<Api4Integracao> {

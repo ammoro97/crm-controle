@@ -159,11 +159,30 @@ export async function POST(request: Request) {
     const externalCallId = extractApi4ComCallId(responseBody);
 
     if (response.status !== 200) {
-      const apiMessage =
-        (responseBody && typeof responseBody === "object" && "message" in responseBody &&
-          typeof (responseBody as { message?: unknown }).message === "string" &&
-          (responseBody as { message: string }).message) ||
-        "Falha ao disparar ligacao na API4COM";
+      let apiMessage = "Falha ao disparar ligacao na API4COM";
+      if (responseBody && typeof responseBody === "object") {
+        const source = responseBody as Record<string, unknown>;
+        const messageCandidates = [
+          source.message,
+          source.error,
+          source.detail,
+          source.reason,
+          source.status,
+        ];
+        const resolvedMessage = messageCandidates.find(
+          (candidate) => typeof candidate === "string" && String(candidate).trim().length > 0,
+        );
+        if (typeof resolvedMessage === "string") {
+          apiMessage = resolvedMessage;
+        } else if (Array.isArray(source.errors) && source.errors.length > 0) {
+          const firstError = source.errors[0];
+          if (typeof firstError === "string" && firstError.trim()) {
+            apiMessage = firstError;
+          }
+        }
+      } else if (typeof responseBody === "string" && responseBody.trim()) {
+        apiMessage = responseBody.trim();
+      }
 
       return NextResponse.json(
         {
