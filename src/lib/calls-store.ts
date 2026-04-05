@@ -82,6 +82,7 @@ function normalizeCallLog(input: Partial<CallLog> & Pick<CallLog, "id">): CallLo
     hangupCauseCode: input.hangupCauseCode || null,
     recordUrl: input.recordUrl || null,
     gateway: input.gateway || null,
+    ramal: input.ramal || null,
     eventType: input.eventType || "",
     status: input.status || "Nao atendida",
     transcript: input.transcript || null,

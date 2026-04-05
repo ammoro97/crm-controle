@@ -264,6 +264,7 @@ export type CallLog = {
   hangupCauseCode?: string | null;
   recordUrl?: string | null;
   gateway?: string | null;
+  ramal?: string | null;
   eventType?: string;
   status?: string;
   createdAt: string;

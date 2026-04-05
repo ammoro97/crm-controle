@@ -327,18 +327,17 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
 
     try {
       const sessionId = generateCallSessionId();
-      const response = await fetch("/api/api4com/dial", {
+      const response = await fetch("/api/ligacoes", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           sessionId,
-          phone: phoneToDial,
+          numero: phoneToDial,
           leadId: lead.id,
           nome: lead.name,
           empresa: lead.company,
-          userId: currentUser?.id,
           responsavelId: resolvedResponsavel.responsavel.id,
           atendenteNome: resolvedResponsavel.responsavel.nome,
         }),

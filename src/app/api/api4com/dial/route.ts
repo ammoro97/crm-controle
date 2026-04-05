@@ -1,206 +1,66 @@
 import { NextResponse } from "next/server";
-import { resolveApi4ComIntegracaoForResponsavel } from "@/lib/api4com-config-store";
-import { requireAuth } from "@/lib/require-auth";
+import { startApi4CallByAuthenticatedUser, StartCallError } from "@/lib/api4/start-call";
+import { getAuthUser } from "@/lib/auth/get-auth-user";
+import type { StartCallInput } from "@/types/ligacoes";
 
 type DialRequestBody = {
   phone?: string;
+  numero?: string;
   leadId?: string;
   sessionId?: string;
   nome?: string;
   name?: string;
   empresa?: string;
   company?: string;
-  userId?: string;
   responsavelId?: string;
   atendenteNome?: string;
 };
 
-function normalizePhone(input: string) {
-  const onlyDigits = input.replace(/\D/g, "");
-  if (!onlyDigits) return "";
-  const withCountry = onlyDigits.startsWith("55") ? onlyDigits : `55${onlyDigits}`;
-  return `+${withCountry}`;
-}
-
-function extractApi4ComCallId(payload: unknown): string | null {
-  const read = (value: unknown): string | null => {
-    if (!value || typeof value !== "object") return null;
-    const source = value as Record<string, unknown>;
-    const direct = String(
-      source.externalCallId || source.id || source.call_id || source.callId || source.uniqueid || "",
-    ).trim();
-    return direct || null;
-  };
-
-  const walk = (value: unknown, depth: number): string | null => {
-    if (depth > 5) return null;
-    const direct = read(value);
-    if (direct) return direct;
-    if (!value || typeof value !== "object") return null;
-    const source = value as Record<string, unknown>;
-    for (const nested of Object.values(source)) {
-      if (!nested || typeof nested !== "object") continue;
-      const found = walk(nested, depth + 1);
-      if (found) return found;
-    }
-    return null;
-  };
-
-  return walk(payload, 0);
+function normalizeText(value: unknown): string {
+  return String(value || "").trim();
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAuth();
-  if (!auth.authenticated) return auth.response;
+  const auth = await getAuthUser();
+  if (!auth.ok) return auth.response;
 
   try {
     const body = (await request.json()) as DialRequestBody;
-    const responsavelId = (body.responsavelId || "").trim();
-    const atendenteNome = (body.atendenteNome || "").trim();
-    const integration = await resolveApi4ComIntegracaoForResponsavel(responsavelId || null);
-
-    if (!integration) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Nenhum ramal da API4COM foi cadastrado. Acesse Configuracoes > Integracoes > API4.",
-        },
-        { status: 400 },
-      );
-    }
-
-    const token = String(integration.token || "").trim();
-    const extension = String(integration.ramal || "").trim();
-    const gateway = String(integration.gateway || "").trim();
-
-    if (!token) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Token da API4COM nao configurado. Acesse Configuracoes > Integracoes > API4.",
-        },
-        { status: 400 },
-      );
-    }
-
-    if (!extension) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Ramal da API4COM nao configurado. Acesse Configuracoes > Integracoes > API4.",
-        },
-        { status: 400 },
-      );
-    }
-
-    const rawPhone = (body.phone || "").trim();
-    const normalizedPhone = normalizePhone(rawPhone);
-    const leadId = (body.leadId || "").trim();
-    const sessionId = (body.sessionId || "").trim();
-    const nome = (body.nome || body.name || "").trim();
-    const empresa = (body.empresa || body.company || "").trim();
-    const userId = (body.userId || "").trim();
-
-    if (!normalizedPhone || !leadId || !nome) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Campos obrigatorios: phone, leadId, nome.",
-        },
-        { status: 400 },
-      );
-    }
-
-    if (!responsavelId || !atendenteNome) {
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "Seu usuario ainda nao esta cadastrado em Responsaveis. Faca esse cadastro antes de realizar ligacoes.",
-        },
-        { status: 400 },
-      );
-    }
-
-    const payload = {
-      extension,
-      phone: normalizedPhone,
-      metadata: {
-        gateway: gateway || "",
-        sessionId,
-        leadId,
-        nome,
-        empresa,
-        telefone: normalizedPhone,
-        userId,
-        responsavelId,
-        atendenteNome,
-      },
+    const input: StartCallInput = {
+      leadId: normalizeText(body.leadId),
+      numero: normalizeText(body.numero || body.phone),
+      sessionId: normalizeText(body.sessionId) || undefined,
+      nome: normalizeText(body.nome || body.name) || undefined,
+      empresa: normalizeText(body.empresa || body.company) || undefined,
+      responsavelId: normalizeText(body.responsavelId) || undefined,
+      atendenteNome: normalizeText(body.atendenteNome) || undefined,
     };
 
-    const response = await fetch("https://api.api4com.com/api/v1/dialer", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: token,
-      },
-      body: JSON.stringify(payload),
-      cache: "no-store",
+    const result = await startApi4CallByAuthenticatedUser({
+      userId: auth.user.id,
+      input,
     });
-
-    const responseText = await response.text();
-    let responseBody: unknown = null;
-    try {
-      responseBody = responseText ? JSON.parse(responseText) : null;
-    } catch {
-      responseBody = responseText || null;
-    }
-
-    const externalCallId = extractApi4ComCallId(responseBody);
-
-    if (response.status !== 200) {
-      let apiMessage = "Falha ao disparar ligacao na API4COM";
-      if (responseBody && typeof responseBody === "object") {
-        const source = responseBody as Record<string, unknown>;
-        const messageCandidates = [
-          source.message,
-          source.error,
-          source.detail,
-          source.reason,
-          source.status,
-        ];
-        const resolvedMessage = messageCandidates.find(
-          (candidate) => typeof candidate === "string" && String(candidate).trim().length > 0,
-        );
-        if (typeof resolvedMessage === "string") {
-          apiMessage = resolvedMessage;
-        } else if (Array.isArray(source.errors) && source.errors.length > 0) {
-          const firstError = source.errors[0];
-          if (typeof firstError === "string" && firstError.trim()) {
-            apiMessage = firstError;
-          }
-        }
-      } else if (typeof responseBody === "string" && responseBody.trim()) {
-        apiMessage = responseBody.trim();
-      }
-
-      return NextResponse.json(
-        {
-          success: false,
-          message: apiMessage,
-          status: response.status,
-        },
-        { status: response.status },
-      );
-    }
 
     return NextResponse.json({
       success: true,
-      message: "Ligacao disparada com sucesso.",
-      externalCallId,
-      data: responseBody,
+      message: result.message,
+      externalCallId: result.externalCallId,
+      data: result.data,
+      callContext: result.context,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof StartCallError) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: error.code,
+          message: error.message,
+          detail: error.detail || null,
+        },
+        { status: error.status },
+      );
+    }
+
     return NextResponse.json(
       {
         success: false,

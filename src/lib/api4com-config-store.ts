@@ -391,6 +391,15 @@ export async function getApi4ComIntegracaoById(id: string): Promise<Api4Integrac
   return storage.items.find((item) => item.id === targetId) || null;
 }
 
+export async function getApi4ComIntegracaoByRamal(ramal: string): Promise<Api4Integracao | null> {
+  const targetRamal = normalizeText(ramal);
+  if (!targetRamal) return null;
+  const storage = await readStorage();
+  const exact = storage.items.find((item) => normalizeText(item.ramal) === targetRamal) || null;
+  if (exact) return exact;
+  return null;
+}
+
 export async function getActiveApi4ComIntegracao(): Promise<Api4Integracao | null> {
   const storage = await readStorage();
   return pickPrimaryIntegration(storage);
