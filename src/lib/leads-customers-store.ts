@@ -126,25 +126,18 @@ async function upsertLeadsIntoTable(admin: SupabaseClient, tableName: LeadTableN
   const dedupedLeads = dedupeByLeadId(leads);
   const nowIso = new Date().toISOString();
 
-  if (dedupedLeads.length > 0) {
-    const rows = dedupedLeads.map((lead) => ({
-      lead_id: lead.id,
-      payload: lead,
-      updated_at: nowIso,
-    }));
-    const { error } = await admin.from(tableName).upsert(rows, { onConflict: "lead_id" });
-    if (error) {
-      console.error(`[LEAD_TABLE] upsert error table=${tableName}`, error.message);
-      return false;
-    }
+  if (dedupedLeads.length === 0) return true;
+
+  const rows = dedupedLeads.map((lead) => ({
+    lead_id: lead.id,
+    payload: lead,
+    updated_at: nowIso,
+  }));
+  const { error } = await admin.from(tableName).upsert(rows, { onConflict: "lead_id" });
+  if (error) {
+    console.error(`[LEAD_TABLE] upsert error table=${tableName}`, error.message);
+    return false;
   }
-
-  const existingIds = await listLeadIds(admin, tableName);
-  if (!existingIds) return dedupedLeads.length > 0;
-
-  const keepIds = new Set(dedupedLeads.map((lead) => lead.id));
-  const staleIds = existingIds.filter((leadId) => !keepIds.has(leadId));
-  await deleteLeadIds(admin, tableName, staleIds);
   return true;
 }
 
@@ -209,4 +202,18 @@ export async function readCustomersCollection() {
 
 export async function writeCustomersCollection(customers: Lead[]) {
   return writeCollection(CUSTOMERS_TABLE, customers);
+}
+
+export async function deleteLeadsFromCollection(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
+  await deleteLeadIds(admin, LEADS_TABLE, ids);
+}
+
+export async function deleteCustomersFromCollection(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
+  await deleteLeadIds(admin, CUSTOMERS_TABLE, ids);
 }

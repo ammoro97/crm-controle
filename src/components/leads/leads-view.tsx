@@ -1721,7 +1721,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   const deleteLeadsById = (ids: string[]) => {
     const toDelete = new Set(ids);
-    setLeads((prev) => prev.filter((lead) => !toDelete.has(lead.id)));
+    const filteredLeads = leads.filter((lead) => !toDelete.has(lead.id));
+    setLeads(filteredLeads);
+    setLeadsSnapshot(filteredLeads, ids);
   };
 
   const finalizeLeadViaProfile = (leadToFinalize: Lead, reason: LeadFinalizationReason, saleValueCents?: number): boolean => {
@@ -1751,7 +1753,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       saleValueCents: reason === "compra_efetuada" ? safeSaleValueCents : null,
     };
 
-    setLeads((prev) => prev.filter((lead) => lead.id !== resolvedLead.id));
+    const filteredLeads = leads.filter((lead) => lead.id !== resolvedLead.id);
+    setLeads(filteredLeads);
+    setLeadsSnapshot(filteredLeads, [resolvedLead.id]);
 
     if (reason === "compra_efetuada") {
       const finalizedCustomerLead: Lead = {

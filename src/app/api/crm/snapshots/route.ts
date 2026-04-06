@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readDataFile, writeDataFile } from "@/lib/storage-paths";
-import { readCustomersCollection, readLeadsCollection, writeCustomersCollection, writeLeadsCollection } from "@/lib/leads-customers-store";
+import { deleteCustomersFromCollection, deleteLeadsFromCollection, readCustomersCollection, readLeadsCollection, writeCustomersCollection, writeLeadsCollection } from "@/lib/leads-customers-store";
 import {
   LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE,
   LeadOwnerDistributionError,
@@ -16,6 +16,8 @@ type SnapshotPayload = {
   customers?: Lead[];
   leadFinalizations?: LeadFinalizationRecord[];
   wrapups?: PostCallWrapup[];
+  deletedLeadIds?: string[];
+  deletedCustomerIds?: string[];
 };
 
 const MEETINGS_FILE = "crm.agenda.meetings.v1.json";
@@ -24,6 +26,11 @@ const WRAPUPS_FILE = "crm.calls.wrapups.v1.json";
 
 function asArray<T>(value: unknown): T[] | null {
   return Array.isArray(value) ? (value as T[]) : null;
+}
+
+function asStringIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === "string" && v.trim() !== "");
 }
 
 function normalizeText(value?: string | null) {
@@ -112,6 +119,16 @@ export async function POST(request: NextRequest) {
     const customers = asArray<Lead>(body?.customers);
     if (customers) {
       writes.push(writeCustomersCollection(customers));
+    }
+
+    const deletedLeadIds = asStringIds(body?.deletedLeadIds);
+    if (deletedLeadIds.length > 0) {
+      writes.push(deleteLeadsFromCollection(deletedLeadIds));
+    }
+
+    const deletedCustomerIds = asStringIds(body?.deletedCustomerIds);
+    if (deletedCustomerIds.length > 0) {
+      writes.push(deleteCustomersFromCollection(deletedCustomerIds));
     }
 
     const leadFinalizations = asArray<LeadFinalizationRecord>(body?.leadFinalizations);

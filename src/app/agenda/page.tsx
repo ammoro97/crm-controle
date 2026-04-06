@@ -581,7 +581,7 @@ export default function AgendaPage() {
       saleValueCents,
     });
 
-    setLeadsSnapshot(leads.filter((lead) => lead.id !== matchedLead.id));
+    setLeadsSnapshot(leads.filter((lead) => lead.id !== matchedLead.id), [matchedLead.id]);
 
     const currentCustomers = getCustomersSnapshot();
     const nextCustomers = [...currentCustomers.filter((lead) => lead.id !== customerLead.id), customerLead];

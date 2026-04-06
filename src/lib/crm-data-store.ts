@@ -21,6 +21,8 @@ type SnapshotPayload = {
   meetings?: Meeting[];
   customers?: Lead[];
   leadFinalizations?: LeadFinalizationRecord[];
+  deletedLeadIds?: string[];
+  deletedCustomerIds?: string[];
 };
 
 type SnapshotResponse = {
@@ -29,6 +31,10 @@ type SnapshotResponse = {
 };
 
 const syncQueue = new Map<SnapshotPayloadField, unknown>();
+const pendingDeleteIds = {
+  leads: new Set<string>(),
+  customers: new Set<string>(),
+};
 let syncInFlight = false;
 let hydrationStarted = false;
 
@@ -93,7 +99,11 @@ async function flushSyncQueue() {
 
   syncInFlight = true;
   const pendingEntries = Array.from(syncQueue.entries());
+  const snapshotDeletedLeadIds = [...pendingDeleteIds.leads];
+  const snapshotDeletedCustomerIds = [...pendingDeleteIds.customers];
   syncQueue.clear();
+  pendingDeleteIds.leads.clear();
+  pendingDeleteIds.customers.clear();
 
   const payload: Partial<SnapshotPayload> = {};
   for (const [field, value] of pendingEntries) {
@@ -102,6 +112,8 @@ async function flushSyncQueue() {
     if (field === "customers") payload.customers = value as Lead[];
     if (field === "leadFinalizations") payload.leadFinalizations = value as LeadFinalizationRecord[];
   }
+  if (snapshotDeletedLeadIds.length > 0) payload.deletedLeadIds = snapshotDeletedLeadIds;
+  if (snapshotDeletedCustomerIds.length > 0) payload.deletedCustomerIds = snapshotDeletedCustomerIds;
 
   try {
     const response = await fetch(SNAPSHOTS_ENDPOINT, {
@@ -125,6 +137,9 @@ async function flushSyncQueue() {
         syncQueue.set(field, value);
       }
     }
+    // Re-queue pending deletes that failed to sync
+    snapshotDeletedLeadIds.forEach((id) => pendingDeleteIds.leads.add(id));
+    snapshotDeletedCustomerIds.forEach((id) => pendingDeleteIds.customers.add(id));
   } finally {
     syncInFlight = false;
     if (hasPendingSyncQueue()) {
@@ -205,9 +220,12 @@ export function getLeadsSnapshot(): Lead[] {
   }
 }
 
-export function setLeadsSnapshot(next: Lead[]) {
+export function setLeadsSnapshot(next: Lead[], deletedIds?: string[]) {
   if (typeof window === "undefined") return;
   const safeNext = cloneLeads(next);
+  if (deletedIds?.length) {
+    deletedIds.forEach((id) => pendingDeleteIds.leads.add(id));
+  }
   enqueueSnapshotSync(LEADS_STORAGE_KEY, safeNext);
 }
 
@@ -245,9 +263,12 @@ export function getCustomersSnapshot(): Lead[] {
   }
 }
 
-export function setCustomersSnapshot(next: Lead[]) {
+export function setCustomersSnapshot(next: Lead[], deletedIds?: string[]) {
   if (typeof window === "undefined") return;
   const safeNext = cloneLeads(next);
+  if (deletedIds?.length) {
+    deletedIds.forEach((id) => pendingDeleteIds.customers.add(id));
+  }
   enqueueSnapshotSync(CUSTOMERS_STORAGE_KEY, safeNext);
 }
 
