@@ -1429,17 +1429,28 @@ export default function LigacoesPage() {
   const isLoadingCallsRef = useRef(false);
   const restoredFromQueryRef = useRef(false);
   const currentWrapupSessionRef = useRef<string | null>(null);
+  const handleRestoreWrapupRef = useRef<(() => void) | null>(null);
   const shouldRestoreWrapupByQuery =
     searchParams.get("restoreWrapup") === "1" || searchParams.get("postCall") === "1";
 
   // Reset the guard whenever the user navigates to this page with restore params.
-  // Without this, a previous navigation sets restoredFromQueryRef=true and blocks
-  // future "Abrir finalizacao" clicks when wrapupState is "minimized" or "pending".
   useEffect(() => {
     if (shouldRestoreWrapupByQuery) {
       restoredFromQueryRef.current = false;
     }
   }, [shouldRestoreWrapupByQuery]);
+
+  // Listen for the custom event dispatched by the app-shell "Abrir finalizacao" button.
+  // This covers the case where the user is already on /ligacoes — router.push to the same
+  // URL would not change searchParams, so the URL-param flow would never re-trigger.
+  useEffect(() => {
+    const handleOpenWrapupEvent = () => {
+      restoredFromQueryRef.current = false;
+      handleRestoreWrapupRef.current?.();
+    };
+    window.addEventListener("crm:open-wrapup", handleOpenWrapupEvent);
+    return () => window.removeEventListener("crm:open-wrapup", handleOpenWrapupEvent);
+  }, []);
   const showReasonField =
     postCallForm.result === "Falou com cliente" && normalizeText(postCallForm.nextAction) === "sem interesse";
   const showNextActionField = finalizacaoComProximaAcao.has(postCallForm.result);
@@ -2665,6 +2676,7 @@ export default function LigacoesPage() {
     setWrapupSessionState(activeSession.sessionId, "opened");
     setWrapupOpen(true);
     setWrapupError(null);
+    restoredFromQueryRef.current = true;
     console.log(`${LIGACOES_DEBUG_PREFIX} WRAPUP_MODAL_RESTORED`, {
       sessionId: activeSession.sessionId,
       externalCallId: activeSession.externalCallId || null,
@@ -2673,6 +2685,9 @@ export default function LigacoesPage() {
       status: activeSession.status,
     });
   };
+
+  // Keep ref current so the event listener always calls the latest version
+  handleRestoreWrapupRef.current = handleRestoreWrapup;
 
   const handleWrapupModalClose = () => {
     handleMinimizeWrapup();

@@ -123,7 +123,10 @@ export function AppShell({ children }: AppShellProps) {
           <button
             type="button"
             className="btn-primary mt-2 h-8 px-3 py-1 text-xs"
-            onClick={() => router.push("/ligacoes?postCall=1&restoreWrapup=1")}
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("crm:open-wrapup"));
+              router.push("/ligacoes?postCall=1&restoreWrapup=1");
+            }}
           >
             Abrir finalizacao
           </button>
