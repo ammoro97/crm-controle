@@ -867,6 +867,14 @@ function clearWrapupDraft(sessionId: string) {
   }
 }
 
+const KNOWN_CRM_STATUSES_DISPLAY = new Set(["Atendida", "Nao atendida", "Não atendida", "Ocupado", "Cancelada", "Sem resposta"]);
+function normalizeStoredStatus(value?: string | null): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (KNOWN_CRM_STATUSES_DISPLAY.has(raw)) return raw;
+  return humanizeHangupCause(raw);
+}
+
 function humanizeHangupCause(value: string): string {
   const normalized = value.trim();
   if (!normalized) return "Não atendida";
@@ -972,7 +980,7 @@ function mapApiCallToRow(
   const internalStatusWrong =
     durationSeconds > 0 &&
     (internal?.status === "Nao atendida" || internal?.status === "Não atendida");
-  const resolvedStatus = internalStatusWrong ? status : (internal?.status || status);
+  const resolvedStatus = internalStatusWrong ? status : (internal?.status ? normalizeStoredStatus(internal.status) || status : status);
   const resolvedStartedAt = internal?.startedAt || startedAt;
 
   let matchSource: "sessionId" | "externalCallId" | "callId" | null = null;
@@ -1166,7 +1174,7 @@ function mapInternalCallToRow(
     startedAt: item.startedAt || null,
     endedAt: item.endedAt || null,
     durationSeconds: Number(item.durationSeconds || 0),
-    status: item.status || "Não atendida",
+    status: normalizeStoredStatus(item.status) || "Não atendida",
     finalizacao,
     subfinalizacao,
     atendente: atendenteFromWrapupResponsavelId || "Responsável não vinculado",
@@ -3340,21 +3348,29 @@ export default function LigacoesPage() {
     setWrapupMessageType("success");
 
     try {
-      const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);
-      if (!resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {
-        console.error("[WRAPUP_SAVE] responsavel_not_found", {
-          userId: currentUser?.id ?? null,
-          email: currentUser?.email ?? null,
-          error: resolvedResponsavel.error ?? null,
-        });
-        setWrapupError(
-          `Seu usuário (${currentUser?.email ?? "sem e-mail"}) ainda não está vinculado a um responsável no CRM. Cadastre esse e-mail em Configurações > Responsáveis antes de finalizar ligações.`,
-        );
-        return;
-      }
+      // Prioriza dados ja resolvidos no login para evitar falhas de rede no momento do save.
+      let ownerName: string;
+      let ownerId: string;
 
-      const ownerName = resolvedResponsavel.responsavel.nome;
-      const ownerId = resolvedResponsavel.responsavel.id;
+      if (currentUser?.responsavelVinculado && currentUser.responsavelId && currentUser.nome !== "Responsavel nao vinculado") {
+        ownerName = currentUser.nome;
+        ownerId = currentUser.responsavelId;
+      } else {
+        const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);
+        if (!resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {
+          console.error("[WRAPUP_SAVE] responsavel_not_found", {
+            userId: currentUser?.id ?? null,
+            email: currentUser?.email ?? null,
+            error: resolvedResponsavel.error ?? null,
+          });
+          setWrapupError(
+            `Seu usuário (${currentUser?.email ?? "sem e-mail"}) ainda não está vinculado a um responsável no CRM. Cadastre esse e-mail em Configurações > Responsáveis antes de finalizar ligações.`,
+          );
+          return;
+        }
+        ownerName = resolvedResponsavel.responsavel.nome;
+        ownerId = resolvedResponsavel.responsavel.id;
+      }
       const currentCallEvidence: CurrentCallEvidence | undefined = activeSession.matchedCallId
         ? (() => {
             const fromTable = calls.find((item) => item.id === activeSession.matchedCallId);

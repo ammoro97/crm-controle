@@ -75,6 +75,42 @@ export async function listAuthUsers(): Promise<AuthUserOption[]> {
 export async function findAuthUserByEmail(email: string): Promise<AuthUserOption | null> {
   const normalizedEmail = normalizeText(email).toLowerCase();
   if (!normalizedEmail) return null;
+
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("SUPABASE_ADMIN_UNAVAILABLE");
+
+  // Consulta direta em auth.users — mais confiavel que listUsers com paginacao.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (admin as any)
+      .schema("auth")
+      .from("users")
+      .select("id, email, raw_user_meta_data")
+      .eq("email", normalizedEmail)
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data && typeof data === "object") {
+      const row = data as Record<string, unknown>;
+      const id = normalizeText(row.id);
+      const userEmail = normalizeText(row.email);
+      if (id && userEmail) {
+        const meta =
+          row.raw_user_meta_data && typeof row.raw_user_meta_data === "object"
+            ? (row.raw_user_meta_data as Record<string, unknown>)
+            : {};
+        const nome =
+          normalizeText(meta.full_name) ||
+          normalizeText(meta.name) ||
+          userEmail;
+        return { id, email: userEmail, nome };
+      }
+    }
+  } catch {
+    // Se schema auth nao estiver acessivel via PostgREST, usa fallback com listUsers.
+  }
+
+  // Fallback: paginar todos os usuarios.
   const users = await listAuthUsers();
   return users.find((user) => normalizeText(user.email).toLowerCase() === normalizedEmail) || null;
 }

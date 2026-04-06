@@ -123,10 +123,15 @@ export function mapWebhookStatus(input: {
   // API4 retorna "Atendida" explicitamente no campo hangupCause — prioridade máxima.
   if (isLigacaoAtendida(cause)) return "Atendida";
 
+  // SIP cause 16: NORMAL_CLEARING = chamada atendida e encerrada normalmente.
+  if (cause === "NORMAL_CLEARING" || causeCode === "16") return "Atendida";
+
   if (eventType.includes("hangup") || duration > 0) {
     if (duration > 0) return "Atendida";
     if (causeLower.includes("busy") || causeCode.includes("busy") || causeCode === "17") return "Ocupado";
     if (causeLower.includes("cancel") || causeLower.includes("cancelada")) return "Cancelada";
+    // NUMBER_CHANGED (SIP 22): numero redirecionado, provavelmente atendida.
+    if (cause === "NUMBER_CHANGED" || causeCode === "22") return "Atendida";
     return "Nao atendida";
   }
 

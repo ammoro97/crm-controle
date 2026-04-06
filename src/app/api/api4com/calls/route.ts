@@ -109,12 +109,12 @@ function toApiCallItem(raw: unknown): Api4ComCallItem | null {
   return raw as Api4ComCallItem;
 }
 
+const KNOWN_CRM_STATUSES = new Set(["Atendida", "Nao atendida", "Ocupado", "Cancelada"]);
+
 function resolveCallStatus(item: Api4ComCallItem, eventType: string, durationSeconds: number): string {
-  const explicitStatus =
-    toStringSafe(item.status) ||
-    toStringSafe(item.hangup_cause) ||
-    toStringSafe(item.hangupCause);
-  if (explicitStatus) return explicitStatus;
+  // Aceita apenas status ja normalizados pelo CRM — raw SIP codes vao para mapWebhookStatus.
+  const explicitStatus = toStringSafe(item.status);
+  if (explicitStatus && KNOWN_CRM_STATUSES.has(explicitStatus)) return explicitStatus;
   return mapWebhookStatus({
     eventType,
     durationSeconds,
