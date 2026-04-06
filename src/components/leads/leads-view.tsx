@@ -26,6 +26,7 @@ import {
 import { useResponsaveis, useResponsaveisRecords } from "@/lib/responsaveis-store";
 import { getPostCallWrapups, subscribePostCallFlow, type PostCallWrapup } from "@/lib/post-call-flow";
 import { formatSaleValueCents, isValidSaleValueCents } from "@/lib/sale-value";
+import { getLeadsFilters, setLeadsFilters } from "@/lib/leads-filters-store";
 import { buildOutboundDashboardMetrics } from "@/lib/leads-outbound-dashboard";
 import GridLayout, { WidthProvider, type Layout as ReactGridLayoutItem } from "react-grid-layout";
 import {
@@ -930,9 +931,18 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   );
   const [detailInitialIsEditing, setDetailInitialIsEditing] = useState(false);
   const [detailInitialObservationId, setDetailInitialObservationId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
+  const filterScope = filter === "outbound" ? "outbound" : "leads";
+  const [searchTerm, setSearchTerm] = useState(() => {
+    if (typeof window === "undefined") return "";
+    const userId = String(currentUser?.id || "guest").trim() || "guest";
+    return getLeadsFilters(userId, filterScope).searchTerm;
+  });
   const deferredSearchTerm = useDeferredValue(searchTerm);
-  const [ownerFilter, setOwnerFilter] = useState("Todos");
+  const [ownerFilter, setOwnerFilter] = useState(() => {
+    if (typeof window === "undefined") return "Todos";
+    const userId = String(currentUser?.id || "guest").trim() || "guest";
+    return getLeadsFilters(userId, filterScope).ownerFilter;
+  });
 
   const [importOpen, setImportOpen] = useState(false);
   const [importDestination, setImportDestination] = useState<ImportDestination>("");
@@ -942,6 +952,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [isAssigningOwners, setIsAssigningOwners] = useState(false);
   const [isDividing, setIsDividing] = useState(false);
   const [divideError, setDivideError] = useState<string | null>(null);
+  const [showDivideConfirm, setShowDivideConfirm] = useState(false);
 
   const addMenuRef = useRef<HTMLDivElement | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -958,6 +969,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [isParsingImportFile, setIsParsingImportFile] = useState(false);
   const [importFileName, setImportFileName] = useState("");
   const [importRows, setImportRows] = useState<ImportedLeadRow[]>([]);
+
+  useEffect(() => {
+    const userId = String(currentUser?.id || "guest").trim() || "guest";
+    setLeadsFilters(userId, filterScope, { ownerFilter, searchTerm });
+  }, [ownerFilter, searchTerm, currentUser?.id, filterScope]);
 
   const dashboardLayoutUserId = useMemo(() => {
     return String(currentUser?.id || DASHBOARD_GUEST_USER_KEY).trim() || DASHBOARD_GUEST_USER_KEY;
@@ -1257,6 +1273,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         setDivideError(data.message || "Erro ao dividir leads.");
         return;
       }
+      setShowDivideConfirm(false);
       if (typeof window !== "undefined") window.location.reload();
     } catch {
       setDivideError("Erro de rede ao dividir leads.");
@@ -2256,6 +2273,17 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               Atualizar pagina
             </button>
           ) : (
+            <div className="flex items-center gap-2">
+              {filter === "outbound" ? (
+                <button
+                  type="button"
+                  className="btn-ghost h-10 px-4 text-sm"
+                  onClick={() => setShowDivideConfirm(true)}
+                  disabled={isDividing}
+                >
+                  Dividir
+                </button>
+              ) : null}
             <div ref={addMenuRef} className="relative">
               <button
                 type="button"
@@ -2325,6 +2353,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                   </button>
                 </div>
               ) : null}
+            </div>
             </div>
           )
         }
@@ -2523,20 +2552,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                   ))}
                 </select>
               </label>
-              {filter === "outbound" ? (
-                <div className="flex flex-col gap-1 self-end">
-                  <button
-                    type="button"
-                    className="btn-ghost h-9 px-3 text-xs"
-                    onClick={() => void dividirLeads()}
-                    disabled={isDividing}
-                  >
-                    {isDividing ? "Dividindo..." : "Dividir"}
-                  </button>
-                  {divideError ? (
-                    <p className="text-[11px] text-rose-300">{divideError}</p>
-                  ) : null}
-                </div>
+              {divideError && filter === "outbound" ? (
+                <p className="self-end text-[11px] text-rose-300">{divideError}</p>
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
@@ -2590,6 +2607,34 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
       {!isDashboardMode ? (
         <>
+      <Modal title="Dividir Leads" open={showDivideConfirm} onClose={() => setShowDivideConfirm(false)}>
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-slate-300">
+            Os leads outbound <strong className="text-white">não acionados</strong> serão distribuídos igualmente entre os vendedores ativos.
+          </p>
+          <p className="text-xs text-slate-400">Leads com primeiro contato registrado ou com ligações em histórico não serão alterados.</p>
+          {divideError ? <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{divideError}</p> : null}
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              className="btn-ghost h-9 px-4 text-sm"
+              onClick={() => { setShowDivideConfirm(false); setDivideError(null); }}
+              disabled={isDividing}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn-primary h-9 px-4 text-sm"
+              disabled={isDividing}
+              onClick={() => { void dividirLeads(); }}
+            >
+              {isDividing ? "Dividindo..." : "Confirmar"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal
         title={
           automationStep === "tipo"

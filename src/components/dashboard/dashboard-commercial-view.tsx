@@ -8,6 +8,8 @@ import { DashboardFunnel } from "@/components/dashboard/dashboard-funnel";
 import { DashboardMetricCard } from "@/components/dashboard/dashboard-metric-card";
 import { useDashboardMetrics } from "@/hooks/use-dashboard-metrics";
 import { useResponsaveisRecords } from "@/lib/responsaveis-store";
+import { useAuth } from "@/components/auth/auth-provider";
+import { getDashboardFilters, setDashboardFilters } from "@/lib/leads-filters-store";
 import type { DashboardFilters, PresetPeriodo } from "@/types/dashboard";
 
 type MetricCardKey =
@@ -410,6 +412,7 @@ export function DashboardCommercialView() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { currentUser } = useAuth();
   const responsaveis = useResponsaveisRecords();
   const searchParamsKey = searchParams.toString();
   const filtersFromUrl = useMemo(
@@ -420,7 +423,18 @@ export function DashboardCommercialView() {
     () => serializeDashboardFilters(filtersFromUrl),
     [filtersFromUrl],
   );
-  const [filters, setFilters] = useState<DashboardFilters>(filtersFromUrl);
+
+  // Initialize from persisted filters when URL has no params
+  const initialFilters = useMemo(() => {
+    if (searchParamsKey) return filtersFromUrl;
+    const userId = String(currentUser?.id || "guest").trim() || "guest";
+    const persisted = getDashboardFilters(userId);
+    if (persisted) return normalizeFiltersInput(persisted as DashboardFilters);
+    return filtersFromUrl;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally run once on mount
+
+  const [filters, setFilters] = useState<DashboardFilters>(initialFilters);
 
   useEffect(() => {
     setFilters((current) =>
@@ -462,8 +476,10 @@ export function DashboardCommercialView() {
       const normalized = normalizeFiltersInput(next);
       setFilters(normalized);
       syncFiltersToUrl(normalized);
+      const userId = String(currentUser?.id || "guest").trim() || "guest";
+      setDashboardFilters(userId, { periodo: normalized.periodo, vendedorId: normalized.vendedorId, from: normalized.from, to: normalized.to });
     },
-    [syncFiltersToUrl],
+    [syncFiltersToUrl, currentUser?.id],
   );
 
   const { metrics, loading, error, refresh } = useDashboardMetrics(filters);
