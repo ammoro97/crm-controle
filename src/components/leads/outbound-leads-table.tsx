@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Modal } from "@/components/ui/modal";
 import { getLeadPhoneItems, getLeadPhones } from "@/lib/lead-contact-utils";
@@ -427,7 +426,6 @@ const RESPONSAVEL_REQUIRED_MESSAGE =
 
 export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLeads }: OutboundLeadsTableProps) {
   const { currentUser } = useAuth();
-  const router = useRouter();
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const bottomScrollRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -538,9 +536,6 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
           ? "Existe uma ligacao encerrada aguardando finalizacao obrigatoria. Finalize antes de iniciar outra."
           : "Existe uma ligacao em andamento. Conclua essa chamada antes de iniciar outra.";
       setCallFeedback(lead.id, { type: "error", message: blockingMessage });
-      if (blocking.reason === "pending_wrapup") {
-        router.push("/ligacoes?postCall=1");
-      }
       return;
     }
     const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);
@@ -585,7 +580,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
       }
       setCallFeedback(lead.id, { type: "success", message: data.message || "Ligacao disparada com sucesso." });
       const externalCallId = extractDialCallId(data);
-      const session = createDialSession({
+      createDialSession({
         sessionId,
         leadId: lead.id,
         nome: lead.name,
@@ -597,7 +592,6 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
         atendenteNome: resolvedResponsavel.responsavel.nome,
         sourcePath: typeof window !== "undefined" ? window.location.pathname : "/leads",
       });
-      router.push(`/ligacoes?postCall=1&sessionId=${encodeURIComponent(session.sessionId)}`);
     } catch {
       setCallFeedback(lead.id, { type: "error", message: "Falha de rede ao tentar ligar." });
     } finally {
@@ -826,6 +820,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
                 />
               </th>
               <th className="w-[6rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Ações</th>
+              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Acionado Base</th>
               <SortHeader col="company"        label="Empresa"           width="w-[14rem]"  active={sortCol === "company"}        dir={sortDir} onSort={handleSort} />
               <SortHeader col="name"           label="Responsavel"       width="w-[12rem]"  active={sortCol === "name"}           dir={sortDir} onSort={handleSort} />
               <SortHeader col="owner"          label="Vendedor"          width="w-[12rem]"  active={sortCol === "owner"}          dir={sortDir} onSort={handleSort} />
@@ -835,7 +830,6 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Expediente</th>
               <SortHeader col="entryDate"      label="Data Cadastro"                        active={sortCol === "entryDate"}      dir={sortDir} onSort={handleSort} />
               <SortHeader col="firstContactDate" label="1o Contato"                         active={sortCol === "firstContactDate"} dir={sortDir} onSort={handleSort} />
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Acionado Base</th>
               <SortHeader col="lastInteraction" label="Ultimo Contato"                      active={sortCol === "lastInteraction"} dir={sortDir} onSort={handleSort} />
               <SortHeader col="nota"           label="Nota"                                 active={sortCol === "nota"}           dir={sortDir} onSort={handleSort} />
               <SortHeader col="avaliacoes"     label="Avaliacoes"                           active={sortCol === "avaliacoes"}     dir={sortDir} onSort={handleSort} />
@@ -882,6 +876,17 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
                   >
                     Editar
                   </button>
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  <span
+                    className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                      hasBaseActivation
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                        : "border-slate-600/80 bg-slate-700/40 text-slate-300"
+                    }`}
+                  >
+                    {hasBaseActivation ? "Sim" : "Nao"}
+                  </span>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 font-medium xl:px-3.5 2xl:py-2">
                   <TruncatedCellText value={lead.company} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
@@ -961,17 +966,6 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                   {formatDateBR(lead.firstContactDate || null)}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <span
-                    className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                      hasBaseActivation
-                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                        : "border-slate-600/80 bg-slate-700/40 text-slate-300"
-                    }`}
-                  >
-                    {hasBaseActivation ? "Sim" : "Nao"}
-                  </span>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                   <TruncatedCellText

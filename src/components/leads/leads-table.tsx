@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Modal } from "@/components/ui/modal";
 import { getLeadPhoneItems, getLeadPhones } from "@/lib/lead-contact-utils";
@@ -193,7 +192,6 @@ const RESPONSAVEL_REQUIRED_MESSAGE =
 
 export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: LeadsTableProps) {
   const { currentUser } = useAuth();
-  const router = useRouter();
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const bottomScrollRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -296,9 +294,6 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
         blockingCallId: blocking.session.matchedCallId || null,
         blockingStatus: blocking.session.status,
       });
-      if (blocking.reason === "pending_wrapup") {
-        router.push("/ligacoes?postCall=1");
-      }
       return;
     }
     console.log("[POSTCALL_DEBUG] NEW_CALL_ALLOWED", {
@@ -382,7 +377,6 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
         sourcePath: typeof window !== "undefined" ? window.location.pathname : "/leads",
       });
       console.log("[POSTCALL_DEBUG] Sessao criada apos discagem", session);
-      router.push(`/ligacoes?postCall=1&sessionId=${encodeURIComponent(session.sessionId)}`);
     } catch {
       setCallFeedback(lead.id, {
         type: "error",
