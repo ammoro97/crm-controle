@@ -21,6 +21,7 @@ import { TruncatedCellLink, TruncatedCellText } from "./table-cell-truncate";
 type OutboundLeadsTableProps = {
   leads: Lead[];
   onSelectLead: (lead: Lead) => void;
+  onEditLead: (lead: Lead) => void;
   onDeleteLeads: (ids: string[]) => void;
 };
 
@@ -396,7 +397,7 @@ function phoneQualityBadgeClass(value?: string) {
 const RESPONSAVEL_REQUIRED_MESSAGE =
   "Seu usuario ainda nao esta vinculado a um responsavel no CRM. Cadastre esse e-mail em Configuracoes > Responsaveis antes de realizar ligacoes.";
 
-export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: OutboundLeadsTableProps) {
+export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLeads }: OutboundLeadsTableProps) {
   const { currentUser } = useAuth();
   const router = useRouter();
   const topScrollRef = useRef<HTMLDivElement | null>(null);
@@ -759,6 +760,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
                   aria-label="Selecionar todos"
                 />
               </th>
+              <th className="w-[6rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Ações</th>
               <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Empresa</th>
               <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Responsavel</th>
               <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Vendedor</th>
@@ -803,6 +805,18 @@ export function OutboundLeadsTable({ leads, onSelectLead, onDeleteLeads }: Outbo
                     className="h-3.5 w-3.5 cursor-pointer accent-sky-500"
                     aria-label={`Selecionar ${lead.company || lead.name}`}
                   />
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                  <button
+                    type="button"
+                    className="rounded-md border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[11px] text-sky-300 transition hover:bg-sky-500/20"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditLead(lead);
+                    }}
+                  >
+                    Editar
+                  </button>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 font-medium xl:px-3.5 2xl:py-2">
                   <TruncatedCellText value={lead.company} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />

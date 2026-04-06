@@ -22,6 +22,7 @@ type LeadDetailDrawerProps = {
   showFinalizeAction?: boolean;
   onClose: () => void;
   initialTab?: DetailTab;
+  initialIsEditing?: boolean;
   initialObservationId?: string | null;
 };
 
@@ -286,6 +287,7 @@ export function LeadDetailDrawer({
   showFinalizeAction = true,
   onClose,
   initialTab,
+  initialIsEditing,
   initialObservationId,
 }: LeadDetailDrawerProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>("resumo");
@@ -305,7 +307,7 @@ export function LeadDetailDrawer({
 
   useEffect(() => {
     setDraftLead(lead);
-    setIsEditing(false);
+    setIsEditing(initialIsEditing ?? false);
     setActiveTab(initialTab || "resumo");
     setTargetObservationId(initialObservationId || null);
     setFinalizeOpen(false);
@@ -315,7 +317,7 @@ export function LeadDetailDrawer({
     setSaleValueDigits("");
     setFinalizeError(null);
     prevLeadIdRef.current = lead?.id ?? null;
-  }, [initialObservationId, initialTab, lead?.id]);
+  }, [initialIsEditing, initialObservationId, initialTab, lead?.id]);
 
   // Quando syncAiObservations adiciona observações ao lead externo, reflete no draftLead
   // sem resetar edições em andamento. Só sincroniza observationLog.

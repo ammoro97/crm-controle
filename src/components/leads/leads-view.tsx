@@ -928,6 +928,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [detailInitialTab, setDetailInitialTab] = useState<"resumo" | "historico" | "qualificacao" | "observacoes" | "agenda">(
     "resumo",
   );
+  const [detailInitialIsEditing, setDetailInitialIsEditing] = useState(false);
   const [detailInitialObservationId, setDetailInitialObservationId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const deferredSearchTerm = useDeferredValue(searchTerm);
@@ -1699,7 +1700,16 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   }, [importPreviewRows]);
 
   const openLeadDetails = (lead: Lead) => {
+    setDetailInitialIsEditing(false);
     setDetailInitialTab("resumo");
+    setDetailInitialObservationId(null);
+    setDetailLeadId(lead.id);
+    setDetailOpen(true);
+  };
+
+  const openLeadForEditing = (lead: Lead) => {
+    setDetailInitialIsEditing(true);
+    setDetailInitialTab("qualificacao");
     setDetailInitialObservationId(null);
     setDetailLeadId(lead.id);
     setDetailOpen(true);
@@ -2503,7 +2513,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           ) : null}
 
           {filter === "outbound" ? (
-            <OutboundLeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onDeleteLeads={deleteLeadsById} />
+            <OutboundLeadsTable leads={visibleLeads} onSelectLead={openLeadDetails} onEditLead={openLeadForEditing} onDeleteLeads={deleteLeadsById} />
           ) : (
             <LeadsTable
               leads={visibleLeads}
@@ -2808,11 +2818,13 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         onSave={updateLeadById}
         onFinalizeLead={finalizeLeadViaProfile}
         initialTab={detailInitialTab}
+        initialIsEditing={detailInitialIsEditing}
         initialObservationId={detailInitialObservationId}
         onClose={() => {
           setDetailOpen(false);
           setDetailLeadId(null);
           setDetailInitialTab("resumo");
+          setDetailInitialIsEditing(false);
           setDetailInitialObservationId(null);
         }}
       />
