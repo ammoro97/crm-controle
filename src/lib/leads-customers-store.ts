@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Lead } from "@/types/crm";
+import type { Lead, Meeting } from "@/types/crm";
 import { getSupabaseAdmin } from "./supabase-admin";
 
 type LeadTableName = "crm_leads" | "crm_customers";
@@ -220,6 +220,7 @@ export async function deleteCustomersFromCollection(ids: string[]): Promise<void
 
 export type LeadArchiveEntry = {
   lead: Lead;
+  meetings?: Meeting[];
   finalizadoEm: string;
   motivo: string;
 };
@@ -246,9 +247,9 @@ export async function archiveLeadsToHistory(entries: LeadArchiveEntry[]): Promis
   const admin = getSupabaseAdmin();
   if (!admin) throw new Error("SUPABASE_REQUIRED_FOR_ARCHIVE");
 
-  const rows = entries.map(({ lead, finalizadoEm, motivo }) => ({
+  const rows = entries.map(({ lead, meetings, finalizadoEm, motivo }) => ({
     lead_id: lead.id,
-    payload: lead,
+    payload: { ...lead, _meetings: meetings ?? [] },
     finalizado_em: finalizadoEm,
     motivo,
   }));

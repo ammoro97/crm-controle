@@ -1758,9 +1758,17 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   const deleteLeadsById = (ids: string[]) => {
     const toDelete = new Set(ids);
+    const toArchive = leads.filter((lead) => toDelete.has(lead.id));
     const filteredLeads = leads.filter((lead) => !toDelete.has(lead.id));
+    const now = new Date().toISOString();
+    const archiveEntries = toArchive.map((lead) => ({
+      lead,
+      meetings: meetings.filter((m) => m.leadId === lead.id),
+      finalizadoEm: now,
+      motivo: "finalizado_apagar",
+    }));
     setLeads(filteredLeads);
-    setLeadsSnapshot(filteredLeads, ids);
+    setLeadsSnapshot(filteredLeads, undefined, archiveEntries);
   };
 
   const finalizeLeadViaProfile = (leadToFinalize: Lead, reason: LeadFinalizationReason, saleValueCents?: number): boolean => {
@@ -1795,7 +1803,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     if (reason === "apagar") {
       // Arquiva na tabela histórica antes de deletar — não usa deletedLeadIds
       setLeadsSnapshot(filteredLeads, undefined, [
-        { lead: resolvedLead, finalizadoEm: finalizedAtIso, motivo: "finalizado_apagar" },
+        {
+          lead: resolvedLead,
+          meetings: meetings.filter((m) => m.leadId === resolvedLead.id),
+          finalizadoEm: finalizedAtIso,
+          motivo: "finalizado_apagar",
+        },
       ]);
     } else {
       // compra_efetuada: lead migra para customers, delete direto da base ativa

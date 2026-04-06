@@ -3,7 +3,7 @@
 import { normalizeMeetingsSnapshot } from "@/lib/agenda-events";
 import { Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
 
-type LeadArchiveEntry = { lead: Lead; finalizadoEm: string; motivo: string };
+type LeadArchiveEntry = { lead: Lead; meetings?: Meeting[]; finalizadoEm: string; motivo: string };
 
 export const LEADS_STORAGE_KEY = "crm.leads.v1";
 export const MEETINGS_STORAGE_KEY = "crm.agenda.meetings.v1";
