@@ -248,10 +248,12 @@ function normalizePhoneDigits(value?: string | null) {
 
 function normalizeSessionWrapupState(session: ActiveCallSession): WrapupSessionState {
   if (session.wrapupState === "opened" || session.wrapupState === "minimized" || session.wrapupState === "pending") {
+    // "opened" so sera preservado se veio de uma sessao anterior (ex: usuario minimizou e recarregou).
+    // Nao promovemos automaticamente para "opened" — apenas "pending" como fallback seguro.
     return session.wrapupState;
   }
-  if (session.status === "ended_detected") return "pending";
-  return "opened";
+  // Fallback seguro: sempre "pending" para nao disparar o modal automaticamente.
+  return "pending";
 }
 
 function normalizeActiveSessionRecord(session: ActiveCallSession): ActiveCallSession {

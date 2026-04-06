@@ -587,17 +587,9 @@ export function GlobalWrapupModal() {
       setPostCallForm(nextForm);
     }
 
-    if (activeSession.wrapupState !== "opened" || wrapupOpen) return;
-
-    if (activeSession.wrapupState !== "opened") {
-      setWrapupSessionState(activeSession.sessionId, "opened");
-    }
-    setWrapupError(null);
-    setWrapupOpen(true);
-    if (!activeSession.promptedAt) {
-      markSessionPrompted(activeSession.sessionId);
-    }
-  }, [activeSession, wrapupOpen]);
+    // Nao abrir o modal automaticamente. O modal so abre via acao manual
+    // do usuario (botao "Abrir finalizacao" dispara crm:open-wrapup).
+  }, [activeSession]);
 
   useEffect(() => {
     if (!activeSession || activeSession.status === "wrapped") return;
