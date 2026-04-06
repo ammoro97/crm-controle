@@ -616,7 +616,18 @@ export async function POST(request: Request) {
     });
 
     if (resolvedCallLog.ambiguous) {
-      mismatches.push("callLogAmbiguous");
+      if (resolvedCallLog.selected) {
+        // Multiple candidates but a deterministic winner exists (most recent).
+        // Log and continue instead of failing — the only ambiguity is extra records,
+        // not a data conflict.
+        console.warn("[ANALISE_IA] CALLBACK_CALLLOG_AMBIGUOUS_RESOLVED", {
+          requestId,
+          selectedCallLogId: resolvedCallLog.selected.id,
+          candidatesCount: resolvedCallLog.filteredCandidates.length,
+        });
+      } else {
+        mismatches.push("callLogAmbiguous");
+      }
     }
 
     let callLog = resolvedCallLog.selected;
