@@ -4,7 +4,6 @@ import { getBlockingInfo } from "@/components/agenda/agenda-utils";
 import {
   AgendaReservation,
   getAgendaReservations,
-  saveAgendaReservations,
   withAgendaReservationsLock,
 } from "@/lib/agenda-reservations-store";
 import {
@@ -37,6 +36,10 @@ type ScheduleResponse = {
   reservationId?: string | null;
   message?: string;
 };
+
+type ReserveResult =
+  | { success: false; available: false; status: number; message: string }
+  | { success: true; available: true; status: number; reservation: AgendaReservation };
 
 function normalizeBlocks(value: unknown): AgendaBlocks {
   if (!value || typeof value !== "object") return emptyAgendaBlocks;
@@ -218,8 +221,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const result = await withAgendaReservationsLock(async () => {
-      const reservations = await getAgendaReservations();
+    const result = await withAgendaReservationsLock<ReserveResult>(async (reservations) => {
       const conflict = validateConflict({
         date,
         time,
@@ -232,11 +234,14 @@ export async function POST(request: Request) {
 
       if (!conflict.available) {
         return {
-          success: false,
-          available: false,
-          status: conflict.status,
-          message: conflict.message,
-        } as const;
+          ok: false,
+          result: {
+            success: false,
+            available: false,
+            status: conflict.status,
+            message: conflict.message,
+          },
+        };
       }
 
       const reservation = upsertReservation({
@@ -246,13 +251,16 @@ export async function POST(request: Request) {
         owner,
         sessionId,
       });
-      await saveAgendaReservations(reservations);
       return {
-        success: true,
-        available: true,
-        status: 200,
-        reservation,
-      } as const;
+        ok: true,
+        reservations,
+        result: {
+          success: true,
+          available: true,
+          status: 200,
+          reservation,
+        },
+      };
     });
 
     if (!result.success) {
