@@ -2,6 +2,7 @@
 
 import { normalizeMeetingsSnapshot } from "@/lib/agenda-events";
 import { Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
+import { applyServerWrapupsSnapshot, type PostCallWrapup } from "@/lib/post-call-flow";
 
 type LeadArchiveEntry = { lead: Lead; meetings?: Meeting[]; finalizadoEm: string; motivo: string };
 
@@ -30,7 +31,7 @@ type SnapshotPayload = {
 
 type SnapshotResponse = {
   success?: boolean;
-  snapshots?: SnapshotPayload;
+  snapshots?: SnapshotPayload & { wrapups?: unknown[] };
 };
 
 const syncQueue = new Map<SnapshotPayloadField, unknown>();
@@ -205,6 +206,10 @@ async function hydrateSnapshotsFromServer() {
         LEAD_FINALIZATIONS_EVENT,
         cloneLeadFinalizations(data.snapshots.leadFinalizations),
       );
+    }
+    // Mescla wrapups de todos os vendedores para exibicao global de finalizacoes.
+    if (Array.isArray(data.snapshots.wrapups)) {
+      applyServerWrapupsSnapshot(data.snapshots.wrapups as PostCallWrapup[]);
     }
   } catch {
     // Falha de rede/autorizacao nao deve quebrar o fluxo local.

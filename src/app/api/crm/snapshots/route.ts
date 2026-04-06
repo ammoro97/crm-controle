@@ -157,7 +157,12 @@ export async function POST(request: NextRequest) {
 
     const wrapups = asArray<PostCallWrapup>(body?.wrapups);
     if (wrapups) {
-      writes.push(writeDataFile(WRAPUPS_FILE, wrapups));
+      // Merge com existentes para nao sobrescrever wrapups de outros usuarios.
+      const existing = await readDataFile<PostCallWrapup[]>(WRAPUPS_FILE, []);
+      const existingArray = Array.isArray(existing) ? existing : [];
+      const incomingIds = new Set(wrapups.map((w) => w.id));
+      const preserved = existingArray.filter((w) => !incomingIds.has((w as PostCallWrapup).id));
+      writes.push(writeDataFile(WRAPUPS_FILE, [...wrapups, ...preserved]));
     }
 
     if (writes.length === 0) {

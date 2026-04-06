@@ -133,22 +133,30 @@ function cloneWrapups(items: PostCallWrapup[]): PostCallWrapup[] {
   return items.map((item) => ({ ...item }));
 }
 
-function shouldHydrateWrapups() {
-  if (!isBrowser()) return false;
-  const raw = window.localStorage.getItem(POST_CALL_WRAPUPS_KEY);
-  if (raw === null) return true;
-  try {
-    const parsed = JSON.parse(raw);
-    return !Array.isArray(parsed);
-  } catch {
-    return true;
-  }
+function readLocalWrapupsRaw(): PostCallWrapup[] {
+  if (!isBrowser()) return [];
+  const parsed = safeParseJSON<PostCallWrapup[]>(window.localStorage.getItem(POST_CALL_WRAPUPS_KEY), []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
-function applyHydratedWrapups(next: PostCallWrapup[]) {
+function mergeWrapupArrays(server: PostCallWrapup[], local: PostCallWrapup[]): PostCallWrapup[] {
+  const byId = new Map<string, PostCallWrapup>();
+  for (const w of server) byId.set(w.id, w);
+  // Wrapups locais prevalecem quando sao mais recentes (protege saves nao sincronizados).
+  for (const w of local) {
+    const existing = byId.get(w.id);
+    if (!existing || w.updatedAt >= existing.updatedAt) byId.set(w.id, w);
+  }
+  return Array.from(byId.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function applyMergedWrapups(serverWrapups: PostCallWrapup[]) {
   if (!isBrowser()) return;
-  window.localStorage.setItem(POST_CALL_WRAPUPS_KEY, JSON.stringify(next));
+  const local = readLocalWrapupsRaw();
+  const merged = mergeWrapupArrays(serverWrapups, local);
+  window.localStorage.setItem(POST_CALL_WRAPUPS_KEY, JSON.stringify(merged));
   emitFlowChanged();
+  debugLog("Wrapups mesclados do servidor", { server: serverWrapups.length, local: local.length, merged: merged.length });
 }
 
 async function hydrateWrapupsFromServer() {
@@ -162,10 +170,9 @@ async function hydrateWrapupsFromServer() {
 
     const data = (await response.json()) as SnapshotResponse;
     const serverWrapups = data?.snapshots?.wrapups;
-    if (!data.success || !Array.isArray(serverWrapups) || !shouldHydrateWrapups()) return;
+    if (!data.success || !Array.isArray(serverWrapups)) return;
 
-    applyHydratedWrapups(cloneWrapups(serverWrapups));
-    debugLog("Wrapups hidratados do Supabase", { count: serverWrapups.length });
+    applyMergedWrapups(serverWrapups);
   } catch {
     // Falha de rede/autorizacao nao deve quebrar fluxo local.
   }
@@ -176,6 +183,15 @@ function ensureWrapupsHydrated() {
   if (wrapupsHydrationStarted) return;
   wrapupsHydrationStarted = true;
   void hydrateWrapupsFromServer();
+}
+
+/**
+ * Mescla wrapups do servidor com os locais. Chamado pelo background sync do crm-data-store
+ * para que todos os vendedores vejam finalizacoes uns dos outros.
+ */
+export function applyServerWrapupsSnapshot(serverWrapups: PostCallWrapup[]) {
+  if (!isBrowser() || !Array.isArray(serverWrapups)) return;
+  applyMergedWrapups(serverWrapups);
 }
 
 async function flushWrapupsSyncQueue() {
