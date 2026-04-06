@@ -1246,12 +1246,17 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     setDivideError(null);
     try {
       const res = await fetch("/api/leads/dividir", { method: "POST" });
-      const data = (await res.json()) as { success: boolean; message?: string; distributed?: number };
+      let data: { success: boolean; message?: string; distributed?: number } = { success: false };
+      try {
+        data = (await res.json()) as typeof data;
+      } catch {
+        setDivideError(`Erro do servidor (${res.status}).`);
+        return;
+      }
       if (!res.ok || !data.success) {
         setDivideError(data.message || "Erro ao dividir leads.");
         return;
       }
-      // Re-hidrata dados do servidor para refletir os owners atualizados
       if (typeof window !== "undefined") window.location.reload();
     } catch {
       setDivideError("Erro de rede ao dividir leads.");
