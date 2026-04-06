@@ -3342,8 +3342,13 @@ export default function LigacoesPage() {
     try {
       const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);
       if (!resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {
+        console.error("[WRAPUP_SAVE] responsavel_not_found", {
+          userId: currentUser?.id ?? null,
+          email: currentUser?.email ?? null,
+          error: resolvedResponsavel.error ?? null,
+        });
         setWrapupError(
-          "Seu usuário ainda não está vinculado a um responsável no CRM. Cadastre esse e-mail em Configurações > Responsáveis antes de finalizar ligações.",
+          `Seu usuário (${currentUser?.email ?? "sem e-mail"}) ainda não está vinculado a um responsável no CRM. Cadastre esse e-mail em Configurações > Responsáveis antes de finalizar ligações.`,
         );
         return;
       }

@@ -100,6 +100,14 @@ function normalizeCallLog(input: Partial<CallLog> & Pick<CallLog, "id">): CallLo
   };
 }
 
+/**
+ * Regra centralizada: se causaDesligamento === "Atendida" (exato, API4) → atendida.
+ * Não depende de outros campos. Um único ponto de verdade.
+ */
+export function isLigacaoAtendida(causaDesligamento?: string | null): boolean {
+  return String(causaDesligamento || "").trim() === "Atendida";
+}
+
 export function mapWebhookStatus(input: {
   eventType?: string;
   durationSeconds?: number;
@@ -108,13 +116,17 @@ export function mapWebhookStatus(input: {
 }) {
   const eventType = (input.eventType || "").toLowerCase();
   const duration = Number(input.durationSeconds || 0);
-  const cause = (input.hangupCause || "").toLowerCase();
+  const cause = String(input.hangupCause || "").trim();
+  const causeLower = cause.toLowerCase();
   const causeCode = (input.hangupCauseCode || "").toLowerCase();
+
+  // API4 retorna "Atendida" explicitamente no campo hangupCause — prioridade máxima.
+  if (isLigacaoAtendida(cause)) return "Atendida";
 
   if (eventType.includes("hangup") || duration > 0) {
     if (duration > 0) return "Atendida";
-    if (cause.includes("busy") || causeCode.includes("busy") || causeCode === "17") return "Ocupado";
-    if (cause.includes("cancel") || cause.includes("cancelada")) return "Cancelada";
+    if (causeLower.includes("busy") || causeCode.includes("busy") || causeCode === "17") return "Ocupado";
+    if (causeLower.includes("cancel") || causeLower.includes("cancelada")) return "Cancelada";
     return "Nao atendida";
   }
 
