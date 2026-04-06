@@ -377,6 +377,7 @@ export function LeadsTable({ leads, onSelectLead, onSaveRow, onDeleteLeads }: Le
         sourcePath: typeof window !== "undefined" ? window.location.pathname : "/leads",
       });
       console.log("[POSTCALL_DEBUG] Sessao criada apos discagem", session);
+      onSelectLead(lead);
     } catch {
       setCallFeedback(lead.id, {
         type: "error",

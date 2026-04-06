@@ -831,7 +831,7 @@ export function createDialSession(input: {
     startedAt: new Date().toISOString(),
     sourcePath: input.sourcePath || "/leads",
     status: "dialing",
-    wrapupState: "opened",
+    wrapupState: "pending",
   };
   writeActiveSession(session);
   debugLog("CALL_START", {
@@ -882,7 +882,7 @@ export function markCallSessionEnded(input: {
   const updated: ActiveCallSession = {
     ...current,
     status: "ended_detected",
-    wrapupState: current.wrapupState === "minimized" ? "pending" : "opened",
+    wrapupState: "pending",
     detectedAt: new Date().toISOString(),
     matchedCallId: input.callId || current.matchedCallId,
     detectionSource: input.detectionSource,

@@ -592,6 +592,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
         atendenteNome: resolvedResponsavel.responsavel.nome,
         sourcePath: typeof window !== "undefined" ? window.location.pathname : "/leads",
       });
+      onSelectLead(lead);
     } catch {
       setCallFeedback(lead.id, { type: "error", message: "Falha de rede ao tentar ligar." });
     } finally {
