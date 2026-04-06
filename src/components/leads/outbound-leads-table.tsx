@@ -25,6 +25,34 @@ type OutboundLeadsTableProps = {
   onDeleteLeads: (ids: string[]) => void;
 };
 
+type SortCol =
+  | "company" | "name" | "owner" | "entryDate" | "firstContactDate"
+  | "lastInteraction" | "nota" | "avaliacoes" | "city" | "state"
+  | "source" | "totalCalls" | "totalFollowUps" | "conversionDate";
+
+type SortDir = "asc" | "desc";
+
+function SortHeader({
+  col, label, width, active, dir, onSort,
+}: {
+  col: SortCol; label: string; width?: string;
+  active: boolean; dir: SortDir; onSort: (col: SortCol) => void;
+}) {
+  return (
+    <th
+      className={`whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2 cursor-pointer select-none${width ? ` ${width}` : ""}${active ? " text-slate-100" : ""}`}
+      onClick={() => onSort(col)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className={`text-[10px] ${active ? "text-sky-400" : "text-muted/40"}`}>
+          {active ? (dir === "asc" ? "↑" : "↓") : "⇅"}
+        </span>
+      </span>
+    </th>
+  );
+}
+
 type DialApiResponse = {
   success?: boolean;
   message?: string;
@@ -447,6 +475,43 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
     [expedienteReferenceDate, leadInteractionMetricsById, leads],
   );
 
+  const [sortCol, setSortCol] = useState<SortCol | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const handleSort = (col: SortCol) => {
+    if (sortCol === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  };
+
+  const sortedRows = useMemo(() => {
+    if (!sortCol) return tableRows;
+    return [...tableRows].sort((a, b) => {
+      let cmp = 0;
+      switch (sortCol) {
+        case "company":      cmp = (a.lead.company || "").localeCompare(b.lead.company || "", "pt-BR", { sensitivity: "base" }); break;
+        case "name":         cmp = (a.lead.name || "").localeCompare(b.lead.name || "", "pt-BR", { sensitivity: "base" }); break;
+        case "owner":        cmp = (a.lead.owner || "").localeCompare(b.lead.owner || "", "pt-BR", { sensitivity: "base" }); break;
+        case "city":         cmp = (a.location.city || "").localeCompare(b.location.city || "", "pt-BR", { sensitivity: "base" }); break;
+        case "state":        cmp = (a.location.state || "").localeCompare(b.location.state || "", "pt-BR", { sensitivity: "base" }); break;
+        case "source":       cmp = (a.lead.source || "").localeCompare(b.lead.source || "", "pt-BR", { sensitivity: "base" }); break;
+        case "entryDate":    cmp = (a.lead.entryDate || "").localeCompare(b.lead.entryDate || ""); break;
+        case "firstContactDate": cmp = (a.lead.firstContactDate || "").localeCompare(b.lead.firstContactDate || ""); break;
+        case "lastInteraction":  cmp = (a.lead.lastInteraction || "").localeCompare(b.lead.lastInteraction || ""); break;
+        case "conversionDate":   cmp = (a.metrics.conversionDate || "").localeCompare(b.metrics.conversionDate || ""); break;
+        case "nota":         cmp = (Number(a.lead.nota) || 0) - (Number(b.lead.nota) || 0); break;
+        case "avaliacoes":   cmp = (Number(a.lead.avaliacoes) || 0) - (Number(b.lead.avaliacoes) || 0); break;
+        case "totalCalls":   cmp = a.metrics.totalCalls - b.metrics.totalCalls; break;
+        case "totalFollowUps": cmp = a.metrics.totalFollowUps - b.metrics.totalFollowUps; break;
+        default: break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [tableRows, sortCol, sortDir]);
+
   const setCallFeedback = (leadId: string, feedback: CallFeedback) => {
     setCallFeedbackByLead((prev) => ({ ...prev, [leadId]: feedback }));
     if (feedbackTimeoutsRef.current[leadId]) clearTimeout(feedbackTimeoutsRef.current[leadId]);
@@ -633,13 +698,13 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
     setSelectedIds(new Set());
   }, [leads]);
 
-  const allSelected = tableRows.length > 0 && tableRows.every(({ lead }) => selectedIds.has(lead.id));
+  const allSelected = sortedRows.length > 0 && sortedRows.every(({ lead }) => selectedIds.has(lead.id));
 
   const toggleSelectAll = () => {
     if (allSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(tableRows.map(({ lead }) => lead.id)));
+      setSelectedIds(new Set(sortedRows.map(({ lead }) => lead.id)));
     }
   };
 
@@ -761,30 +826,30 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
                 />
               </th>
               <th className="w-[6rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Ações</th>
-              <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Empresa</th>
-              <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Responsavel</th>
-              <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Vendedor</th>
+              <SortHeader col="company"        label="Empresa"           width="w-[14rem]"  active={sortCol === "company"}        dir={sortDir} onSort={handleSort} />
+              <SortHeader col="name"           label="Responsavel"       width="w-[12rem]"  active={sortCol === "name"}           dir={sortDir} onSort={handleSort} />
+              <SortHeader col="owner"          label="Vendedor"          width="w-[12rem]"  active={sortCol === "owner"}          dir={sortDir} onSort={handleSort} />
               <th className="w-[19rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Telefone</th>
               <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Email</th>
               <th className="w-[16rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Site</th>
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Expediente</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Data Cadastro</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">1o Contato</th>
+              <SortHeader col="entryDate"      label="Data Cadastro"                        active={sortCol === "entryDate"}      dir={sortDir} onSort={handleSort} />
+              <SortHeader col="firstContactDate" label="1o Contato"                         active={sortCol === "firstContactDate"} dir={sortDir} onSort={handleSort} />
               <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Acionado Base</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Ultimo Contato</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Nota</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Avaliacoes</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Cidade</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Estado</th>
-              <th className="w-[12rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Origem</th>
-              <th className="w-[9rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Total de Ligacoes</th>
-              <th className="w-[10rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Total de Follow-ups</th>
+              <SortHeader col="lastInteraction" label="Ultimo Contato"                      active={sortCol === "lastInteraction"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="nota"           label="Nota"                                 active={sortCol === "nota"}           dir={sortDir} onSort={handleSort} />
+              <SortHeader col="avaliacoes"     label="Avaliacoes"                           active={sortCol === "avaliacoes"}     dir={sortDir} onSort={handleSort} />
+              <SortHeader col="city"           label="Cidade"                               active={sortCol === "city"}           dir={sortDir} onSort={handleSort} />
+              <SortHeader col="state"          label="Estado"                               active={sortCol === "state"}          dir={sortDir} onSort={handleSort} />
+              <SortHeader col="source"         label="Origem"            width="w-[12rem]"  active={sortCol === "source"}         dir={sortDir} onSort={handleSort} />
+              <SortHeader col="totalCalls"     label="Total de Ligacoes" width="w-[9rem]"   active={sortCol === "totalCalls"}     dir={sortDir} onSort={handleSort} />
+              <SortHeader col="totalFollowUps" label="Total de Follow-ups" width="w-[10rem]" active={sortCol === "totalFollowUps"} dir={sortDir} onSort={handleSort} />
               <th className="w-[9rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Call Agendada</th>
-              <th className="w-[10rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Data de Conversao</th>
+              <SortHeader col="conversionDate" label="Data de Conversao" width="w-[10rem]" active={sortCol === "conversionDate"} dir={sortDir} onSort={handleSort} />
             </tr>
           </thead>
           <tbody>
-            {tableRows.map(({ lead, location, expediente, metrics }) => {
+            {sortedRows.map(({ lead, location, expediente, metrics }) => {
               const phones = getLeadPhones(lead);
               const hasBaseActivation = metrics.totalCalls > 0 || Boolean(String(lead.firstContactDate || "").trim());
               return (

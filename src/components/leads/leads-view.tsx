@@ -940,6 +940,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [createError, setCreateError] = useState("");
   const [assignError, setAssignError] = useState("");
   const [isAssigningOwners, setIsAssigningOwners] = useState(false);
+  const [isDividing, setIsDividing] = useState(false);
+  const [divideError, setDivideError] = useState<string | null>(null);
 
   const addMenuRef = useRef<HTMLDivElement | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -1235,6 +1237,26 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       setAssignError(resolveLeadDistributionErrorMessage(error));
     } finally {
       setIsAssigningOwners(false);
+    }
+  };
+
+  const dividirLeads = async () => {
+    if (isDividing) return;
+    setIsDividing(true);
+    setDivideError(null);
+    try {
+      const res = await fetch("/api/leads/dividir", { method: "POST" });
+      const data = (await res.json()) as { success: boolean; message?: string; distributed?: number };
+      if (!res.ok || !data.success) {
+        setDivideError(data.message || "Erro ao dividir leads.");
+        return;
+      }
+      // Re-hidrata dados do servidor para refletir os owners atualizados
+      if (typeof window !== "undefined") window.location.reload();
+    } catch {
+      setDivideError("Erro de rede ao dividir leads.");
+    } finally {
+      setIsDividing(false);
     }
   };
 
@@ -2475,6 +2497,21 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                   ))}
                 </select>
               </label>
+              {filter === "outbound" ? (
+                <div className="flex flex-col gap-1 self-end">
+                  <button
+                    type="button"
+                    className="btn-ghost h-9 px-3 text-xs"
+                    onClick={() => void dividirLeads()}
+                    disabled={isDividing}
+                  >
+                    {isDividing ? "Dividindo..." : "Dividir"}
+                  </button>
+                  {divideError ? (
+                    <p className="text-[11px] text-rose-300">{divideError}</p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               {hasUnassignedScopedLeads ? (
