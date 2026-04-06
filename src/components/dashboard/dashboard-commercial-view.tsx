@@ -424,17 +424,7 @@ export function DashboardCommercialView() {
     [filtersFromUrl],
   );
 
-  // Initialize from persisted filters when URL has no params
-  const initialFilters = useMemo(() => {
-    if (searchParamsKey) return filtersFromUrl;
-    const userId = String(currentUser?.id || "guest").trim() || "guest";
-    const persisted = getDashboardFilters(userId);
-    if (persisted) return normalizeFiltersInput(persisted as DashboardFilters);
-    return filtersFromUrl;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally run once on mount
-
-  const [filters, setFilters] = useState<DashboardFilters>(initialFilters);
+  const [filters, setFilters] = useState<DashboardFilters>(filtersFromUrl);
 
   useEffect(() => {
     setFilters((current) =>
@@ -443,6 +433,19 @@ export function DashboardCommercialView() {
         : filtersFromUrl,
     );
   }, [filtersFromUrl, filtersFromUrlKey]);
+
+  // On mount with no URL params: restore persisted filters by pushing them to URL.
+  // The URL change triggers filtersFromUrl → setFilters naturally, keeping one source of truth.
+  useEffect(() => {
+    if (searchParamsKey) return; // URL already has params, nothing to restore
+    const userId = String(currentUser?.id || "guest").trim() || "guest";
+    const persisted = getDashboardFilters(userId);
+    if (!persisted) return;
+    const normalized = normalizeFiltersInput(persisted as DashboardFilters);
+    const query = buildFiltersSearchParams(normalized).toString();
+    if (query) router.replace(`${pathname}?${query}`, { scroll: false });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount only
 
   const vendedores = useMemo(() => {
     const vendedoresOnly = responsaveis.filter((responsavel) => responsavel.tipo === "vendedor");
