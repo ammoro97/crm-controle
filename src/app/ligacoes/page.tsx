@@ -1420,6 +1420,8 @@ export default function LigacoesPage() {
   const [postCallForm, setPostCallForm] = useState<PostCallFormState>(createDefaultPostCallForm());
   const [agendaBlocks, setAgendaBlocks] = useState<AgendaBlocks>(emptyAgendaBlocks);
   const [wrapupResolvedOwnerName, setWrapupResolvedOwnerName] = useState("");
+  const [phoneAccordionOpen, setPhoneAccordionOpen] = useState(false);
+  const [emailAccordionOpen, setEmailAccordionOpen] = useState(false);
 
   const checkingCallEndRef = useRef(false);
   const initialLoadDoneRef = useRef(false);
@@ -4155,19 +4157,35 @@ export default function LigacoesPage() {
               </span>
             </div>
             <div className="mt-3 flex flex-col gap-3">
-          <div className="w-full rounded-lg border border-slate-800/90 bg-slate-900/40 p-3">
-            <div className="flex items-start justify-between gap-2">
-              <div>
+          <div className="w-full rounded-lg border border-slate-800/90 bg-slate-900/40">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-2 p-3 text-left"
+              onClick={() => setPhoneAccordionOpen((v) => !v)}
+              aria-expanded={phoneAccordionOpen}
+            >
+              <div className="flex items-center gap-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-200">Telefones</p>
-                <p className="mt-1 text-[11px] text-slate-400">
-                  Classifique cada numero para apoiar a decisao de nova tentativa.
-                </p>
+                <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-300">
+                  {postCallForm.phoneItems.length}
+                </span>
               </div>
-              <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-300">
-                {postCallForm.phoneItems.length}
-              </span>
-            </div>
-            <div className="mt-2 max-h-44 space-y-2 overflow-y-auto pr-1">
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${phoneAccordionOpen ? "rotate-180" : ""}`}
+              >
+                <path d="M4 6l4 4 4-4" />
+              </svg>
+            </button>
+            {phoneAccordionOpen ? (
+            <div className="px-3 pb-3">
+            <p className="mb-2 text-[11px] text-slate-400">Classifique cada numero para apoiar a decisao de nova tentativa.</p>
+            <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
               {postCallForm.phoneItems.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-slate-700 px-2.5 py-2 text-xs text-slate-400">
                   Nenhum telefone cadastrado.
@@ -4293,21 +4311,39 @@ export default function LigacoesPage() {
                 </button>
               </div>
             </div>
+            </div>
+            ) : null}
           </div>
 
-          <div className="w-full rounded-lg border border-slate-800/90 bg-slate-900/40 p-3">
-            <div className="flex items-start justify-between gap-2">
-              <div>
+          <div className="w-full rounded-lg border border-slate-800/90 bg-slate-900/40">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-2 p-3 text-left"
+              onClick={() => setEmailAccordionOpen((v) => !v)}
+              aria-expanded={emailAccordionOpen}
+            >
+              <div className="flex items-center gap-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-200">E-mails</p>
-                <p className="mt-1 text-[11px] text-slate-400">
-                  Deixe a qualidade clara para orientar o envio opcional nesta finalizacao.
-                </p>
+                <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-300">
+                  {postCallForm.emailItems.length}
+                </span>
               </div>
-              <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-300">
-                {postCallForm.emailItems.length}
-              </span>
-            </div>
-            <div className="mt-2 max-h-44 space-y-2 overflow-y-auto pr-1">
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${emailAccordionOpen ? "rotate-180" : ""}`}
+              >
+                <path d="M4 6l4 4 4-4" />
+              </svg>
+            </button>
+            {emailAccordionOpen ? (
+            <div className="px-3 pb-3">
+            <p className="mb-2 text-[11px] text-slate-400">Deixe a qualidade clara para orientar o envio opcional nesta finalizacao.</p>
+            <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
               {postCallForm.emailItems.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-slate-700 px-2.5 py-2 text-xs text-slate-400">
                   Nenhum e-mail cadastrado.
@@ -4416,6 +4452,8 @@ export default function LigacoesPage() {
                 </button>
               </div>
             </div>
+            </div>
+            ) : null}
           </div>
             </div>
           </section>
