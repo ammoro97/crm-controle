@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DashboardFilters as DashboardFiltersPanel } from "@/components/dashboard/DashboardFilters";
 import { PageTopbar } from "@/components/layout/page-topbar";
@@ -412,7 +412,7 @@ export function DashboardCommercialView() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { currentUser } = useAuth();
+  const { currentUser, loading: authLoading } = useAuth();
   const responsaveis = useResponsaveisRecords();
   const searchParamsKey = searchParams.toString();
   const filtersFromUrl = useMemo(
@@ -434,18 +434,21 @@ export function DashboardCommercialView() {
     );
   }, [filtersFromUrl, filtersFromUrlKey]);
 
-  // On mount with no URL params: restore persisted filters by pushing them to URL.
-  // The URL change triggers filtersFromUrl → setFilters naturally, keeping one source of truth.
+  // Restore persisted filters once auth resolves and URL has no params.
+  // Must wait for currentUser (auth is async — on mount currentUser is null).
+  const restoredRef = useRef(false);
   useEffect(() => {
-    if (searchParamsKey) return; // URL already has params, nothing to restore
+    if (authLoading) return;           // wait for auth to resolve
+    if (restoredRef.current) return;   // run only once per mount
+    restoredRef.current = true;
+    if (searchParams.toString()) return; // URL already has params
     const userId = String(currentUser?.id || "guest").trim() || "guest";
     const persisted = getDashboardFilters(userId);
     if (!persisted) return;
     const normalized = normalizeFiltersInput(persisted as DashboardFilters);
     const query = buildFiltersSearchParams(normalized).toString();
     if (query) router.replace(`${pathname}?${query}`, { scroll: false });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once on mount only
+  }, [authLoading, currentUser?.id, pathname, router, searchParams]);
 
   const vendedores = useMemo(() => {
     const vendedoresOnly = responsaveis.filter((responsavel) => responsavel.tipo === "vendedor");
