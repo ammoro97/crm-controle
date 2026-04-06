@@ -426,6 +426,7 @@ export function DashboardCommercialView() {
 
   const [filters, setFilters] = useState<DashboardFilters>(filtersFromUrl);
 
+  // Sync URL → state whenever URL params change
   useEffect(() => {
     setFilters((current) =>
       serializeDashboardFilters(current) === filtersFromUrlKey
@@ -434,21 +435,38 @@ export function DashboardCommercialView() {
     );
   }, [filtersFromUrl, filtersFromUrlKey]);
 
-  // Restore persisted filters once auth resolves and URL has no params.
-  // Must wait for currentUser (auth is async — on mount currentUser is null).
+  // restoredRef gates the URL-normalization effect below.
+  // It is set to true exactly once: either when auth resolves (restore path)
+  // or when URL already has params (no restore needed).
   const restoredRef = useRef(false);
+
+  // Once auth resolves, restore persisted filters by pushing them to the URL.
+  // Must happen BEFORE the normalization effect pushes defaults.
   useEffect(() => {
-    if (authLoading) return;           // wait for auth to resolve
-    if (restoredRef.current) return;   // run only once per mount
+    if (authLoading) return;
+    if (restoredRef.current) return;
     restoredRef.current = true;
-    if (searchParams.toString()) return; // URL already has params
+
+    if (searchParams.toString()) return; // URL already has params — nothing to restore
+
     const userId = String(currentUser?.id || "guest").trim() || "guest";
     const persisted = getDashboardFilters(userId);
     if (!persisted) return;
+
     const normalized = normalizeFiltersInput(persisted as DashboardFilters);
     const query = buildFiltersSearchParams(normalized).toString();
     if (query) router.replace(`${pathname}?${query}`, { scroll: false });
   }, [authLoading, currentUser?.id, pathname, router, searchParams]);
+
+  // Normalize URL format (e.g. add missing default keys).
+  // Guarded by restoredRef so it never runs before restore,
+  // which would push defaults and block restoration.
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    const normalizedQuery = buildFiltersSearchParams(filtersFromUrl).toString();
+    if (normalizedQuery === searchParamsKey) return;
+    router.replace(`${pathname}?${normalizedQuery}`, { scroll: false });
+  }, [filtersFromUrl, pathname, router, searchParamsKey]);
 
   const vendedores = useMemo(() => {
     const vendedoresOnly = responsaveis.filter((responsavel) => responsavel.tipo === "vendedor");
@@ -461,12 +479,6 @@ export function DashboardCommercialView() {
       .filter((item) => item.id && item.nome)
       .sort((first, second) => first.nome.localeCompare(second.nome));
   }, [responsaveis]);
-
-  useEffect(() => {
-    const normalizedQuery = buildFiltersSearchParams(filtersFromUrl).toString();
-    if (normalizedQuery === searchParamsKey) return;
-    router.replace(`${pathname}?${normalizedQuery}`, { scroll: false });
-  }, [filtersFromUrl, pathname, router, searchParamsKey]);
 
   const syncFiltersToUrl = useCallback(
     (nextFilters: DashboardFilters) => {
