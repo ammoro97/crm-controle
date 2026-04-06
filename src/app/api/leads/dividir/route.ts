@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/require-auth";
 import { readLeadsCollection, writeLeadsCollection } from "@/lib/leads-customers-store";
-import { reloadResponsaveisGlobal } from "@/lib/responsaveis-store";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 /**
@@ -17,11 +16,20 @@ export async function POST() {
   if (!auth.authenticated) return auth.response;
 
   try {
-    // 1. Carregar vendedores ativos
-    const responsaveis = await reloadResponsaveisGlobal();
-    const vendedores = responsaveis
-      .filter((r) => r.tipo === "vendedor")
-      .map((r) => r.nome)
+    // 1. Carregar vendedores ativos direto do Supabase (server-side)
+    const admin = getSupabaseAdmin();
+    if (!admin) {
+      return NextResponse.json({ success: false, message: "Supabase admin indisponivel." }, { status: 500 });
+    }
+    const { data: respRows, error: respError } = await admin
+      .from("crm_responsaveis")
+      .select("nome, tipo");
+    if (respError) {
+      return NextResponse.json({ success: false, message: `Erro ao carregar vendedores: ${respError.message}` }, { status: 500 });
+    }
+    const vendedores = (respRows ?? [])
+      .filter((r) => String(r.tipo || "").trim().toLowerCase() === "vendedor")
+      .map((r) => String(r.nome || "").trim())
       .filter(Boolean);
 
     if (vendedores.length === 0) {
@@ -32,7 +40,6 @@ export async function POST() {
     }
 
     // 2. Leads com chamadas registradas (considerados acionados)
-    const admin = getSupabaseAdmin();
     const acionadosIds = new Set<string>();
     if (admin) {
       const { data } = await admin
