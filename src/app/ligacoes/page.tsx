@@ -1431,6 +1431,15 @@ export default function LigacoesPage() {
   const currentWrapupSessionRef = useRef<string | null>(null);
   const shouldRestoreWrapupByQuery =
     searchParams.get("restoreWrapup") === "1" || searchParams.get("postCall") === "1";
+
+  // Reset the guard whenever the user navigates to this page with restore params.
+  // Without this, a previous navigation sets restoredFromQueryRef=true and blocks
+  // future "Abrir finalizacao" clicks when wrapupState is "minimized" or "pending".
+  useEffect(() => {
+    if (shouldRestoreWrapupByQuery) {
+      restoredFromQueryRef.current = false;
+    }
+  }, [shouldRestoreWrapupByQuery]);
   const showReasonField =
     postCallForm.result === "Falou com cliente" && normalizeText(postCallForm.nextAction) === "sem interesse";
   const showNextActionField = finalizacaoComProximaAcao.has(postCallForm.result);
