@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
 import { ActiveCallSession, getActiveCallSession, subscribePostCallFlow } from "@/lib/post-call-flow";
+import { startBackgroundSync, stopBackgroundSync } from "@/lib/crm-data-store";
 import { Sidebar } from "./sidebar";
 
 type AppShellProps = {
@@ -41,6 +42,12 @@ export function AppShell({ children }: AppShellProps) {
     sync();
     return subscribePostCallFlow(sync);
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    startBackgroundSync();
+    return () => stopBackgroundSync();
+  }, [currentUser]);
 
   useEffect(() => {
     try {

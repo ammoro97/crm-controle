@@ -66,6 +66,14 @@ function hasPendingSyncQueue() {
   return syncQueue.size > 0;
 }
 
+function hasPendingDeletes() {
+  return pendingDeleteIds.leads.size > 0 || pendingDeleteIds.customers.size > 0;
+}
+
+function canBackgroundRehydrate() {
+  return !hasPendingSyncQueue() && !syncInFlight && !hasPendingDeletes();
+}
+
 function scheduleSyncFlush() {
   if (!isBrowser()) return;
   void flushSyncQueue();
@@ -342,4 +350,56 @@ export function subscribeLeadFinalizationsSnapshot(listener: () => void) {
     window.removeEventListener(LEAD_FINALIZATIONS_EVENT, listener);
     window.removeEventListener("storage", onStorage);
   };
+}
+
+// ---------------------------------------------------------------------------
+// Background sync — cross-user realtime via polling + visibilitychange
+// ---------------------------------------------------------------------------
+
+const BACKGROUND_SYNC_INTERVAL_MS = 60_000;
+let backgroundSyncTimer: ReturnType<typeof setInterval> | null = null;
+
+async function runBackgroundRehydrate() {
+  if (!isBrowser()) return;
+  if (!canBackgroundRehydrate()) return;
+  try {
+    await hydrateSnapshotsFromServer();
+  } catch {
+    // Background failures are silent — UI must not break
+  }
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === "visible") {
+    void runBackgroundRehydrate();
+  }
+}
+
+/**
+ * Starts periodic background sync (60s interval + tab visibility).
+ * Only re-hydrates when there are no pending local writes to avoid
+ * overwriting in-flight changes.
+ * Call once after the user is authenticated (e.g. in AppShell).
+ */
+export function startBackgroundSync() {
+  if (!isBrowser()) return;
+  if (backgroundSyncTimer !== null) return;
+
+  backgroundSyncTimer = setInterval(() => {
+    void runBackgroundRehydrate();
+  }, BACKGROUND_SYNC_INTERVAL_MS);
+
+  document.addEventListener("visibilitychange", onVisibilityChange);
+}
+
+/**
+ * Stops background sync. Call on logout or AppShell unmount.
+ */
+export function stopBackgroundSync() {
+  if (!isBrowser()) return;
+  if (backgroundSyncTimer !== null) {
+    clearInterval(backgroundSyncTimer);
+    backgroundSyncTimer = null;
+  }
+  document.removeEventListener("visibilitychange", onVisibilityChange);
 }
