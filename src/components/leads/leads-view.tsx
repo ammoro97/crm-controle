@@ -1792,7 +1792,15 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
     const filteredLeads = leads.filter((lead) => lead.id !== resolvedLead.id);
     setLeads(filteredLeads);
-    setLeadsSnapshot(filteredLeads, [resolvedLead.id]);
+    if (reason === "apagar") {
+      // Arquiva na tabela histórica antes de deletar — não usa deletedLeadIds
+      setLeadsSnapshot(filteredLeads, undefined, [
+        { lead: resolvedLead, finalizadoEm: finalizedAtIso, motivo: "finalizado_apagar" },
+      ]);
+    } else {
+      // compra_efetuada: lead migra para customers, delete direto da base ativa
+      setLeadsSnapshot(filteredLeads, [resolvedLead.id]);
+    }
 
     if (reason === "compra_efetuada") {
       const finalizedCustomerLead: Lead = {

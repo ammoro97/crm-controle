@@ -217,3 +217,45 @@ export async function deleteCustomersFromCollection(ids: string[]): Promise<void
   if (!admin) return;
   await deleteLeadIds(admin, CUSTOMERS_TABLE, ids);
 }
+
+export type LeadArchiveEntry = {
+  lead: Lead;
+  finalizadoEm: string;
+  motivo: string;
+};
+
+/**
+ * Arquiva leads na tabela `leads_finalizados` antes de removê-los da base ativa.
+ * A operação é insert-first: se o insert falhar, lança erro e o delete não ocorre.
+ *
+ * SQL necessário (rodar uma vez no Supabase):
+ *
+ *   CREATE TABLE leads_finalizados (
+ *     id            BIGSERIAL PRIMARY KEY,
+ *     lead_id       TEXT NOT NULL,
+ *     payload       JSONB NOT NULL,
+ *     finalizado_em TIMESTAMPTZ NOT NULL,
+ *     motivo        TEXT NOT NULL DEFAULT 'finalizado_apagar',
+ *     created_at    TIMESTAMPTZ DEFAULT NOW()
+ *   );
+ *   CREATE INDEX idx_leads_finalizados_lead_id ON leads_finalizados(lead_id);
+ *   CREATE INDEX idx_leads_finalizados_finalizado_em ON leads_finalizados(finalizado_em);
+ */
+export async function archiveLeadsToHistory(entries: LeadArchiveEntry[]): Promise<void> {
+  if (entries.length === 0) return;
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("SUPABASE_REQUIRED_FOR_ARCHIVE");
+
+  const rows = entries.map(({ lead, finalizadoEm, motivo }) => ({
+    lead_id: lead.id,
+    payload: lead,
+    finalizado_em: finalizadoEm,
+    motivo,
+  }));
+
+  const { error } = await admin.from("leads_finalizados").insert(rows);
+  if (error) throw new Error(`ARCHIVE_INSERT_FAILED: ${error.message}`);
+
+  // Só deleta da tabela ativa após confirmar o insert
+  await deleteLeadIds(admin, LEADS_TABLE, entries.map((e) => e.lead.id));
+}

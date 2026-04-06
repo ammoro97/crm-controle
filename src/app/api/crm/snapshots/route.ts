@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readDataFile, writeDataFile } from "@/lib/storage-paths";
-import { deleteCustomersFromCollection, deleteLeadsFromCollection, readCustomersCollection, readLeadsCollection, writeCustomersCollection, writeLeadsCollection } from "@/lib/leads-customers-store";
+import { archiveLeadsToHistory, deleteCustomersFromCollection, deleteLeadsFromCollection, LeadArchiveEntry, readCustomersCollection, readLeadsCollection, writeCustomersCollection, writeLeadsCollection } from "@/lib/leads-customers-store";
 import {
   LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE,
   LeadOwnerDistributionError,
@@ -18,6 +18,7 @@ type SnapshotPayload = {
   wrapups?: PostCallWrapup[];
   deletedLeadIds?: string[];
   deletedCustomerIds?: string[];
+  archivedLeads?: LeadArchiveEntry[];
 };
 
 const MEETINGS_FILE = "crm.agenda.meetings.v1.json";
@@ -31,6 +32,17 @@ function asArray<T>(value: unknown): T[] | null {
 function asStringIds(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((v): v is string => typeof v === "string" && v.trim() !== "");
+}
+
+function asLeadArchiveEntries(value: unknown): LeadArchiveEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (v): v is LeadArchiveEntry =>
+      typeof v === "object" && v !== null &&
+      typeof (v as LeadArchiveEntry).finalizadoEm === "string" &&
+      typeof (v as LeadArchiveEntry).motivo === "string" &&
+      typeof (v as LeadArchiveEntry).lead === "object",
+  );
 }
 
 function normalizeText(value?: string | null) {
@@ -119,6 +131,13 @@ export async function POST(request: NextRequest) {
     const customers = asArray<Lead>(body?.customers);
     if (customers) {
       writes.push(writeCustomersCollection(customers));
+    }
+
+    // Leads arquivados: insert em leads_finalizados ANTES do delete (sequencial, não paralelo)
+    const archivedLeads = asLeadArchiveEntries(body?.archivedLeads);
+    if (archivedLeads.length > 0) {
+      // Executa fora do Promise.all para garantir insert → delete sequencial
+      await archiveLeadsToHistory(archivedLeads);
     }
 
     const deletedLeadIds = asStringIds(body?.deletedLeadIds);

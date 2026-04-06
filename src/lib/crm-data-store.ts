@@ -3,6 +3,8 @@
 import { normalizeMeetingsSnapshot } from "@/lib/agenda-events";
 import { Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
 
+type LeadArchiveEntry = { lead: Lead; finalizadoEm: string; motivo: string };
+
 export const LEADS_STORAGE_KEY = "crm.leads.v1";
 export const MEETINGS_STORAGE_KEY = "crm.agenda.meetings.v1";
 export const CUSTOMERS_STORAGE_KEY = "crm.customers.v1";
@@ -23,6 +25,7 @@ type SnapshotPayload = {
   leadFinalizations?: LeadFinalizationRecord[];
   deletedLeadIds?: string[];
   deletedCustomerIds?: string[];
+  archivedLeads?: LeadArchiveEntry[];
 };
 
 type SnapshotResponse = {
@@ -35,6 +38,7 @@ const pendingDeleteIds = {
   leads: new Set<string>(),
   customers: new Set<string>(),
 };
+const pendingArchiveLeads = new Map<string, LeadArchiveEntry>(); // keyed by lead.id
 let syncInFlight = false;
 let hydrationStarted = false;
 
@@ -67,7 +71,7 @@ function hasPendingSyncQueue() {
 }
 
 function hasPendingDeletes() {
-  return pendingDeleteIds.leads.size > 0 || pendingDeleteIds.customers.size > 0;
+  return pendingDeleteIds.leads.size > 0 || pendingDeleteIds.customers.size > 0 || pendingArchiveLeads.size > 0;
 }
 
 function canBackgroundRehydrate() {
@@ -109,9 +113,11 @@ async function flushSyncQueue() {
   const pendingEntries = Array.from(syncQueue.entries());
   const snapshotDeletedLeadIds = [...pendingDeleteIds.leads];
   const snapshotDeletedCustomerIds = [...pendingDeleteIds.customers];
+  const snapshotArchivedLeads = [...pendingArchiveLeads.values()];
   syncQueue.clear();
   pendingDeleteIds.leads.clear();
   pendingDeleteIds.customers.clear();
+  pendingArchiveLeads.clear();
 
   const payload: Partial<SnapshotPayload> = {};
   for (const [field, value] of pendingEntries) {
@@ -122,6 +128,7 @@ async function flushSyncQueue() {
   }
   if (snapshotDeletedLeadIds.length > 0) payload.deletedLeadIds = snapshotDeletedLeadIds;
   if (snapshotDeletedCustomerIds.length > 0) payload.deletedCustomerIds = snapshotDeletedCustomerIds;
+  if (snapshotArchivedLeads.length > 0) payload.archivedLeads = snapshotArchivedLeads;
 
   try {
     const response = await fetch(SNAPSHOTS_ENDPOINT, {
@@ -145,9 +152,10 @@ async function flushSyncQueue() {
         syncQueue.set(field, value);
       }
     }
-    // Re-queue pending deletes that failed to sync
+    // Re-queue pending deletes/archives that failed to sync
     snapshotDeletedLeadIds.forEach((id) => pendingDeleteIds.leads.add(id));
     snapshotDeletedCustomerIds.forEach((id) => pendingDeleteIds.customers.add(id));
+    snapshotArchivedLeads.forEach((entry) => pendingArchiveLeads.set(entry.lead.id, entry));
   } finally {
     syncInFlight = false;
     if (hasPendingSyncQueue()) {
@@ -228,11 +236,14 @@ export function getLeadsSnapshot(): Lead[] {
   }
 }
 
-export function setLeadsSnapshot(next: Lead[], deletedIds?: string[]) {
+export function setLeadsSnapshot(next: Lead[], deletedIds?: string[], archiveEntries?: LeadArchiveEntry[]) {
   if (typeof window === "undefined") return;
   const safeNext = cloneLeads(next);
   if (deletedIds?.length) {
     deletedIds.forEach((id) => pendingDeleteIds.leads.add(id));
+  }
+  if (archiveEntries?.length) {
+    archiveEntries.forEach((entry) => pendingArchiveLeads.set(entry.lead.id, entry));
   }
   enqueueSnapshotSync(LEADS_STORAGE_KEY, safeNext);
 }
