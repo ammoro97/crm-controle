@@ -6,6 +6,7 @@ import { useAuth } from "@/components/auth/auth-provider";
 import { ActiveCallSession, getActiveCallSession, subscribePostCallFlow } from "@/lib/post-call-flow";
 import { startBackgroundSync, stopBackgroundSync } from "@/lib/crm-data-store";
 import { Sidebar } from "./sidebar";
+import { GlobalWrapupModal } from "@/components/wrapup/global-wrapup-modal";
 
 type AppShellProps = {
   children: ReactNode;
@@ -125,13 +126,14 @@ export function AppShell({ children }: AppShellProps) {
             className="btn-primary mt-2 h-8 px-3 py-1 text-xs"
             onClick={() => {
               window.dispatchEvent(new CustomEvent("crm:open-wrapup"));
-              router.push("/ligacoes?postCall=1&restoreWrapup=1");
             }}
           >
             Abrir finalizacao
           </button>
         </div>
       ) : null}
+
+      <GlobalWrapupModal />
 
       <main className={`px-4 py-6 md:px-7 ${sidebarPinned ? "md:ml-64" : "md:ml-[74px]"}`}>{children}</main>
     </div>
