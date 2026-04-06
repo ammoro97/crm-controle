@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import { getResponsavelImpact, transferResponsavelVinculos } from "@/lib/responsaveis-relations";
 import {
@@ -8,6 +8,8 @@ import {
   type ResponsavelTipo,
   addResponsavel,
   removeResponsavel,
+  syncAllUnlinkedResponsaveis,
+  syncResponsavelAuthLinkExplicit,
   updateResponsavel,
   useResponsaveis,
   useResponsaveisRecords,
@@ -21,6 +23,16 @@ export function ResponsaveisManager() {
   const [novoResponsavelTipo, setNovoResponsavelTipo] = useState<ResponsavelTipo>("vendedor");
   const [novoResponsavelEmail, setNovoResponsavelEmail] = useState("");
   const [erro, setErro] = useState<string | null>(null);
+
+  const autoSyncedRef = useRef(false);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [syncResults, setSyncResults] = useState<Record<string, { linked: boolean; message?: string }>>({});
+
+  useEffect(() => {
+    if (autoSyncedRef.current) return;
+    autoSyncedRef.current = true;
+    void syncAllUnlinkedResponsaveis();
+  }, []);
 
   const [editingResponsavelId, setEditingResponsavelId] = useState<string | null>(null);
   const [editingNome, setEditingNome] = useState("");
@@ -232,9 +244,30 @@ export function ResponsaveisManager() {
                         <div>
                           <span className="text-sm text-slate-100">{record.nome}</span>
                           {record.email ? <p className="text-xs text-slate-400">{record.email}</p> : null}
-                          <p className={`text-[11px] ${record.authUserId ? "text-emerald-300" : "text-amber-300"}`}>
-                            {record.authUserId ? "Login autenticado vinculado" : "Sem login autenticado vinculado"}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <p className={`text-[11px] ${record.authUserId ? "text-emerald-300" : syncResults[record.id]?.linked === false ? "text-rose-300" : "text-amber-300"}`}>
+                              {record.authUserId
+                                ? "Login autenticado vinculado"
+                                : syncResults[record.id]?.linked === false
+                                  ? (syncResults[record.id]?.message || "Login nao encontrado para este e-mail")
+                                  : "Sem login autenticado vinculado"}
+                            </p>
+                            {!record.authUserId && record.email ? (
+                              <button
+                                type="button"
+                                disabled={syncingId === record.id}
+                                className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/10 disabled:opacity-50 transition"
+                                onClick={async () => {
+                                  setSyncingId(record.id);
+                                  const result = await syncResponsavelAuthLinkExplicit(record.id);
+                                  setSyncResults((prev) => ({ ...prev, [record.id]: result }));
+                                  setSyncingId(null);
+                                }}
+                              >
+                                {syncingId === record.id ? "Vinculando..." : "Vincular"}
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                         <span className="rounded-md border border-slate-600 bg-slate-800/70 px-2 py-0.5 text-[11px] font-semibold text-slate-200">
                           {record.tipo === "gestor" ? "Gestor" : "Vendedor"}

@@ -323,3 +323,40 @@ async function syncResponsavelAuthLink(responsavelId: string) {
     // Sync de auth_user_id e best-effort para nao bloquear fluxo principal.
   }
 }
+
+export async function syncResponsavelAuthLinkExplicit(responsavelId: string): Promise<{
+  linked: boolean;
+  authUserId: string | null;
+  code?: string;
+  message?: string;
+}> {
+  const targetId = String(responsavelId || "").trim();
+  if (!targetId) return { linked: false, authUserId: null, code: "ID_REQUIRED", message: "ID nao informado." };
+  const response = await fetch("/api/responsaveis/sync-auth-link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ responsavelId: targetId }),
+  });
+  const json = await response.json().catch(() => ({})) as Record<string, unknown>;
+  await reloadResponsaveisGlobal();
+  return {
+    linked: Boolean(json.linked),
+    authUserId: String(json.authUserId || "").trim() || null,
+    code: String(json.code || "").trim() || undefined,
+    message: String(json.message || "").trim() || undefined,
+  };
+}
+
+export async function syncAllUnlinkedResponsaveis(): Promise<{ synced: number; linked: number }> {
+  await ensureResponsaveisLoaded();
+  const unlinked = responsaveisCache.filter((item) => !item.authUserId && item.email);
+  if (unlinked.length === 0) return { synced: 0, linked: 0 };
+
+  let linked = 0;
+  for (const item of unlinked) {
+    const result = await syncResponsavelAuthLinkExplicit(item.id);
+    if (result.linked) linked += 1;
+  }
+  await reloadResponsaveisGlobal();
+  return { synced: unlinked.length, linked };
+}
