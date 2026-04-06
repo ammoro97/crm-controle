@@ -195,6 +195,12 @@ export async function POST(request: Request) {
       status,
     });
 
+    console.info("[API4_RAMAL_CREATE]", {
+      ramal,
+      responsavelId,
+      status,
+    });
+
     await createApi4ComIntegracao({
       nome: normalizeText(body.nome) || `API4COM - Ramal ${ramal}`,
       ramal,
@@ -278,11 +284,24 @@ export async function PUT(request: Request) {
       );
     }
 
+    // Nunca sobrescrever responsavelId com null automaticamente.
+    // null ou undefined no payload = preservar valor atual.
+    // Apenas aceitar mudanca explicita quando vier como string nao-vazia.
     const responsavelId =
-      body.responsavelId === undefined
+      body.responsavelId === undefined || body.responsavelId === null
         ? normalizeOptionalResponsavelId(current.responsavelId)
         : normalizeOptionalResponsavelId(body.responsavelId);
     const status = body.status === undefined ? normalizeStatus(current.status) : normalizeStatus(body.status);
+
+    console.info("[API4_RAMAL_UPDATE] before", {
+      id,
+      ramal: current.ramal,
+      responsavelId_before: current.responsavelId,
+      responsavelId_incoming: body.responsavelId,
+      responsavelId_resolved: responsavelId,
+      status_before: current.status,
+      status_resolved: status,
+    });
 
     await assertResponsavelExists(responsavelId);
     await assertActiveResponsavelUniqueness({
@@ -308,6 +327,13 @@ export async function PUT(request: Request) {
         { status: 404 },
       );
     }
+
+    console.info("[API4_RAMAL_UPDATE] after", {
+      id,
+      ramal: updated.ramal,
+      responsavelId_after: updated.responsavelId,
+      status_after: updated.status,
+    });
 
     const { items, template, responsaveis } = await buildRamaisPayload();
     return NextResponse.json({

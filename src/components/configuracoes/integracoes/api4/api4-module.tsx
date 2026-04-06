@@ -126,7 +126,7 @@ export function Api4Module() {
           gateway: values.gateway,
           token: values.token,
           status: values.status,
-          responsavelId: values.responsavelId || null,
+          responsavelId: values.responsavelId || undefined,
           setAsPrimary: values.setAsPrimary,
           baseIntegrationId: template?.baseIntegrationId || null,
         }),

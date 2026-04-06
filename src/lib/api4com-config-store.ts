@@ -306,8 +306,12 @@ function mergeIntegration(
   const nextToken = rawTokenInput !== undefined && rawTokenInput ? rawTokenInput : current.token;
 
   const nextStatus = input.status !== undefined ? normalizeStatus(input.status, current.status) : current.status;
+  // Nunca sobrescrever responsavelId com null automaticamente.
+  // Apenas aceitar mudanca explicita quando vier como string nao-vazia.
   const nextResponsavelId =
-    input.responsavelId !== undefined ? normalizeNullableText(input.responsavelId) : current.responsavelId;
+    input.responsavelId !== undefined && input.responsavelId !== null
+      ? normalizeNullableText(input.responsavelId)
+      : current.responsavelId;
 
   return {
     ...current,
@@ -569,8 +573,11 @@ export async function saveApi4ComConfig(input: {
       ramal: nextRamal,
       gateway: nextGateway || current.gateway,
       token: nextToken || current.token,
+      // Nunca sobrescrever responsavelId com null automaticamente via saveApi4ComConfig (legado).
       responsavelId:
-        input.responsavelId !== undefined ? normalizeNullableText(input.responsavelId) : current.responsavelId,
+        input.responsavelId !== undefined && input.responsavelId !== null
+          ? normalizeNullableText(input.responsavelId)
+          : current.responsavelId,
       status: "inativo",
       updatedAt: now,
     };
