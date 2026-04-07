@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getStateFromCity } from "@/lib/br-city-state";
 import { getLeadContacts, getLeadEmails, getLeadPhones, updateLeadContacts, updateLeadEmails, updateLeadPhones } from "@/lib/lead-contact-utils";
 import { useResponsaveis } from "@/lib/responsaveis-store";
@@ -64,18 +64,38 @@ type ContactsFieldProps = {
 };
 
 function ContactsField({ value, isEditing, onOpen, onClose, onChange }: ContactsFieldProps) {
-  const contacts = value.length > 0 ? value : [{ nome: "", cargo: "" }];
+  const [localContacts, setLocalContacts] = useState<Array<{ nome: string; cargo: string }>>(() =>
+    value.length > 0 ? [...value] : [{ nome: "", cargo: "" }],
+  );
+  const prevIsEditingRef = useRef(isEditing);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  useEffect(() => {
+    if (isEditing !== prevIsEditingRef.current) {
+      prevIsEditingRef.current = isEditing;
+      const current = valueRef.current;
+      setLocalContacts(current.length > 0 ? [...current] : [{ nome: "", cargo: "" }]);
+    }
+  });
+
+  const contacts = isEditing ? localContacts : (value.length > 0 ? value : [{ nome: "", cargo: "" }]);
 
   const updateAt = (index: number, key: "nome" | "cargo", nextValue: string) => {
-    const next = contacts.map((item, idx) => (idx === index ? { ...item, [key]: nextValue } : item));
+    const next = localContacts.map((item, idx) => (idx === index ? { ...item, [key]: nextValue } : item));
+    setLocalContacts(next);
     onChange(next);
   };
 
-  const add = () => onChange([...contacts, { nome: "", cargo: "" }]);
+  const add = () => {
+    setLocalContacts((prev) => [...prev, { nome: "", cargo: "" }]);
+  };
 
   const remove = (index: number) => {
-    const next = contacts.filter((_, idx) => idx !== index);
-    onChange(next.length > 0 ? next : [{ nome: "", cargo: "" }]);
+    const next = localContacts.filter((_, idx) => idx !== index);
+    const withFallback = next.length > 0 ? next : [{ nome: "", cargo: "" }];
+    setLocalContacts(withFallback);
+    onChange(withFallback);
   };
 
   return (
@@ -159,17 +179,38 @@ type MultiInputFieldProps = {
 };
 
 function MultiInputField({ label, values, addButtonLabel, placeholder, isEditing, onOpen, onClose, onChange }: MultiInputFieldProps) {
-  const list = values.length > 0 ? values : [""];
+  const [localList, setLocalList] = useState<string[]>(() => values.length > 0 ? [...values] : [""]);
+  const prevIsEditingRef = useRef(isEditing);
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
+
+  useEffect(() => {
+    if (isEditing !== prevIsEditingRef.current) {
+      prevIsEditingRef.current = isEditing;
+      const current = valuesRef.current;
+      setLocalList(current.length > 0 ? [...current] : [""]);
+    }
+  });
+
+  const list = isEditing ? localList : (values.length > 0 ? values : [""]);
 
   const updateAt = (index: number, value: string) => {
-    const next = list.map((item, idx) => (idx === index ? value : item));
+    const next = localList.map((item, idx) => (idx === index ? value : item));
+    setLocalList(next);
     onChange(next);
   };
 
-  const add = () => onChange([...list, ""]);
+  // Adiciona linha vazia ao estado local — nao propaga para o pai pois string
+  // vazia seria filtrada por clean(). O item persiste quando o usuario digitar.
+  const add = () => {
+    setLocalList((prev) => [...prev, ""]);
+  };
+
   const remove = (index: number) => {
-    const next = list.filter((_, idx) => idx !== index);
-    onChange(next.length > 0 ? next : [""]);
+    const next = localList.filter((_, idx) => idx !== index);
+    const withFallback = next.length > 0 ? next : [""];
+    setLocalList(withFallback);
+    onChange(withFallback);
   };
 
   return (
@@ -271,26 +312,25 @@ export function LeadGeneralTab({
   }, [draftLead.entryDate]);
 
   const updateCityState = (city: string, state: string) => {
-    const cityClean = city.trim();
     const stateClean = state.trim();
     onDraftChange({
       ...draftLead,
-      city: stateClean ? `${cityClean} - ${stateClean}` : cityClean,
+      city: stateClean ? `${city} - ${stateClean}` : city,
     });
   };
 
   const onCityChange = (value: string) => {
-    const cityClean = value.trim();
-    if (!cityClean) {
+    if (!value.trim()) {
       updateCityState("", "");
       return;
     }
-    const detected = getStateFromCity(cityClean);
+    // Detecta estado pelo nome da cidade mas preserva o valor original com espacos
+    const detected = getStateFromCity(value.trim());
     if (detected) {
-      updateCityState(cityClean, detected);
+      updateCityState(value, detected);
       return;
     }
-    updateCityState(cityClean, "");
+    updateCityState(value, "");
   };
 
   return (
@@ -326,7 +366,7 @@ export function LeadGeneralTab({
           />
 
           <LeadInlineField
-            label="Responsavel"
+            label="Vendedor"
             value={draftLead.owner}
             editable
             isEditing={activeField === "owner"}
