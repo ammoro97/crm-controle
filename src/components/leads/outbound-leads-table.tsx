@@ -5,7 +5,7 @@ import { useAuth } from "@/components/auth/auth-provider";
 import { Modal } from "@/components/ui/modal";
 import { getLeadPhoneItems, getLeadPhones } from "@/lib/lead-contact-utils";
 import { resolveLeadExpedienteStatusFromHorario } from "@/lib/lead-expediente";
-import { resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
+import { resolveResponsavelFromUser, resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
 import {
   createDialSession,
   generateCallSessionId,
@@ -445,8 +445,9 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
   const [responsavelMissingModalOpen, setResponsavelMissingModalOpen] = useState(false);
   const [phonePickerLead, setPhonePickerLead] = useState<Lead | null>(null);
   const [selectedDialPhone, setSelectedDialPhone] = useState("");
-  const [expedienteReferenceDate, setExpedienteReferenceDate] = useState<Date>(() => new Date());
-  const [metricsReferenceDate, setMetricsReferenceDate] = useState<Date>(() => new Date());
+  // Referencia de tempo unificada — atualiza em intervalos e serve tanto para
+  // expediente quanto para calculo de metricas (evita dois re-renders por ciclo)
+  const [tableReferenceDate, setTableReferenceDate] = useState<Date>(() => new Date());
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
   const [leadWrapups, setLeadWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
 
@@ -456,9 +457,9 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
         leads,
         calls: callLogs,
         wrapups: leadWrapups,
-        referenceDate: metricsReferenceDate,
+        referenceDate: tableReferenceDate,
       }),
-    [callLogs, leadWrapups, leads, metricsReferenceDate],
+    [callLogs, leadWrapups, leads, tableReferenceDate],
   );
 
   const tableRows = useMemo(
@@ -467,11 +468,11 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
         lead,
         location: parseCityState(lead.city),
         expediente: resolveLeadExpedienteStatusFromHorario(lead.horario_funcionamento, {
-          referenceDate: expedienteReferenceDate,
+          referenceDate: tableReferenceDate,
         }),
         metrics: leadInteractionMetricsById[lead.id] || EMPTY_INTERACTION_METRICS,
       })),
-    [expedienteReferenceDate, leadInteractionMetricsById, leads],
+    [tableReferenceDate, leadInteractionMetricsById, leads],
   );
 
   const [sortCol, setSortCol] = useState<SortCol | null>(null);
@@ -537,22 +538,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
       setCallFeedback(lead.id, { type: "error", message: "Lead sem telefone para discagem." });
       return;
     }
-    const sessionController = new AbortController();
-    const blocking = await resolveBlockingStateBeforeNewDial(sessionController.signal);
-    if (blocking.blocked && blocking.session) {
-      const blockingMessage =
-        blocking.reason === "pending_wrapup"
-          ? "Existe uma ligacao encerrada aguardando finalizacao obrigatoria. Finalize antes de iniciar outra."
-          : "Existe uma ligacao em andamento. Conclua essa chamada antes de iniciar outra.";
-      setCallFeedback(lead.id, { type: "error", message: blockingMessage });
-      return;
-    }
-    const resolvedResponsavel = await resolveResponsavelFromUserAsync(currentUser);
-    if (!currentUser || !resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {
-      setCallFeedback(lead.id, { type: "error", message: RESPONSAVEL_REQUIRED_MESSAGE });
-      setResponsavelMissingModalOpen(true);
-      return;
-    }
+    // Feedback imediato — spinner antes dos checks assincronos
     setCallingLeadId(lead.id);
     setCallFeedbackByLead((prev) => {
       const next = { ...prev };
@@ -560,6 +546,29 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
       return next;
     });
     try {
+      const sessionController = new AbortController();
+      // Tenta cache em memoria primeiro (sem round-trip ao banco)
+      const cachedResponsavel = resolveResponsavelFromUser(currentUser);
+      // Executa blocking check e resolucao de responsavel em paralelo
+      const [blocking, resolvedResponsavel] = await Promise.all([
+        resolveBlockingStateBeforeNewDial(sessionController.signal),
+        cachedResponsavel.linked
+          ? Promise.resolve(cachedResponsavel)
+          : resolveResponsavelFromUserAsync(currentUser),
+      ]);
+      if (blocking.blocked && blocking.session) {
+        const blockingMessage =
+          blocking.reason === "pending_wrapup"
+            ? "Existe uma ligacao encerrada aguardando finalizacao obrigatoria. Finalize antes de iniciar outra."
+            : "Existe uma ligacao em andamento. Conclua essa chamada antes de iniciar outra.";
+        setCallFeedback(lead.id, { type: "error", message: blockingMessage });
+        return;
+      }
+      if (!currentUser || !resolvedResponsavel.linked || !resolvedResponsavel.responsavel) {
+        setCallFeedback(lead.id, { type: "error", message: RESPONSAVEL_REQUIRED_MESSAGE });
+        setResponsavelMissingModalOpen(true);
+        return;
+      }
       const sessionId = generateCallSessionId();
       const response = await fetch("/api/ligacoes", {
         method: "POST",
@@ -684,16 +693,10 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
     });
   }, []);
 
+  // Intervalo unificado: atualiza expediente e metricas num unico re-render por minuto
   useEffect(() => {
     const intervalId = window.setInterval(() => {
-      setExpedienteReferenceDate(new Date());
-    }, 60 * 1000);
-    return () => window.clearInterval(intervalId);
-  }, []);
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setMetricsReferenceDate(new Date());
+      setTableReferenceDate(new Date());
     }, 60 * 1000);
     return () => window.clearInterval(intervalId);
   }, []);

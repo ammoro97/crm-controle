@@ -535,6 +535,7 @@ export function GlobalWrapupModal() {
   const handleRestoreWrapupRef = useRef<(() => void) | null>(null);
   const wrapupPhoneInputRef = useRef<HTMLInputElement | null>(null);
   const wrapupEmailInputRef = useRef<HTMLInputElement | null>(null);
+  const draftWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const sync = () => setActiveSession(getActiveCallSession());
@@ -590,7 +591,7 @@ export function GlobalWrapupModal() {
       const isLeadsOutboundSession = activeSession.sourcePath === "/leads/outbound";
       const nextForm: PostCallFormState = {
         ...createDefaultPostCallForm(),
-        result: isLeadsOutboundSession ? "Falou com cliente" : "Caixa postal",
+        result: isLeadsOutboundSession ? "Enviar para callback" : "Caixa postal",
         ...(draft || {}),
         phoneItems: draft?.phoneItems?.length ? draft.phoneItems : defaultPhoneItems,
         emailItems: draft?.emailItems?.length ? draft.emailItems : defaultEmailItems,
@@ -605,9 +606,16 @@ export function GlobalWrapupModal() {
     // do usuario (botao "Abrir finalizacao" dispara crm:open-wrapup).
   }, [activeSession]);
 
+  // Debounce para evitar escrita no localStorage a cada tecla digitada
   useEffect(() => {
     if (!activeSession || activeSession.status === "wrapped") return;
-    writeWrapupDraft(activeSession.sessionId, postCallForm);
+    if (draftWriteTimerRef.current) clearTimeout(draftWriteTimerRef.current);
+    draftWriteTimerRef.current = setTimeout(() => {
+      writeWrapupDraft(activeSession.sessionId, postCallForm);
+    }, 800);
+    return () => {
+      if (draftWriteTimerRef.current) clearTimeout(draftWriteTimerRef.current);
+    };
   }, [activeSession, postCallForm]);
 
   const isLeadsOutboundFlow = activeSession?.sourcePath === "/leads/outbound";
