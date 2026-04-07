@@ -217,7 +217,7 @@ export function getLeadQualificacaoNegocioForm(lead: Lead): QualificacaoNegocioF
     outbound?.quantidadeProfissionaisClinica ?? outbound?.teamSize,
   );
   const nomeDecisor = normalizeText(outbound?.nomeDecisor ?? outbound?.decisionContacts?.[0]?.name);
-  const informacoesAdicionaisNegocio = normalizeText(outbound?.informacoesAdicionaisNegocio);
+  const informacoesAdicionaisNegocio = String(outbound?.informacoesAdicionaisNegocio || "");
 
   return {
     jaUtilizaCrm,

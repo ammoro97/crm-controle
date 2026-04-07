@@ -27,7 +27,8 @@ type OutboundLeadsTableProps = {
 type SortCol =
   | "company" | "name" | "owner" | "entryDate" | "firstContactDate"
   | "lastInteraction" | "nota" | "avaliacoes" | "city" | "state"
-  | "source" | "totalCalls" | "totalFollowUps" | "conversionDate";
+  | "source" | "totalCalls" | "totalFollowUps" | "conversionDate"
+  | "acionadoBase";
 
 type SortDir = "asc" | "desc";
 
@@ -504,6 +505,14 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
         case "avaliacoes":   cmp = (Number(a.lead.avaliacoes) || 0) - (Number(b.lead.avaliacoes) || 0); break;
         case "totalCalls":   cmp = a.metrics.totalCalls - b.metrics.totalCalls; break;
         case "totalFollowUps": cmp = a.metrics.totalFollowUps - b.metrics.totalFollowUps; break;
+        case "acionadoBase": {
+          const getVal = (row: typeof a) => {
+            const v = row.metrics.totalCalls > 0 || Boolean(String(row.lead.firstContactDate || "").trim());
+            return v ? 1 : 0;
+          };
+          cmp = getVal(a) - getVal(b);
+          break;
+        }
         default: break;
       }
       return sortDir === "asc" ? cmp : -cmp;
@@ -821,7 +830,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
                 />
               </th>
               <th className="w-[6rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Ações</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Acionado Base</th>
+              <SortHeader col="acionadoBase" label="Acionado Base" active={sortCol === "acionadoBase"} dir={sortDir} onSort={handleSort} />
               <SortHeader col="company"        label="Empresa"           width="w-[14rem]"  active={sortCol === "company"}        dir={sortDir} onSort={handleSort} />
               <SortHeader col="name"           label="Responsavel"       width="w-[12rem]"  active={sortCol === "name"}           dir={sortDir} onSort={handleSort} />
               <SortHeader col="owner"          label="Vendedor"          width="w-[12rem]"  active={sortCol === "owner"}          dir={sortDir} onSort={handleSort} />
