@@ -119,6 +119,17 @@ export function Sidebar({ onNavigate, isPinned = true, onPinnedChange }: Sidebar
                       </svg>
                     }
                   />
+                  <SidebarItem
+                    variant="default"
+                    label="Callback"
+                    href="/leads/outbound/callback"
+                    onClick={onNavigate}
+                    icon={
+                      <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                        <circle cx="9" cy="9" r="2" fill="currentColor" />
+                      </svg>
+                    }
+                  />
                 </div>
               ) : null}
             </div>

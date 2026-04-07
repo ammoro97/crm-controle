@@ -38,7 +38,8 @@ export type PostCallResultOption =
   | "Numero invalido"
   | "Pessoa nao conhece"
   | "Falou com cliente"
-  | "Falou com secretaria";
+  | "Falou com secretaria"
+  | "Enviar para callback";
 
 // Mantem tipagem explicita da subfinalizacao para o fluxo de wrap-up.
 export type PostCallSubfinalizacaoOption =

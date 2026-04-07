@@ -92,11 +92,22 @@ const postCallResultOptions: Array<{ value: PostCallResultOption; label: string 
   { value: "Falou com secretaria", label: "Falou com secretária" },
 ];
 
-const POST_CALL_RESULT_VALUES = new Set<PostCallResultOption>(postCallResultOptions.map((option) => option.value));
+// Opcoes restritas para ligacoes iniciadas a partir da aba Leads (outbound)
+const postCallResultOptionsLeadsOutbound: Array<{ value: PostCallResultOption; label: string }> = [
+  { value: "Falou com cliente", label: "Falou com o cliente" },
+  { value: "Falou com secretaria", label: "Falou com a secretária" },
+  { value: "Enviar para callback", label: "Enviar para callback" },
+];
+
+const POST_CALL_RESULT_VALUES = new Set<PostCallResultOption>([
+  ...postCallResultOptions.map((option) => option.value),
+  "Enviar para callback",
+]);
 
 const finalizacaoComProximaAcao = new Set<PostCallResultOption>([
   "Falou com cliente",
   "Falou com secretaria",
+  // "Enviar para callback" intencionalmente excluido — nao tem subfinalizacao
 ]);
 
 const nextActionComFollowUp = new Set([
@@ -175,6 +186,7 @@ const OFFICIAL_FINALIZACOES = new Set([
   "Pessoa não conhece",
   "Falou com cliente",
   "Falou com secretária",
+  "Enviar para callback",
 ]);
 
 function normalizeFinalizacaoLabel(value: string) {
@@ -575,8 +587,10 @@ export function GlobalWrapupModal() {
       const defaultEmailItems = buildInitialEmailItemsForSession(relatedLead);
       const defaultCompany = String(relatedLead?.name || activeSession.nome || relatedLead?.company || activeSession.empresa || "").trim();
       const defaultPrimaryEmail = String(relatedLead?.email || defaultEmailItems[0]?.value || "").trim();
+      const isLeadsOutboundSession = activeSession.sourcePath === "/leads/outbound";
       const nextForm: PostCallFormState = {
         ...createDefaultPostCallForm(),
+        result: isLeadsOutboundSession ? "Falou com cliente" : "Caixa postal",
         ...(draft || {}),
         phoneItems: draft?.phoneItems?.length ? draft.phoneItems : defaultPhoneItems,
         emailItems: draft?.emailItems?.length ? draft.emailItems : defaultEmailItems,
@@ -595,6 +609,9 @@ export function GlobalWrapupModal() {
     if (!activeSession || activeSession.status === "wrapped") return;
     writeWrapupDraft(activeSession.sessionId, postCallForm);
   }, [activeSession, postCallForm]);
+
+  const isLeadsOutboundFlow = activeSession?.sourcePath === "/leads/outbound";
+  const visibleResultOptions = isLeadsOutboundFlow ? postCallResultOptionsLeadsOutbound : postCallResultOptions;
 
   const showReasonField =
     postCallForm.result === "Falou com cliente" && normalizeText(postCallForm.nextAction) === "sem interesse";
@@ -1034,9 +1051,12 @@ export function GlobalWrapupModal() {
 
     const historyEventDescription = `Ligação realizada com o lead. Finalização: ${resultLabel}.`;
 
+    const isCallbackResult = formState.result === "Enviar para callback";
+
     const nextLead: Lead = {
       ...leadWithUpdatedContacts,
       company: companyName || leadWithUpdatedContacts.company,
+      ...(isCallbackResult ? { callbackAt: now.dateTime, callbackBy: ownerName } : {}),
       history: [
         ...leadWithUpdatedContacts.history,
         {
@@ -1468,7 +1488,7 @@ export function GlobalWrapupModal() {
                   }));
                 }}
               >
-                {postCallResultOptions.map((option) => (
+                {visibleResultOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>

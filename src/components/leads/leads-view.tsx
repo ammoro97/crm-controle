@@ -1286,10 +1286,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
   const visibleLeads = useMemo(() => {
     const channelScoped = filter === "all" ? leads : leads.filter((lead) => lead.channel === filter);
+    // Outbound leads enviados para callback nao aparecem na listagem principal
+    const withoutCallback = filter === "outbound" ? channelScoped.filter((lead) => !lead.callbackAt) : channelScoped;
     const base =
       effectiveOwnerFilter === "Todos"
-        ? channelScoped
-        : channelScoped.filter((lead) => normalizeQueryText(lead.owner) === normalizeQueryText(effectiveOwnerFilter));
+        ? withoutCallback
+        : withoutCallback.filter((lead) => normalizeQueryText(lead.owner) === normalizeQueryText(effectiveOwnerFilter));
     const sorted = [...base].sort((a, b) => a.name.localeCompare(b.name));
     const normalizedSearch = normalizeQueryText(deferredSearchTerm);
     if (!normalizedSearch) return sorted;

@@ -163,6 +163,8 @@ export type Lead = {
   convertedToCustomerAt?: string | null;
   customerStatus?: "cliente" | null;
   saleValueCents?: number | null;
+  callbackAt?: string | null;
+  callbackBy?: string | null;
 };
 
 export type LeadFinalizationRecord = {

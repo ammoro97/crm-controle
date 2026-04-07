@@ -18,6 +18,7 @@ const FINALIZACAO_CLASSIFICATION_MAP: Record<PostCallResultOption | "Nao atendeu
   "Pessoa nao conhece": { conectado: false, tipo: "PROBLEMA_BASE" },
   "Falou com cliente": { conectado: true, tipo: "CONECTOU" },
   "Falou com secretaria": { conectado: true, tipo: "CONECTOU", resultado: "NEUTRO" },
+  "Enviar para callback": { conectado: true, tipo: "CONECTOU", resultado: "NEUTRO" },
 };
 
 function normalize(value: string) {
