@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readDataFile, writeDataFile } from "@/lib/storage-paths";
-import { archiveLeadsToHistory, deleteCustomersFromCollection, deleteLeadsFromCollection, LeadArchiveEntry, readCustomersCollection, readLeadsCollection, writeCustomersCollection, writeLeadsCollection } from "@/lib/leads-customers-store";
+import { archiveLeadsToHistory, deleteCustomersFromCollection, deleteLeadsFromCollection, LeadArchiveEntry, readCustomersCollection, readLeadsCollection, readLeadsPage, writeCustomersCollection, writeLeadsCollection } from "@/lib/leads-customers-store";
 import {
   LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE,
   LeadOwnerDistributionError,
@@ -49,37 +49,38 @@ function normalizeText(value?: string | null) {
   return String(value || "").trim().toLocaleLowerCase("pt-BR");
 }
 
+const LEADS_PAGE_SIZE = 50;
+
 export async function GET(request: NextRequest) {
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
+  const page = Math.max(0, parseInt(request.nextUrl.searchParams.get("page") ?? "0", 10));
+  const isFirstPage = page === 0;
+
   try {
-    const [leads, meetings, customers, leadFinalizations, wrapups] = await Promise.all([
-      readLeadsCollection(),
-      readDataFile<Meeting[]>(MEETINGS_FILE, []),
-      readCustomersCollection(),
-      readDataFile<LeadFinalizationRecord[]>(LEAD_FINALIZATIONS_FILE, []),
-      readDataFile<PostCallWrapup[]>(WRAPUPS_FILE, []),
+    // Leads: paginados. Demais dados: apenas na primeira página (são menores, não precisam de paginação).
+    const [leadsResult, meetings, customers, leadFinalizations, wrapups] = await Promise.all([
+      readLeadsPage({ limit: LEADS_PAGE_SIZE, offset: page * LEADS_PAGE_SIZE }),
+      isFirstPage ? readDataFile<Meeting[]>(MEETINGS_FILE, []) : Promise.resolve([]),
+      isFirstPage ? readCustomersCollection() : Promise.resolve([]),
+      isFirstPage ? readDataFile<LeadFinalizationRecord[]>(LEAD_FINALIZATIONS_FILE, []) : Promise.resolve([]),
+      isFirstPage ? readDataFile<PostCallWrapup[]>(WRAPUPS_FILE, []) : Promise.resolve([]),
     ]);
-
-    const ownerFilter = normalizeText(request.nextUrl.searchParams.get("responsavel"));
-    const channelFilter = normalizeText(request.nextUrl.searchParams.get("canal"));
-
-    const normalizedLeads = Array.isArray(leads) ? leads : [];
-    const filteredLeads = normalizedLeads.filter((lead) => {
-      if (ownerFilter && ownerFilter !== "todos" && normalizeText(lead.owner) !== ownerFilter) return false;
-      if (channelFilter && channelFilter !== "todos" && normalizeText(lead.channel) !== channelFilter) return false;
-      return true;
-    });
 
     return NextResponse.json({
       success: true,
       snapshots: {
-        leads: filteredLeads,
+        leads: leadsResult.leads,
         meetings: Array.isArray(meetings) ? meetings : [],
         customers: Array.isArray(customers) ? customers : [],
         leadFinalizations: Array.isArray(leadFinalizations) ? leadFinalizations : [],
         wrapups: Array.isArray(wrapups) ? wrapups : [],
+      },
+      pagination: {
+        page,
+        pageSize: LEADS_PAGE_SIZE,
+        hasMore: leadsResult.hasMore,
       },
     });
   } catch {

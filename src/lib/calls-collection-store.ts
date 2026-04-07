@@ -1,6 +1,14 @@
 import { createHash } from "crypto";
 import type { CallLog } from "@/types/crm";
 import { getSupabaseAdmin } from "./supabase-admin";
+import { withTimeout } from "./server/with-timeout";
+
+// Limite de registros carregados em memória por instância.
+// Calls são ordenados por updated_at DESC — os 1000 mais recentes cobrem
+// qualquer sessão ativa. Calls históricos permanecem no Supabase e não
+// precisam estar em memória para leitura/escrita correntes.
+const CALLS_READ_LIMIT = 1_000;
+const CALLS_READ_TIMEOUT_MS = 10_000;
 
 const CALLS_TABLE = "crm_calls";
 const UPSERT_BATCH_SIZE = 500;
@@ -91,18 +99,78 @@ export async function readCallLogsCollection(): Promise<CallLog[]> {
   const admin = getSupabaseAdmin();
   if (!admin) return [];
 
-  const { data, error } = await admin
-    .from(CALLS_TABLE)
-    .select("call_id,payload")
-    .order("updated_at", { ascending: false });
+  const startedAt = Date.now();
+  try {
+    const { data, error } = await withTimeout(
+      Promise.resolve(
+        admin
+          .from(CALLS_TABLE)
+          .select("call_id,payload")
+          .order("updated_at", { ascending: false })
+          .limit(CALLS_READ_LIMIT),
+      ),
+      CALLS_READ_TIMEOUT_MS,
+      "readCallLogsCollection",
+    );
 
-  if (error) {
-    console.error("[CALLS_TABLE] read error", error.message);
+    if (error) {
+      console.error(`[CALLS_TABLE] read error elapsed=${Date.now() - startedAt}ms`, error.message);
+      return [];
+    }
+
+    console.log(`[CALLS_TABLE] read ok rows=${(data as unknown[])?.length ?? 0} elapsed=${Date.now() - startedAt}ms`);
+    const rows = parseCallRows(data as unknown);
+    return toCallsFromRows(rows);
+  } catch (err) {
+    const isTimeout = err instanceof Error && err.message.startsWith("TIMEOUT:");
+    console.error(`[CALLS_TABLE] ${isTimeout ? "timeout" : "exception"} elapsed=${Date.now() - startedAt}ms`, isTimeout ? "" : err);
     return [];
   }
+}
 
-  const rows = parseCallRows(data as unknown);
-  return toCallsFromRows(rows);
+/**
+ * Lê uma página de call logs, ordenados por updated_at DESC.
+ * Retorna `calls` (até `limit` itens) e `hasMore` (detectado via +1 trick).
+ */
+export async function readCallLogsPage(options: {
+  limit: number;
+  offset: number;
+}): Promise<{ calls: CallLog[]; hasMore: boolean }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { calls: [], hasMore: false };
+
+  const fetchLimit = options.limit + 1;
+  const startedAt = Date.now();
+
+  try {
+    const { data, error } = await withTimeout(
+      Promise.resolve(
+        admin
+          .from(CALLS_TABLE)
+          .select("call_id,payload")
+          .order("updated_at", { ascending: false })
+          .range(options.offset, options.offset + fetchLimit - 1),
+      ),
+      CALLS_READ_TIMEOUT_MS,
+      `readCallLogsPage:offset=${options.offset}`,
+    );
+
+    if (error) {
+      console.error(`[CALLS_TABLE] page error offset=${options.offset} elapsed=${Date.now() - startedAt}ms`, error.message);
+      return { calls: [], hasMore: false };
+    }
+
+    const rows = parseCallRows(data as unknown);
+    const hasMore = rows.length > options.limit;
+    const pageRows = hasMore ? rows.slice(0, options.limit) : rows;
+
+    console.log(`[CALLS_TABLE] page ok offset=${options.offset} rows=${pageRows.length} hasMore=${hasMore} elapsed=${Date.now() - startedAt}ms`);
+    return { calls: toCallsFromRows(pageRows), hasMore };
+  } catch (err) {
+    const isTimeout = err instanceof Error && err.message.startsWith("TIMEOUT:");
+    console.error(`[CALLS_TABLE] page ${isTimeout ? "timeout" : "exception"} offset=${options.offset} elapsed=${Date.now() - startedAt}ms`, isTimeout ? "" : err);
+    return { calls: [], hasMore: false };
+  }
 }
 
 export async function writeCallLogsCollection(calls: CallLog[]) {

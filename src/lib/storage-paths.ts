@@ -1,6 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { getSupabaseAdmin } from "./supabase-admin";
+import { withTimeout } from "./server/with-timeout";
+
+const STORAGE_READ_TIMEOUT_MS = 8_000;
+const STORAGE_WRITE_TIMEOUT_MS = 8_000;
 
 // Storage priority:
 // 1. Supabase (persistent)
@@ -48,11 +52,17 @@ export async function readDataFile<T>(filename: string, fallback: T): Promise<T>
       console.warn(`[STORAGE] read key=${key} supabase=SKIP (service role missing)`);
       if (supabaseRequired) return fallback;
     } else {
-      const { data, error } = await admin
-        .from(STORAGE_TABLE)
-        .select("value")
-        .eq("key", key)
-        .maybeSingle();
+      const { data, error } = await withTimeout(
+        Promise.resolve(
+          admin
+            .from(STORAGE_TABLE)
+            .select("value")
+            .eq("key", key)
+            .maybeSingle(),
+        ),
+        STORAGE_READ_TIMEOUT_MS,
+        `storage:read:${key}`,
+      );
 
       if (error) {
         console.error(`[STORAGE] read key=${key} supabase=ERROR`, error.message);
@@ -101,13 +111,19 @@ export async function writeDataFile<T>(filename: string, value: T): Promise<void
         throw new Error("SUPABASE_REQUIRED_FOR_STORAGE_WRITE");
       }
     } else {
-      const { error } = await admin.from(STORAGE_TABLE).upsert(
-        {
-          key,
-          value,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "key" },
+      const { error } = await withTimeout(
+        Promise.resolve(
+          admin.from(STORAGE_TABLE).upsert(
+            {
+              key,
+              value,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "key" },
+          ),
+        ),
+        STORAGE_WRITE_TIMEOUT_MS,
+        `storage:write:${key}`,
       );
       if (!error) {
         supabaseOk = true;

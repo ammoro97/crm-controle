@@ -29,8 +29,10 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  // Importante: usar getUser() (nao getSession()) para validar com o servidor
-  await supabase.auth.getUser();
+  // Middleware usa getSession() — leitura local do JWT, sem round-trip ao servidor.
+  // Valida com o servidor somente quando o token expira (~60min) para renovar cookie.
+  // A validacao server-side real acontece em requireAuth() dentro de cada route handler.
+  await supabase.auth.getSession();
 
   return supabaseResponse;
 }

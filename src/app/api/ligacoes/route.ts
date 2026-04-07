@@ -1,26 +1,46 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getCallLogs } from "@/lib/calls-store";
+import { readCallLogsPage } from "@/lib/calls-collection-store";
 import { startApi4CallByAuthenticatedUser, StartCallError } from "@/lib/api4/start-call";
 import { getAuthUser } from "@/lib/auth/get-auth-user";
 import { requireAuth } from "@/lib/require-auth";
 import type { StartCallInput } from "@/types/ligacoes";
 
-export async function GET() {
+const CALLS_PAGE_SIZE = 50;
+
+export async function GET(request: NextRequest) {
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
+  // Suporta paginação via ?page=N. Sem o param, retorna a página 0
+  // (compatibilidade com clientes que ainda não enviam ?page=).
+  const pageParam = request.nextUrl.searchParams.get("page");
+
   try {
+    if (pageParam !== null) {
+      // Caminho paginado: lê direto do Supabase por página, sem passar pelo cache em memória.
+      const page = Math.max(0, parseInt(pageParam, 10));
+      const result = await readCallLogsPage({ limit: CALLS_PAGE_SIZE, offset: page * CALLS_PAGE_SIZE });
+      const ordered = [...result.calls].sort((a, b) => {
+        const first = a.startedAt || a.createdAt;
+        const second = b.startedAt || b.createdAt;
+        return second.localeCompare(first);
+      });
+      return NextResponse.json({
+        success: true,
+        calls: ordered,
+        pagination: { page, pageSize: CALLS_PAGE_SIZE, hasMore: result.hasMore },
+      });
+    }
+
+    // Caminho legado: retorna todos (limitado a 1000 pelo calls-collection-store).
     const calls = await getCallLogs();
     const ordered = [...calls].sort((a, b) => {
       const first = a.startedAt || a.createdAt;
       const second = b.startedAt || b.createdAt;
       return second.localeCompare(first);
     });
-
-    return NextResponse.json({
-      success: true,
-      calls: ordered,
-    });
+    return NextResponse.json({ success: true, calls: ordered });
   } catch {
     return NextResponse.json(
       { success: false, message: "Nao foi possivel carregar ligacoes." },

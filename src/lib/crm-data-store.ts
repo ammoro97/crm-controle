@@ -32,6 +32,7 @@ type SnapshotPayload = {
 type SnapshotResponse = {
   success?: boolean;
   snapshots?: SnapshotPayload & { wrapups?: unknown[] };
+  pagination?: { page: number; pageSize: number; hasMore: boolean };
 };
 
 const syncQueue = new Map<SnapshotPayloadField, unknown>();
@@ -42,6 +43,9 @@ const pendingDeleteIds = {
 const pendingArchiveLeads = new Map<string, LeadArchiveEntry>(); // keyed by lead.id
 let syncInFlight = false;
 let hydrationStarted = false;
+// Lock para evitar hidratações concorrentes (ex: background sync disparando enquanto
+// a hidratação inicial ainda está carregando páginas).
+let hydrationInFlight = false;
 
 function cloneLeads(leads: Lead[]): Lead[] {
   return leads.map((lead) => ({ ...lead }));
@@ -181,38 +185,63 @@ function applyHydratedSnapshot(storageKey: string, eventName: string, value: unk
 
 async function hydrateSnapshotsFromServer() {
   if (!isBrowser()) return;
+  // Evita hidratações concorrentes: se o background sync disparar enquanto a
+  // hidratação inicial ainda está buscando páginas, ignora a segunda chamada.
+  if (hydrationInFlight) return;
+  hydrationInFlight = true;
+
   try {
-    const response = await fetch(SNAPSHOTS_ENDPOINT, {
-      method: "GET",
-      cache: "no-store",
-    });
-    if (!response.ok) return;
+    let page = 0;
+    const accumulatedLeads: Lead[] = [];
+    // Limite de segurança: evita loop infinito em caso de bug no servidor.
+    const MAX_PAGES = 200;
 
-    const data = (await response.json()) as SnapshotResponse;
-    if (!data.success || !data.snapshots) return;
+    while (page < MAX_PAGES) {
+      const response = await fetch(`${SNAPSHOTS_ENDPOINT}?page=${page}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (!response.ok) break;
 
-    if (Array.isArray(data.snapshots.leads)) {
-      applyHydratedSnapshot(LEADS_STORAGE_KEY, LEADS_EVENT, cloneLeads(data.snapshots.leads));
-    }
-    if (Array.isArray(data.snapshots.meetings)) {
-      applyHydratedSnapshot(MEETINGS_STORAGE_KEY, MEETINGS_EVENT, cloneMeetings(data.snapshots.meetings));
-    }
-    if (Array.isArray(data.snapshots.customers)) {
-      applyHydratedSnapshot(CUSTOMERS_STORAGE_KEY, CUSTOMERS_EVENT, cloneLeads(data.snapshots.customers));
-    }
-    if (Array.isArray(data.snapshots.leadFinalizations)) {
-      applyHydratedSnapshot(
-        LEAD_FINALIZATIONS_STORAGE_KEY,
-        LEAD_FINALIZATIONS_EVENT,
-        cloneLeadFinalizations(data.snapshots.leadFinalizations),
-      );
-    }
-    // Mescla wrapups de todos os vendedores para exibicao global de finalizacoes.
-    if (Array.isArray(data.snapshots.wrapups)) {
-      applyServerWrapupsSnapshot(data.snapshots.wrapups as PostCallWrapup[]);
+      const data = (await response.json()) as SnapshotResponse;
+      if (!data.success || !data.snapshots) break;
+
+      // Dados não-leads (meetings, customers etc.) chegam somente na página 0.
+      if (page === 0) {
+        if (Array.isArray(data.snapshots.meetings)) {
+          applyHydratedSnapshot(MEETINGS_STORAGE_KEY, MEETINGS_EVENT, cloneMeetings(data.snapshots.meetings));
+        }
+        if (Array.isArray(data.snapshots.customers)) {
+          applyHydratedSnapshot(CUSTOMERS_STORAGE_KEY, CUSTOMERS_EVENT, cloneLeads(data.snapshots.customers));
+        }
+        if (Array.isArray(data.snapshots.leadFinalizations)) {
+          applyHydratedSnapshot(
+            LEAD_FINALIZATIONS_STORAGE_KEY,
+            LEAD_FINALIZATIONS_EVENT,
+            cloneLeadFinalizations(data.snapshots.leadFinalizations),
+          );
+        }
+        // Mescla wrapups de todos os vendedores para exibicao global de finalizacoes.
+        if (Array.isArray(data.snapshots.wrapups)) {
+          applyServerWrapupsSnapshot(data.snapshots.wrapups as PostCallWrapup[]);
+        }
+      }
+
+      if (Array.isArray(data.snapshots.leads)) {
+        accumulatedLeads.push(...data.snapshots.leads);
+        // Emite após cada página para a UI começar a renderizar progressivamente
+        // sem esperar o carregamento completo de todos os leads.
+        applyHydratedSnapshot(LEADS_STORAGE_KEY, LEADS_EVENT, cloneLeads(accumulatedLeads));
+      }
+
+      // Se não há mais páginas, encerra o loop.
+      if (!data.pagination?.hasMore) break;
+      page++;
     }
   } catch {
     // Falha de rede/autorizacao nao deve quebrar o fluxo local.
+  } finally {
+    hydrationInFlight = false;
   }
 }
 

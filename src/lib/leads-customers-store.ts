@@ -2,6 +2,9 @@ import { createHash } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Lead, Meeting } from "@/types/crm";
 import { getSupabaseAdmin } from "./supabase-admin";
+import { withTimeout } from "./server/with-timeout";
+
+const LEADS_READ_TIMEOUT_MS = 12_000;
 
 type LeadTableName = "crm_leads" | "crm_customers";
 
@@ -145,18 +148,32 @@ async function readFromTable(tableName: LeadTableName): Promise<Lead[] | null> {
   const admin = getSupabaseAdmin();
   if (!admin) return null;
 
-  const { data, error } = await admin
-    .from(tableName)
-    .select("lead_id,payload")
-    .order("updated_at", { ascending: false });
+  const startedAt = Date.now();
+  try {
+    const { data, error } = await withTimeout(
+      Promise.resolve(
+        admin
+          .from(tableName)
+          .select("lead_id,payload")
+          .order("updated_at", { ascending: false }),
+      ),
+      LEADS_READ_TIMEOUT_MS,
+      `readFromTable:${tableName}`,
+    );
 
-  if (error) {
-    console.error(`[LEAD_TABLE] read error table=${tableName}`, error.message);
+    if (error) {
+      console.error(`[LEAD_TABLE] read error table=${tableName} elapsed=${Date.now() - startedAt}ms`, error.message);
+      return null;
+    }
+
+    console.log(`[LEAD_TABLE] read ok table=${tableName} rows=${(data as unknown[])?.length ?? 0} elapsed=${Date.now() - startedAt}ms`);
+    const rows = parseLeadTableRows(data as unknown);
+    return toLeadsFromRows(rows);
+  } catch (err) {
+    const isTimeout = err instanceof Error && err.message.startsWith("TIMEOUT:");
+    console.error(`[LEAD_TABLE] ${isTimeout ? "timeout" : "exception"} table=${tableName} elapsed=${Date.now() - startedAt}ms`, isTimeout ? "" : err);
     return null;
   }
-
-  const rows = parseLeadTableRows(data as unknown);
-  return toLeadsFromRows(rows);
 }
 
 async function writeToTable(tableName: LeadTableName, leads: Lead[]): Promise<boolean> {
@@ -190,6 +207,54 @@ async function writeCollection(tableName: LeadTableName, leads: Lead[]) {
 
 export async function readLeadsCollection() {
   return readCollection(LEADS_TABLE);
+}
+
+/**
+ * Lê uma página de leads da tabela, ordenados por updated_at DESC.
+ * Retorna `leads` (até `limit` itens) e `hasMore` (se existem mais páginas).
+ *
+ * Internamente busca `limit + 1` registros: se o DB retornar `limit + 1`,
+ * há mais páginas sem precisar de uma query COUNT separada.
+ */
+export async function readLeadsPage(options: {
+  limit: number;
+  offset: number;
+}): Promise<{ leads: Lead[]; hasMore: boolean }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { leads: [], hasMore: false };
+
+  const fetchLimit = options.limit + 1; // +1 para detectar hasMore sem COUNT
+  const startedAt = Date.now();
+
+  try {
+    const { data, error } = await withTimeout(
+      Promise.resolve(
+        admin
+          .from(LEADS_TABLE)
+          .select("lead_id,payload")
+          .order("updated_at", { ascending: false })
+          .range(options.offset, options.offset + fetchLimit - 1),
+      ),
+      LEADS_READ_TIMEOUT_MS,
+      `readLeadsPage:offset=${options.offset}`,
+    );
+
+    if (error) {
+      console.error(`[LEAD_TABLE] page error offset=${options.offset} elapsed=${Date.now() - startedAt}ms`, error.message);
+      return { leads: [], hasMore: false };
+    }
+
+    const rows = parseLeadTableRows(data as unknown);
+    const hasMore = rows.length > options.limit;
+    const pageRows = hasMore ? rows.slice(0, options.limit) : rows;
+
+    console.log(`[LEAD_TABLE] page ok offset=${options.offset} rows=${pageRows.length} hasMore=${hasMore} elapsed=${Date.now() - startedAt}ms`);
+    return { leads: toLeadsFromRows(pageRows), hasMore };
+  } catch (err) {
+    const isTimeout = err instanceof Error && err.message.startsWith("TIMEOUT:");
+    console.error(`[LEAD_TABLE] page ${isTimeout ? "timeout" : "exception"} offset=${options.offset} elapsed=${Date.now() - startedAt}ms`, isTimeout ? "" : err);
+    return { leads: [], hasMore: false };
+  }
 }
 
 export async function writeLeadsCollection(leads: Lead[]) {

@@ -1526,6 +1526,21 @@ export default function LigacoesPage() {
     });
   }, [atendenteFilter, calls, finalizacaoFilter]);
 
+  const CALLS_PAGE_SIZE = 50;
+  const [callsPage, setCallsPage] = useState(0);
+
+  // Reseta a página ao trocar filtros para não mostrar página vazia.
+  useEffect(() => {
+    setCallsPage(0);
+  }, [finalizacaoFilter, atendenteFilter]);
+
+  const pagedCalls = useMemo(
+    () => filteredCalls.slice(callsPage * CALLS_PAGE_SIZE, (callsPage + 1) * CALLS_PAGE_SIZE),
+    [filteredCalls, callsPage],
+  );
+
+  const totalCallsPages = Math.ceil(filteredCalls.length / CALLS_PAGE_SIZE);
+
   useEffect(() => {
     if (!selectedIds.length) return;
     const currentIds = new Set(filteredCalls.map((call) => call.id));
@@ -2446,7 +2461,7 @@ export default function LigacoesPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredCalls.map((call) => {
+                  pagedCalls.map((call) => {
                     const isOpen = selectedCallId === call.id;
                     const isSelected = selectedIds.includes(call.id);
                     const recordingUrl = getCallRecordingUrl(call);
@@ -2649,6 +2664,34 @@ export default function LigacoesPage() {
                 )}
               </tbody>
             </table>
+            {totalCallsPages > 1 && (
+              <div className="flex items-center justify-between border-t border-white/[0.06] px-4 py-3 text-xs text-slate-400">
+                <span>
+                  {callsPage * CALLS_PAGE_SIZE + 1}–{Math.min((callsPage + 1) * CALLS_PAGE_SIZE, filteredCalls.length)} de {filteredCalls.length} ligações
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={callsPage === 0}
+                    onClick={() => setCallsPage((p) => p - 1)}
+                    className="rounded border border-white/[0.08] bg-[#0A0A0B] px-3 py-1.5 text-xs text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Anterior
+                  </button>
+                  <span className="tabular-nums">
+                    {callsPage + 1} / {totalCallsPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={callsPage >= totalCallsPages - 1}
+                    onClick={() => setCallsPage((p) => p + 1)}
+                    className="rounded border border-white/[0.08] bg-[#0A0A0B] px-3 py-1.5 text-xs text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Próximo
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : null}
       </div>
