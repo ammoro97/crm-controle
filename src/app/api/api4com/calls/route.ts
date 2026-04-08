@@ -22,6 +22,10 @@ function toNumberSafe(value: string | null, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function buildQuery(page: number, filter: string) {
   const params = new URLSearchParams();
   params.set("page", String(page));
@@ -197,6 +201,8 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const page = toNumberSafe(searchParams.get("page"), 1);
     const filter = (searchParams.get("filter") || "").trim();
+    const maxPages = clamp(toNumberSafe(searchParams.get("maxPages"), 1), 1, 20);
+    const maxItems = clamp(toNumberSafe(searchParams.get("maxItems"), 100), 1, 1000);
 
     const integration = await getActiveApi4ComIntegracao();
     const token = String(integration?.token || "").trim();
@@ -210,46 +216,71 @@ export async function GET(request: Request) {
       });
     }
 
-    const query = buildQuery(page, filter);
     const endpoints = [
       preferredCallsEndpoint,
       ...API4COM_CALLS_ENDPOINTS.filter((endpoint) => endpoint !== preferredCallsEndpoint),
-    ].map((endpoint) => `${endpoint}?${query}`);
+    ];
 
     let lastError = "Nao foi possivel buscar historico na API4COM.";
 
-    for (const endpoint of endpoints) {
+    endpointLoop: for (const endpoint of endpoints) {
       try {
-        const response = await fetch(endpoint, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: token,
-          },
-          cache: "no-store",
-        });
+        const aggregatedItems: unknown[] = [];
+        const rawPages: unknown[] = [];
+        let pagesFetched = 0;
+        let currentPage = page;
 
-        const raw = await parseApiResponse(response);
+        while (pagesFetched < maxPages && aggregatedItems.length < maxItems) {
+          const query = buildQuery(currentPage, filter);
+          const response = await fetch(`${endpoint}?${query}`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: token,
+            },
+            cache: "no-store",
+          });
 
-        if (!response.ok) {
-          const message =
-            raw && typeof raw === "object" && "message" in raw && typeof (raw as { message?: unknown }).message === "string"
-              ? (raw as { message: string }).message
-              : `Falha ao consultar historico`;
-          lastError = message;
-          continue;
+          const raw = await parseApiResponse(response);
+
+          if (!response.ok) {
+            const message =
+              raw && typeof raw === "object" && "message" in raw && typeof (raw as { message?: unknown }).message === "string"
+                ? (raw as { message: string }).message
+                : "Falha ao consultar historico";
+            lastError = message;
+
+            // Se a primeira pagina ja falhou, tenta o proximo endpoint.
+            if (pagesFetched === 0) continue endpointLoop;
+            break;
+          }
+
+          rawPages.push(raw);
+          const pageItems = extractItems(raw);
+          if (pageItems.length === 0) break;
+
+          aggregatedItems.push(...pageItems);
+          pagesFetched += 1;
+          currentPage += 1;
         }
 
-        preferredCallsEndpoint = endpoint.split("?")[0];
+        preferredCallsEndpoint = endpoint;
+        const items = aggregatedItems.slice(0, maxItems);
 
-        const items = extractItems(raw);
         try {
           const sync = await syncExternalCalls(items);
           return NextResponse.json({
             ok: true,
             items,
-            raw,
+            raw: rawPages.length <= 1 ? (rawPages[0] || null) : { pages: rawPages },
             sync,
+            pagination: {
+              page,
+              pagesFetched,
+              maxPages,
+              maxItems,
+              returnedItems: items.length,
+            },
           });
         } catch (syncError) {
           console.error(

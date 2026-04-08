@@ -89,6 +89,11 @@ type CallsApiResponse = {
 type InternalCallsApiResponse = {
   success?: boolean;
   calls?: CallLog[];
+  pagination?: {
+    page?: number;
+    pageSize?: number;
+    hasMore?: boolean;
+  };
 };
 
 type WebhookOutConfigResponse = {
@@ -153,6 +158,9 @@ const HIDDEN_CALL_IDS_STORAGE_KEY = "crm:ligacoes:hidden-call-ids";
 const WEBHOOK_OUT_LOCAL_STORAGE_KEY = "crm:webhook-out-config:v1";
 const LIGACOES_DEBUG_PREFIX = "[LIGACOES_DEBUG]";
 const SEM_INTERESSE_SUBFINALIZACAO = "Sem Interesse";
+const CALLS_PAGE_SIZE = 50;
+const CALLS_HISTORY_LIMIT = 1000;
+const CALLS_HISTORY_MAX_PAGES = Math.ceil(CALLS_HISTORY_LIMIT / CALLS_PAGE_SIZE);
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
@@ -764,6 +772,101 @@ function shouldReplaceLookupRecord(current: CallLog, incoming: CallLog) {
   return false;
 }
 
+function registerInternalLookup(indexByLookup: Map<string, CallLog>, key: string, item: CallLog) {
+  const normalized = normalizeLookupKey(key);
+  if (!normalized) return;
+  const current = indexByLookup.get(normalized);
+  if (!current || shouldReplaceLookupRecord(current, item)) {
+    indexByLookup.set(normalized, item);
+  }
+}
+
+function registerInternalCall(indexById: Map<string, CallLog>, indexByLookup: Map<string, CallLog>, item: CallLog) {
+  indexById.set(item.id, item);
+  registerInternalLookup(indexByLookup, item.id, item);
+  registerInternalLookup(indexByLookup, item.externalCallId || "", item);
+  registerInternalLookup(indexByLookup, item.sessionId || "", item);
+  const internalPhoneDigits = normalizeDigits(item.telefone || item.called || item.caller || "");
+  const internalStartedAtMinute = getStartedAtMinuteKey(item.startedAt || item.createdAt || null);
+  if (internalPhoneDigits && internalStartedAtMinute) {
+    registerInternalLookup(indexByLookup, `phone-minute:${internalPhoneDigits}|${internalStartedAtMinute}`, item);
+    const internalLeadId = String(item.leadId || "").trim();
+    if (internalLeadId) {
+      registerInternalLookup(
+        indexByLookup,
+        `lead-phone-minute:${internalLeadId}|${internalPhoneDigits}|${internalStartedAtMinute}`,
+        item,
+      );
+    }
+  }
+}
+
+function mergeRowsPrioritizingExternal(internalRows: MappedCall[], externalRows: MappedCall[]) {
+  const merged = [...internalRows];
+  const rowIndexByLookup = new Map<string, number>();
+
+  merged.forEach((row, index) => {
+    for (const key of buildMappedCallLookupKeys(row)) {
+      rowIndexByLookup.set(key, index);
+    }
+  });
+
+  for (const externalRow of externalRows) {
+    const lookups = buildMappedCallLookupKeys(externalRow);
+    let matchedIndex: number | null = null;
+    for (const key of lookups) {
+      const existingIndex = rowIndexByLookup.get(key);
+      if (existingIndex === undefined) continue;
+      matchedIndex = existingIndex;
+      break;
+    }
+
+    if (matchedIndex === null) {
+      const nextIndex = merged.length;
+      merged.push(externalRow);
+      for (const key of lookups) {
+        rowIndexByLookup.set(key, nextIndex);
+      }
+      continue;
+    }
+
+    merged[matchedIndex] = externalRow;
+    for (const key of lookups) {
+      rowIndexByLookup.set(key, matchedIndex);
+    }
+  }
+
+  return merged;
+}
+
+function applyAnalysisOverlay(previous: MappedCall[], visibleRows: MappedCall[]) {
+  if (!previous.length) return visibleRows;
+  const previousByLookup = new Map<string, MappedCall>();
+  const registerPrevious = (call: MappedCall) => {
+    for (const key of buildMappedCallLookupKeys(call)) {
+      const current = previousByLookup.get(key);
+      if (!current || shouldOverlayAnalysisState(current, call)) {
+        previousByLookup.set(key, call);
+      }
+    }
+  };
+  previous.forEach(registerPrevious);
+
+  return visibleRows.map((row) => {
+    let fallback: MappedCall | undefined;
+    for (const key of buildMappedCallLookupKeys(row)) {
+      const candidate = previousByLookup.get(key);
+      if (!candidate) continue;
+      if (!fallback || shouldOverlayAnalysisState(fallback, candidate)) {
+        fallback = candidate;
+      }
+    }
+
+    if (!fallback || !shouldOverlayAnalysisState(row, fallback)) return row;
+    return mergeAnalysisState(row, fallback);
+  });
+}
+
 function mapInternalCallToRow(
   item: CallLog,
   context: {
@@ -1008,7 +1111,9 @@ export default function LigacoesPage() {
   const [finalizacaoFilter, setFinalizacaoFilter] = useState("Todas");
   const [atendenteFilter, setAtendenteFilter] = useState("Todos");
   const [searchTerm, setSearchTerm] = useState("");
+  const [nameSearchTerm, setNameSearchTerm] = useState("");
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const deferredNameSearchTerm = useDeferredValue(nameSearchTerm);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [webhookOutConfigured, setWebhookOutConfigured] = useState(false);
   const [webhookOutLoading, setWebhookOutLoading] = useState(true);
@@ -1029,6 +1134,8 @@ export default function LigacoesPage() {
   const initialLoadDoneRef = useRef(false);
   const isInitialLoadRunningRef = useRef(false);
   const isLoadingCallsRef = useRef(false);
+  const internalHistoryAbortRef = useRef<AbortController | null>(null);
+  const internalHistoryRunIdRef = useRef(0);
   const responsavelById = useMemo(() => {
     const map: ResponsavelByIdIndex = new Map();
     for (const item of responsaveisRecords) {
@@ -1056,6 +1163,10 @@ export default function LigacoesPage() {
     const isInitialLoad = !initialLoadDoneRef.current;
     if (isInitialLoad) setLoading(true);
     setError(null);
+    internalHistoryAbortRef.current?.abort();
+    internalHistoryAbortRef.current = null;
+    const historyRunId = internalHistoryRunIdRef.current + 1;
+    internalHistoryRunIdRef.current = historyRunId;
 
     const fetchStart = Date.now();
     try {
@@ -1072,8 +1183,12 @@ export default function LigacoesPage() {
       const combinedSignal = buildCombinedSignal();
 
       const [externalResponse, internalResponse] = await Promise.all([
-        fetch("/api/api4com/calls", { method: "GET", cache: "no-store", signal: combinedSignal }),
-        fetch("/api/ligacoes", { method: "GET", cache: "no-store", signal: combinedSignal }),
+        fetch(`/api/api4com/calls?page=1&maxPages=${CALLS_HISTORY_MAX_PAGES}&maxItems=${CALLS_HISTORY_LIMIT}`, {
+          method: "GET",
+          cache: "no-store",
+          signal: combinedSignal,
+        }),
+        fetch("/api/ligacoes?page=0", { method: "GET", cache: "no-store", signal: combinedSignal }),
       ]).finally(() => window.clearTimeout(timeoutId));
 
       const elapsed = Date.now() - fetchStart;
@@ -1087,28 +1202,8 @@ export default function LigacoesPage() {
 
       const internalMapById = new Map<string, CallLog>();
       const internalMapByLookup = new Map<string, CallLog>();
-      const registerLookup = (key: string, item: CallLog) => {
-        const normalized = normalizeLookupKey(key);
-        if (!normalized) return;
-        const current = internalMapByLookup.get(normalized);
-        if (!current || shouldReplaceLookupRecord(current, item)) {
-          internalMapByLookup.set(normalized, item);
-        }
-      };
       for (const item of internalData.calls) {
-        internalMapById.set(item.id, item);
-        registerLookup(item.id, item);
-        registerLookup(item.externalCallId || "", item);
-        registerLookup(item.sessionId || "", item);
-        const internalPhoneDigits = normalizeDigits(item.telefone || item.called || item.caller || "");
-        const internalStartedAtMinute = getStartedAtMinuteKey(item.startedAt || item.createdAt || null);
-        if (internalPhoneDigits && internalStartedAtMinute) {
-          registerLookup(`phone-minute:${internalPhoneDigits}|${internalStartedAtMinute}`, item);
-          const internalLeadId = String(item.leadId || "").trim();
-          if (internalLeadId) {
-            registerLookup(`lead-phone-minute:${internalLeadId}|${internalPhoneDigits}|${internalStartedAtMinute}`, item);
-          }
-        }
+        registerInternalCall(internalMapById, internalMapByLookup, item);
       }
       setInternalById(internalMapById);
 
@@ -1116,55 +1211,73 @@ export default function LigacoesPage() {
       const wrapupsIndexes = buildWrapupsIndexes(wrapups);
       const externalItems = externalResponse.ok && externalData.ok && Array.isArray(externalData.items) ? externalData.items : [];
 
-      const rows =
-        externalItems.length > 0
-          ? externalItems.map((item, index) =>
-              mapApiCallToRow(item, index, {
-                leadsIndexes,
-                internalByLookup: internalMapByLookup,
-                wrapupsIndexes,
-                responsavelById,
-              }),
-            )
-          : Array.from(internalMapById.values()).map((item) =>
-              mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),
-            );
-
-      rows.sort((a, b) => {
-        const first = a.startedAt || "";
-        const second = b.startedAt || "";
-        return second.localeCompare(first);
-      });
-
-      const visibleRows = rows.filter((row) => !hiddenCallIdsRef.current.has(row.id));
-      setCalls((prev) => {
-        if (!prev.length) return visibleRows;
-
-        const previousByLookup = new Map<string, MappedCall>();
-        const registerPrevious = (call: MappedCall) => {
-          for (const key of buildMappedCallLookupKeys(call)) {
-            const current = previousByLookup.get(key);
-            if (!current || shouldOverlayAnalysisState(current, call)) {
-              previousByLookup.set(key, call);
-            }
-          }
-        };
-        prev.forEach(registerPrevious);
-
-        return visibleRows.map((row) => {
-          let fallback: MappedCall | undefined;
-          for (const key of buildMappedCallLookupKeys(row)) {
-            const candidate = previousByLookup.get(key);
-            if (!candidate) continue;
-            if (!fallback || shouldOverlayAnalysisState(fallback, candidate)) {
-              fallback = candidate;
-            }
-          }
-
-          if (!fallback || !shouldOverlayAnalysisState(row, fallback)) return row;
-          return mergeAnalysisState(row, fallback);
+      const buildVisibleRows = () => {
+        const internalRows = Array.from(internalMapById.values()).map((item) =>
+          mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),
+        );
+        const externalRows = externalItems.map((item, index) =>
+          mapApiCallToRow(item, index, {
+            leadsIndexes,
+            internalByLookup: internalMapByLookup,
+            wrapupsIndexes,
+            responsavelById,
+          }),
+        );
+        const mergedRows = mergeRowsPrioritizingExternal(internalRows, externalRows);
+        mergedRows.sort((a, b) => {
+          const first = a.startedAt || "";
+          const second = b.startedAt || "";
+          return second.localeCompare(first);
         });
-      });
+        return mergedRows
+          .filter((row) => !hiddenCallIdsRef.current.has(row.id))
+          .slice(0, CALLS_HISTORY_LIMIT);
+      };
+
+      const visibleRows = buildVisibleRows();
+      setCalls((prev) => applyAnalysisOverlay(prev, visibleRows));
+
+      const hasMoreInternalPages = Boolean(internalData.pagination?.hasMore);
+      if (hasMoreInternalPages) {
+        const historyController = new AbortController();
+        internalHistoryAbortRef.current = historyController;
+        if (signal) {
+          signal.addEventListener("abort", () => historyController.abort(), { once: true });
+        }
+
+        void (async () => {
+          let page = 1;
+          let hasMore = true;
+          let loadedPages = 0;
+          while (hasMore && !historyController.signal.aborted && page < CALLS_HISTORY_MAX_PAGES) {
+            try {
+              const response = await fetch(`/api/ligacoes?page=${page}`, {
+                method: "GET",
+                cache: "no-store",
+                signal: historyController.signal,
+              });
+              if (!response.ok) break;
+              const data = (await response.json()) as InternalCallsApiResponse;
+              if (!data.success || !Array.isArray(data.calls)) break;
+              data.calls.forEach((call) => registerInternalCall(internalMapById, internalMapByLookup, call));
+              loadedPages += 1;
+              hasMore = Boolean(data.pagination?.hasMore);
+              page += 1;
+
+              if (internalHistoryRunIdRef.current !== historyRunId) return;
+              if (loadedPages % 3 === 0 || !hasMore) {
+                setInternalById(new Map(internalMapById));
+                const hydratedRows = buildVisibleRows();
+                setCalls((prev) => applyAnalysisOverlay(prev, hydratedRows));
+              }
+            } catch (historyError) {
+              if (historyError instanceof DOMException && historyError.name === "AbortError") return;
+              break;
+            }
+          }
+        })();
+      }
+
       if (!externalResponse.ok || !externalData.ok) {
         setError(externalData.error || "Histórico externo indisponível. Exibindo ligações internas.");
       } else {
@@ -1279,6 +1392,12 @@ export default function LigacoesPage() {
       activeSession,
     });
   }, [activeSession]);
+
+  useEffect(() => {
+    return () => {
+      internalHistoryAbortRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     console.log(`${LIGACOES_DEBUG_PREFIX} PAGE MOUNT`);
@@ -1520,32 +1639,52 @@ export default function LigacoesPage() {
     setAtendenteFilter("Todos");
   }, [atendenteFilter, atendenteOptions]);
 
+  const nameSuggestions = useMemo(() => {
+    const uniqueNames = Array.from(
+      new Set(
+        calls
+          .map((call) => String(call.nome || "").trim())
+          .filter((name) => name.length > 0 && name !== "-"),
+      ),
+    ).sort((a, b) => a.localeCompare(b));
+    const normalizedNameSearch = normalizeText(deferredNameSearchTerm);
+    if (!normalizedNameSearch) return uniqueNames.slice(0, 30);
+    return uniqueNames.filter((name) => normalizeText(name).includes(normalizedNameSearch)).slice(0, 30);
+  }, [calls, deferredNameSearchTerm]);
+
   const filteredCalls = useMemo(() => {
     const normalizedSearch = deferredSearchTerm
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .trim();
+    const normalizedNameSearch = normalizeText(deferredNameSearchTerm);
 
     return calls.filter((call) => {
       const matchesFinalizacao = finalizacaoFilter === "Todas" || call.finalizacao === finalizacaoFilter;
       const matchesAtendente = atendenteFilter === "Todos" || call.atendente === atendenteFilter;
-      if (!matchesFinalizacao || !matchesAtendente) return false;
+      const matchesName =
+        !normalizedNameSearch ||
+        String(call.nome || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .includes(normalizedNameSearch);
+      if (!matchesFinalizacao || !matchesAtendente || !matchesName) return false;
 
       if (!normalizedSearch) return true;
       const normalize = (v?: string | null) =>
         String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       return [call.empresa, call.nome, call.telefone].some((v) => normalize(v).includes(normalizedSearch));
     });
-  }, [atendenteFilter, calls, deferredSearchTerm, finalizacaoFilter]);
+  }, [atendenteFilter, calls, deferredNameSearchTerm, deferredSearchTerm, finalizacaoFilter]);
 
-  const CALLS_PAGE_SIZE = 50;
   const [callsPage, setCallsPage] = useState(0);
 
   // Reseta a página ao trocar filtros para não mostrar página vazia.
   useEffect(() => {
     setCallsPage(0);
-  }, [finalizacaoFilter, atendenteFilter, deferredSearchTerm]);
+  }, [finalizacaoFilter, atendenteFilter, deferredNameSearchTerm, deferredSearchTerm]);
 
   const pagedCalls = useMemo(
     () => filteredCalls.slice(callsPage * CALLS_PAGE_SIZE, (callsPage + 1) * CALLS_PAGE_SIZE),
@@ -2166,6 +2305,22 @@ export default function LigacoesPage() {
                 onChange={(event) => setSearchTerm(event.target.value)}
               />
             </div>
+            <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
+              Nome
+              <input
+                type="text"
+                list="ligacoes-nome-sugestoes"
+                className="field mt-1 h-9 min-w-[220px] border-white/[0.06] bg-[#0A0A0B] px-2.5 py-1.5 text-xs"
+                placeholder="Buscar por nome..."
+                value={nameSearchTerm}
+                onChange={(event) => setNameSearchTerm(event.target.value)}
+              />
+              <datalist id="ligacoes-nome-sugestoes">
+                {nameSuggestions.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            </label>
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
               Atendente
               <select
