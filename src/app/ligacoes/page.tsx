@@ -162,6 +162,14 @@ const CALLS_PAGE_SIZE = 50;
 const CALLS_HISTORY_LIMIT = 1000;
 const CALLS_HISTORY_MAX_PAGES = Math.ceil(CALLS_HISTORY_LIMIT / CALLS_PAGE_SIZE);
 
+type CallsRuntimeCache = {
+  rows: MappedCall[];
+  internalCalls: CallLog[];
+  updatedAt: number;
+};
+
+let callsRuntimeCache: CallsRuntimeCache | null = null;
+
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
@@ -1102,11 +1110,15 @@ export default function LigacoesPage() {
   const { currentUser } = useAuth();
   const responsaveisRecords = useResponsaveisRecords();
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
-  const [calls, setCalls] = useState<MappedCall[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [calls, setCalls] = useState<MappedCall[]>(() => callsRuntimeCache?.rows || []);
+  const [loading, setLoading] = useState(() => !(callsRuntimeCache && callsRuntimeCache.rows.length > 0));
   const [error, setError] = useState<string | null>(null);
   const [leadsSnapshot, setLeadsSnapshotState] = useState<Lead[]>(() => getLeadsSnapshot());
-  const [internalById, setInternalById] = useState<Map<string, CallLog>>(new Map());
+  const [internalById, setInternalById] = useState<Map<string, CallLog>>(() => {
+    const map = new Map<string, CallLog>();
+    (callsRuntimeCache?.internalCalls || []).forEach((call) => map.set(call.id, call));
+    return map;
+  });
   const [wrapups, setWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
   const [finalizacaoFilter, setFinalizacaoFilter] = useState("Todas");
   const [atendenteFilter, setAtendenteFilter] = useState("Todos");
@@ -1121,7 +1133,7 @@ export default function LigacoesPage() {
   const [analysisLoadingCallId, setAnalysisLoadingCallId] = useState<string | null>(null);
   const [viewAnalysisLoadingCallId, setViewAnalysisLoadingCallId] = useState<string | null>(null);
   const [analysisFeedbackByCallId, setAnalysisFeedbackByCallId] = useState<Record<string, AnalysisFeedbackEntry>>({});
-  const hiddenCallIdsRef = useRef<Set<string>>(new Set());
+  const hiddenCallIdsRef = useRef<Set<string>>(readHiddenCallIds());
   const callsTableScrollRef = useRef<HTMLDivElement | null>(null);
   const callsTableDragStartXRef = useRef(0);
   const callsTableDragStartScrollLeftRef = useRef(0);
@@ -1161,7 +1173,7 @@ export default function LigacoesPage() {
       ts: new Date().toISOString(),
     });
     const isInitialLoad = !initialLoadDoneRef.current;
-    if (isInitialLoad) setLoading(true);
+    if (isInitialLoad && calls.length === 0) setLoading(true);
     setError(null);
     internalHistoryAbortRef.current?.abort();
     internalHistoryAbortRef.current = null;
@@ -1182,18 +1194,31 @@ export default function LigacoesPage() {
       };
       const combinedSignal = buildCombinedSignal();
 
-      const [externalResponse, internalResponse] = await Promise.all([
-        fetch(`/api/api4com/calls?page=1&maxPages=${CALLS_HISTORY_MAX_PAGES}&maxItems=${CALLS_HISTORY_LIMIT}`, {
-          method: "GET",
-          cache: "no-store",
-          signal: combinedSignal,
-        }),
-        fetch("/api/ligacoes?page=0", { method: "GET", cache: "no-store", signal: combinedSignal }),
-      ]).finally(() => window.clearTimeout(timeoutId));
+      const api4SyncPromise = (async () => {
+        try {
+          const response = await fetch(`/api/api4com/calls?page=1&maxPages=1&maxItems=${CALLS_PAGE_SIZE}`, {
+            method: "GET",
+            cache: "no-store",
+            signal: combinedSignal,
+          });
+          const data = (await response.json()) as CallsApiResponse;
+          return { ok: response.ok && Boolean(data.ok), data };
+        } catch (api4SyncError) {
+          if (api4SyncError instanceof DOMException && api4SyncError.name === "AbortError") {
+            return { ok: false, data: { ok: false } as CallsApiResponse };
+          }
+          return { ok: false, data: { ok: false } as CallsApiResponse };
+        }
+      })();
+
+      const internalResponse = await fetch("/api/ligacoes?page=0", {
+        method: "GET",
+        cache: "no-store",
+        signal: combinedSignal,
+      }).finally(() => window.clearTimeout(timeoutId));
 
       const elapsed = Date.now() - fetchStart;
       if (elapsed > 3000) sendPerfLog({ etapa: "fetch_ligacoes", tempoRespostaMs: elapsed });
-      const externalData = (await externalResponse.json()) as CallsApiResponse;
       const internalData = (await internalResponse.json()) as InternalCallsApiResponse;
 
       if (!internalResponse.ok || !internalData.success || !Array.isArray(internalData.calls)) {
@@ -1209,33 +1234,61 @@ export default function LigacoesPage() {
 
       const leadsIndexes = buildLeadsIndexes(leadsSnapshot);
       const wrapupsIndexes = buildWrapupsIndexes(wrapups);
-      const externalItems = externalResponse.ok && externalData.ok && Array.isArray(externalData.items) ? externalData.items : [];
 
       const buildVisibleRows = () => {
-        const internalRows = Array.from(internalMapById.values()).map((item) =>
-          mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById }),
-        );
-        const externalRows = externalItems.map((item, index) =>
-          mapApiCallToRow(item, index, {
-            leadsIndexes,
-            internalByLookup: internalMapByLookup,
-            wrapupsIndexes,
-            responsavelById,
-          }),
-        );
-        const mergedRows = mergeRowsPrioritizingExternal(internalRows, externalRows);
-        mergedRows.sort((a, b) => {
+        const internalRows = Array.from(internalMapById.values()).map((item) => {
+          const row = mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById });
+          return {
+            ...row,
+            origem: item.externalCallId ? "api4com" : row.origem,
+          };
+        });
+        internalRows.sort((a, b) => {
           const first = a.startedAt || "";
           const second = b.startedAt || "";
           return second.localeCompare(first);
         });
-        return mergedRows
+        return internalRows
           .filter((row) => !hiddenCallIdsRef.current.has(row.id))
           .slice(0, CALLS_HISTORY_LIMIT);
       };
 
-      const visibleRows = buildVisibleRows();
-      setCalls((prev) => applyAnalysisOverlay(prev, visibleRows));
+      const commitVisibleRows = (rows: MappedCall[]) => {
+        setInternalById(new Map(internalMapById));
+        setCalls((prev) => {
+          const nextRows = applyAnalysisOverlay(prev, rows);
+          callsRuntimeCache = {
+            rows: [...nextRows],
+            internalCalls: Array.from(internalMapById.values()),
+            updatedAt: Date.now(),
+          };
+          return nextRows;
+        });
+      };
+
+      commitVisibleRows(buildVisibleRows());
+
+      const api4Sync = await api4SyncPromise;
+      if (api4Sync.ok) {
+        try {
+          const refreshedInternalResponse = await fetch("/api/ligacoes?page=0", {
+            method: "GET",
+            cache: "no-store",
+            signal: combinedSignal,
+          });
+          if (refreshedInternalResponse.ok) {
+            const refreshedInternalData = (await refreshedInternalResponse.json()) as InternalCallsApiResponse;
+            if (refreshedInternalData.success && Array.isArray(refreshedInternalData.calls)) {
+              refreshedInternalData.calls.forEach((call) => registerInternalCall(internalMapById, internalMapByLookup, call));
+              commitVisibleRows(buildVisibleRows());
+            }
+          }
+        } catch (refreshInternalError) {
+          if (!(refreshInternalError instanceof DOMException && refreshInternalError.name === "AbortError")) {
+            console.warn(`${LIGACOES_DEBUG_PREFIX} REFRESH_INTERNAL_AFTER_SYNC_FAIL`, refreshInternalError);
+          }
+        }
+      }
 
       const hasMoreInternalPages = Boolean(internalData.pagination?.hasMore);
       if (hasMoreInternalPages) {
@@ -1266,9 +1319,7 @@ export default function LigacoesPage() {
 
               if (internalHistoryRunIdRef.current !== historyRunId) return;
               if (loadedPages % 3 === 0 || !hasMore) {
-                setInternalById(new Map(internalMapById));
-                const hydratedRows = buildVisibleRows();
-                setCalls((prev) => applyAnalysisOverlay(prev, hydratedRows));
+                commitVisibleRows(buildVisibleRows());
               }
             } catch (historyError) {
               if (historyError instanceof DOMException && historyError.name === "AbortError") return;
@@ -1278,18 +1329,15 @@ export default function LigacoesPage() {
         })();
       }
 
-      if (!externalResponse.ok || !externalData.ok) {
-        setError(externalData.error || "Histórico externo indisponível. Exibindo ligações internas.");
-      } else {
-        setError(null);
-      }
+      setError(null);
+      const visibleRows = buildVisibleRows();
       console.log(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD SUCCESS`, {
         reason,
-        externalOk: externalResponse.ok && externalData.ok,
-        externalCount: externalItems.length,
+        externalOk: api4Sync.ok,
+        externalCount: Array.isArray(api4Sync.data.items) ? api4Sync.data.items.length : 0,
         internalCount: internalMapById.size,
         renderedCount: visibleRows.length,
-        source: externalItems.length > 0 ? "api4com" : "internal-fallback",
+        source: "supabase-history",
       });
       return true;
     } catch (requestError) {
@@ -1297,7 +1345,6 @@ export default function LigacoesPage() {
       const errMsg = requestError instanceof Error ? requestError.message : "erro desconhecido";
       sendPerfLog({ etapa: "fetch_ligacoes", erro: errMsg, tempoRespostaMs: Date.now() - fetchStart });
       setError("Não foi possível carregar ligações.");
-      setCalls([]);
       console.error(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD FAIL`, { reason, message: errMsg });
       return false;
     } finally {
@@ -1733,6 +1780,13 @@ export default function LigacoesPage() {
     writeHiddenCallIds(nextHidden);
 
     setCalls((prev) => prev.filter((call) => !nextHidden.has(call.id)));
+    if (callsRuntimeCache) {
+      callsRuntimeCache = {
+        ...callsRuntimeCache,
+        rows: callsRuntimeCache.rows.filter((call) => !nextHidden.has(call.id)),
+        updatedAt: Date.now(),
+      };
+    }
     if (selectedCallId && nextHidden.has(selectedCallId)) {
       setSelectedCallId(null);
     }
