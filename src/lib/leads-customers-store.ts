@@ -23,6 +23,34 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function reportLeadTableError(context: string, details?: unknown) {
+  if (process.env.NODE_ENV !== "production") {
+    // eslint-disable-next-line no-console
+    console.error(`[LEAD_TABLE] ${context}`, details);
+  }
+}
+
+function canonicalizeJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => canonicalizeJson(entry));
+  }
+  if (isObjectRecord(value)) {
+    const sortedEntries = Object.keys(value)
+      .sort((left, right) => left.localeCompare(right))
+      .map((key) => [key, canonicalizeJson(value[key])] as const);
+    return Object.fromEntries(sortedEntries);
+  }
+  return value;
+}
+
+function fingerprintJson(value: unknown): string {
+  return JSON.stringify(canonicalizeJson(value));
+}
+
+function fingerprintLead(lead: Lead): string {
+  return fingerprintJson(lead);
+}
+
 function buildFallbackLeadId(seed: unknown, index: number): string {
   const hash = createHash("sha1")
     .update(JSON.stringify(seed) || `empty-${index}`)
@@ -116,7 +144,7 @@ async function listLeadIds(admin: SupabaseClient, tableName: LeadTableName): Pro
       .select("lead_id")
       .range(from, to);
     if (error) {
-      console.error(`[LEAD_TABLE] list ids error table=${tableName}`, error.message);
+      reportLeadTableError(`list ids error table=${tableName}`, error.message);
       return null;
     }
     const pageIds = parseLeadIdRows(data as unknown);
@@ -133,26 +161,63 @@ async function deleteLeadIds(admin: SupabaseClient, tableName: LeadTableName, id
     const chunk = ids.slice(index, index + DELETE_BATCH_SIZE);
     const { error } = await admin.from(tableName).delete().in("lead_id", chunk);
     if (error) {
-      console.error(`[LEAD_TABLE] delete stale rows error table=${tableName}`, error.message);
+      reportLeadTableError(`delete stale rows error table=${tableName}`, error.message);
       return;
     }
   }
 }
 
+async function readLeadFingerprintsById(
+  admin: SupabaseClient,
+  tableName: LeadTableName,
+  ids: string[],
+): Promise<Map<string, string> | null> {
+  const fingerprints = new Map<string, string>();
+  for (let index = 0; index < ids.length; index += DELETE_BATCH_SIZE) {
+    const chunk = ids.slice(index, index + DELETE_BATCH_SIZE);
+    if (chunk.length === 0) continue;
+    const { data, error } = await admin
+      .from(tableName)
+      .select("lead_id,payload")
+      .in("lead_id", chunk);
+
+    if (error) {
+      reportLeadTableError(`read fingerprints error table=${tableName}`, error.message);
+      return null;
+    }
+
+    const rows = parseLeadTableRows(data as unknown);
+    for (const row of rows) {
+      fingerprints.set(row.lead_id, fingerprintJson(row.payload));
+    }
+  }
+  return fingerprints;
+}
+
 async function upsertLeadsIntoTable(admin: SupabaseClient, tableName: LeadTableName, leads: Lead[]): Promise<boolean> {
   const dedupedLeads = dedupeByLeadId(leads);
-  const nowIso = new Date().toISOString();
-
   if (dedupedLeads.length === 0) return true;
+  const existingFingerprints = await readLeadFingerprintsById(
+    admin,
+    tableName,
+    dedupedLeads.map((lead) => lead.id),
+  );
+  if (!existingFingerprints) return false;
 
-  const rows = dedupedLeads.map((lead) => ({
-    lead_id: lead.id,
-    payload: lead,
-    updated_at: nowIso,
-  }));
-  const { error } = await admin.from(tableName).upsert(rows, { onConflict: "lead_id" });
+  const nowIso = new Date().toISOString();
+  const rowsToUpsert = dedupedLeads
+    .filter((lead) => existingFingerprints.get(lead.id) !== fingerprintLead(lead))
+    .map((lead) => ({
+      lead_id: lead.id,
+      payload: lead,
+      updated_at: nowIso,
+    }));
+
+  if (rowsToUpsert.length === 0) return true;
+
+  const { error } = await admin.from(tableName).upsert(rowsToUpsert, { onConflict: "lead_id" });
   if (error) {
-    console.error(`[LEAD_TABLE] upsert error table=${tableName}`, error.message);
+    reportLeadTableError(`upsert error table=${tableName}`, error.message);
     return false;
   }
   return true;
@@ -174,6 +239,7 @@ async function readFromTable(tableName: LeadTableName): Promise<Lead[] | null> {
             .from(tableName)
             .select("lead_id,payload")
             .order("updated_at", { ascending: false })
+            .order("lead_id", { ascending: true })
             .range(from, to),
         ),
         LEADS_READ_TIMEOUT_MS,
@@ -181,7 +247,10 @@ async function readFromTable(tableName: LeadTableName): Promise<Lead[] | null> {
       );
 
       if (error) {
-        console.error(`[LEAD_TABLE] read error table=${tableName} page=${page} elapsed=${Date.now() - startedAt}ms`, error.message);
+        reportLeadTableError(
+          `read error table=${tableName} page=${page} elapsed=${Date.now() - startedAt}ms`,
+          error.message,
+        );
         return null;
       }
 
@@ -191,11 +260,13 @@ async function readFromTable(tableName: LeadTableName): Promise<Lead[] | null> {
       if (pageRows.length < READ_PAGE_SIZE) break;
     }
 
-    console.log(`[LEAD_TABLE] read ok table=${tableName} rows=${rows.length} elapsed=${Date.now() - startedAt}ms`);
     return toLeadsFromRows(rows);
   } catch (err) {
     const isTimeout = err instanceof Error && err.message.startsWith("TIMEOUT:");
-    console.error(`[LEAD_TABLE] ${isTimeout ? "timeout" : "exception"} table=${tableName} elapsed=${Date.now() - startedAt}ms`, isTimeout ? "" : err);
+    reportLeadTableError(
+      `${isTimeout ? "timeout" : "exception"} table=${tableName} elapsed=${Date.now() - startedAt}ms`,
+      isTimeout ? "" : err,
+    );
     return null;
   }
 }
@@ -217,7 +288,7 @@ async function writeCollection(tableName: LeadTableName, leads: Lead[]) {
   if (tableName === LEADS_TABLE && normalized.length === 0) {
     const current = await readFromTable(tableName);
     if (current && current.length > 0) {
-      console.error("[LEAD_TABLE] bloqueado snapshot vazio para crm_leads (protecao anti-wipe)");
+      reportLeadTableError("bloqueado snapshot vazio para crm_leads (protecao anti-wipe)");
       throw new Error("LEADS_EMPTY_SNAPSHOT_BLOCKED");
     }
   }
@@ -257,6 +328,7 @@ export async function readLeadsPage(options: {
           .from(LEADS_TABLE)
           .select("lead_id,payload")
           .order("updated_at", { ascending: false })
+          .order("lead_id", { ascending: true })
           .range(options.offset, options.offset + fetchLimit - 1),
       ),
       LEADS_READ_TIMEOUT_MS,
@@ -264,7 +336,7 @@ export async function readLeadsPage(options: {
     );
 
     if (error) {
-      console.error(`[LEAD_TABLE] page error offset=${options.offset} elapsed=${Date.now() - startedAt}ms`, error.message);
+      reportLeadTableError(`page error offset=${options.offset} elapsed=${Date.now() - startedAt}ms`, error.message);
       return { leads: [], hasMore: false };
     }
 
@@ -272,11 +344,13 @@ export async function readLeadsPage(options: {
     const hasMore = rows.length > options.limit;
     const pageRows = hasMore ? rows.slice(0, options.limit) : rows;
 
-    console.log(`[LEAD_TABLE] page ok offset=${options.offset} rows=${pageRows.length} hasMore=${hasMore} elapsed=${Date.now() - startedAt}ms`);
     return { leads: toLeadsFromRows(pageRows), hasMore };
   } catch (err) {
     const isTimeout = err instanceof Error && err.message.startsWith("TIMEOUT:");
-    console.error(`[LEAD_TABLE] page ${isTimeout ? "timeout" : "exception"} offset=${options.offset} elapsed=${Date.now() - startedAt}ms`, isTimeout ? "" : err);
+    reportLeadTableError(
+      `page ${isTimeout ? "timeout" : "exception"} offset=${options.offset} elapsed=${Date.now() - startedAt}ms`,
+      isTimeout ? "" : err,
+    );
     return { leads: [], hasMore: false };
   }
 }

@@ -46,6 +46,9 @@ let hydrationStarted = false;
 // Lock para evitar hidratações concorrentes (ex: background sync disparando enquanto
 // a hidratação inicial ainda está carregando páginas).
 let hydrationInFlight = false;
+const MAX_HYDRATION_PAGES = 200;
+
+type HydrationMode = "initial" | "background";
 
 function cloneLeads(leads: Lead[]): Lead[] {
   return leads.map((lead) => ({ ...lead }));
@@ -61,6 +64,26 @@ function cloneLeadFinalizations(records: LeadFinalizationRecord[]): LeadFinaliza
 
 function isBrowser() {
   return typeof window !== "undefined";
+}
+
+function reportStoreClientError(context: string, error: unknown) {
+  if (process.env.NODE_ENV !== "production") {
+    // eslint-disable-next-line no-console
+    console.error(`[CRM_DATA_STORE] ${context}`, error);
+  }
+}
+
+function parseStorageArray<T>(storageKey: string): T[] {
+  if (!isBrowser()) return [];
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch (error) {
+    reportStoreClientError(`parseStorageArray:${storageKey}`, error);
+    return [];
+  }
 }
 
 function mapStorageKeyToPayloadField(storageKey: string): SnapshotPayloadField | null {
@@ -151,7 +174,8 @@ async function flushSyncQueue() {
     for (const [field, value] of pendingEntries) {
       applyFieldSnapshot(field, value);
     }
-  } catch {
+  } catch (error) {
+    reportStoreClientError("flushSyncQueue", error);
     for (const [field, value] of pendingEntries) {
       if (!syncQueue.has(field)) {
         syncQueue.set(field, value);
@@ -177,13 +201,17 @@ function enqueueSnapshotSync(storageKey: string, payloadValue: unknown) {
   scheduleSyncFlush();
 }
 
-function applyHydratedSnapshot(storageKey: string, eventName: string, value: unknown[]) {
-  if (!isBrowser()) return;
-  window.localStorage.setItem(storageKey, JSON.stringify(value));
+function applyHydratedSnapshot(storageKey: string, eventName: string, value: unknown[]): boolean {
+  if (!isBrowser()) return false;
+  const serialized = JSON.stringify(value);
+  const previous = window.localStorage.getItem(storageKey);
+  if (previous === serialized) return false;
+  window.localStorage.setItem(storageKey, serialized);
   window.dispatchEvent(new CustomEvent(eventName, { detail: value }));
+  return true;
 }
 
-async function hydrateSnapshotsFromServer() {
+async function hydrateSnapshotsFromServer(mode: HydrationMode = "initial") {
   if (!isBrowser()) return;
   // Evita hidratações concorrentes: se o background sync disparar enquanto a
   // hidratação inicial ainda está buscando páginas, ignora a segunda chamada.
@@ -193,8 +221,9 @@ async function hydrateSnapshotsFromServer() {
   try {
     let page = 0;
     const accumulatedLeads: Lead[] = [];
+    let hasLoadedLeadPage = false;
     // Limite de segurança: evita loop infinito em caso de bug no servidor.
-    const MAX_PAGES = 200;
+    const MAX_PAGES = MAX_HYDRATION_PAGES;
 
     while (page < MAX_PAGES) {
       const response = await fetch(`${SNAPSHOTS_ENDPOINT}?page=${page}`, {
@@ -228,18 +257,21 @@ async function hydrateSnapshotsFromServer() {
       }
 
       if (Array.isArray(data.snapshots.leads)) {
+        hasLoadedLeadPage = true;
         accumulatedLeads.push(...data.snapshots.leads);
         // Emite após cada página para a UI começar a renderizar progressivamente
         // sem esperar o carregamento completo de todos os leads.
-        applyHydratedSnapshot(LEADS_STORAGE_KEY, LEADS_EVENT, cloneLeads(accumulatedLeads));
       }
 
       // Se não há mais páginas, encerra o loop.
       if (!data.pagination?.hasMore) break;
       page++;
     }
-  } catch {
-    // Falha de rede/autorizacao nao deve quebrar o fluxo local.
+    if (hasLoadedLeadPage) {
+      applyHydratedSnapshot(LEADS_STORAGE_KEY, LEADS_EVENT, cloneLeads(accumulatedLeads));
+    }
+  } catch (error) {
+    reportStoreClientError(`hydrateSnapshotsFromServer:${mode}`, error);
   } finally {
     hydrationInFlight = false;
   }
@@ -249,25 +281,12 @@ function ensureSnapshotsHydrated() {
   if (!isBrowser()) return;
   if (hydrationStarted) return;
   hydrationStarted = true;
-  window.localStorage.removeItem(LEADS_STORAGE_KEY);
-  window.localStorage.removeItem(MEETINGS_STORAGE_KEY);
-  window.localStorage.removeItem(CUSTOMERS_STORAGE_KEY);
-  window.localStorage.removeItem(LEAD_FINALIZATIONS_STORAGE_KEY);
-  void hydrateSnapshotsFromServer();
+  void hydrateSnapshotsFromServer("initial");
 }
 
 export function getLeadsSnapshot(): Lead[] {
   ensureSnapshotsHydrated();
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(LEADS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return cloneLeads(parsed as Lead[]);
-  } catch {
-    return [];
-  }
+  return cloneLeads(parseStorageArray<Lead>(LEADS_STORAGE_KEY));
 }
 
 export function setLeadsSnapshot(next: Lead[], deletedIds?: string[], archiveEntries?: LeadArchiveEntry[]) {
@@ -284,16 +303,7 @@ export function setLeadsSnapshot(next: Lead[], deletedIds?: string[], archiveEnt
 
 export function getMeetingsSnapshot(): Meeting[] {
   ensureSnapshotsHydrated();
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(MEETINGS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return cloneMeetings(parsed as Meeting[]);
-  } catch {
-    return [];
-  }
+  return cloneMeetings(parseStorageArray<Meeting>(MEETINGS_STORAGE_KEY));
 }
 
 export function setMeetingsSnapshot(next: Meeting[]) {
@@ -304,16 +314,7 @@ export function setMeetingsSnapshot(next: Meeting[]) {
 
 export function getCustomersSnapshot(): Lead[] {
   ensureSnapshotsHydrated();
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(CUSTOMERS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return cloneLeads(parsed as Lead[]);
-  } catch {
-    return [];
-  }
+  return cloneLeads(parseStorageArray<Lead>(CUSTOMERS_STORAGE_KEY));
 }
 
 export function setCustomersSnapshot(next: Lead[], deletedIds?: string[]) {
@@ -327,16 +328,7 @@ export function setCustomersSnapshot(next: Lead[], deletedIds?: string[]) {
 
 export function getLeadFinalizationsSnapshot(): LeadFinalizationRecord[] {
   ensureSnapshotsHydrated();
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(LEAD_FINALIZATIONS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return cloneLeadFinalizations(parsed as LeadFinalizationRecord[]);
-  } catch {
-    return [];
-  }
+  return cloneLeadFinalizations(parseStorageArray<LeadFinalizationRecord>(LEAD_FINALIZATIONS_STORAGE_KEY));
 }
 
 export function setLeadFinalizationsSnapshot(next: LeadFinalizationRecord[]) {
@@ -408,9 +400,9 @@ async function runBackgroundRehydrate() {
   if (!isBrowser()) return;
   if (!canBackgroundRehydrate()) return;
   try {
-    await hydrateSnapshotsFromServer();
-  } catch {
-    // Background failures are silent — UI must not break
+    await hydrateSnapshotsFromServer("background");
+  } catch (error) {
+    reportStoreClientError("runBackgroundRehydrate", error);
   }
 }
 

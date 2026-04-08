@@ -519,7 +519,7 @@ function getDashboardLayoutSnapshot(
     const parsed = JSON.parse(raw);
     const byUser = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
     return extractDashboardLayout(byUser[userId] || byUser[DASHBOARD_GUEST_USER_KEY] || defaultDashboardWidgetOrder, columns);
-  } catch {
+  } catch (error) {
     return {
       order: defaultDashboardWidgetOrder,
       items: buildDashboardLayoutItems(defaultDashboardWidgetOrder, columns),
@@ -541,7 +541,7 @@ function setDashboardLayoutSnapshot(
     const byUser = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
     byUser[userId] = normalizedLayout;
     window.localStorage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify(byUser));
-  } catch {
+  } catch (error) {
     window.localStorage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify({ [userId]: normalizedLayout }));
   }
 }
@@ -919,6 +919,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const openedFromQueryRef = useRef<string | null>(null);
   const hasSyncedLeadsRef = useRef(false);
   const applyingExternalLeadsRef = useRef(false);
+  const lastPersistedLeadsFingerprintRef = useRef<string>("");
 
   const [leads, setLeads] = useState<Lead[]>(() => getLeadsSnapshot().map(normalizeLead));
   const [meetings, setMeetings] = useState<Meeting[]>(() => getMeetingsSnapshot());
@@ -1030,7 +1031,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             };
           }),
         );
-      } catch {
+      } catch (error) {
         // Ignore sync failures for now
       }
     };
@@ -1080,15 +1081,16 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           });
           return changed ? next : prev;
         });
-      } catch {
+      } catch (error) {
         // ignore background sync failures
       }
     };
 
     void syncAiObservations();
     const intervalId = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       void syncAiObservations();
-    }, 12000);
+    }, 30000);
 
     return () => {
       cancelled = true;
@@ -1140,7 +1142,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         }
         setDashboardCallLogs(data.calls);
         setDashboardError(null);
-      } catch {
+      } catch (error) {
         if (!cancelled && showLoading) {
           setDashboardError("Nao foi possivel carregar as ligacoes para o painel.");
         }
@@ -1280,7 +1282,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       let data: { success: boolean; message?: string; distributed?: number } = { success: false };
       try {
         data = (await res.json()) as typeof data;
-      } catch {
+      } catch (error) {
         setDivideError(`Erro do servidor (${res.status}).`);
         return;
       }
@@ -1290,7 +1292,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       }
       setShowDivideConfirm(false);
       if (typeof window !== "undefined") window.location.reload();
-    } catch {
+    } catch (error) {
       setDivideError("Erro de rede ao dividir leads.");
     } finally {
       setIsDividing(false);
@@ -1835,7 +1837,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     const filteredLeads = leads.filter((lead) => lead.id !== resolvedLead.id);
     setLeads(filteredLeads);
     if (reason === "apagar") {
-      // Arquiva na tabela histórica antes de deletar — não usa deletedLeadIds
+      // Arquiva na tabela historica antes de deletar - nao usa deletedLeadIds
       setLeadsSnapshot(filteredLeads, undefined, [
         {
           lead: resolvedLead,
@@ -2041,12 +2043,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         setAutomationLeadsCount(returnedLeads.length);
         setAutomationStep("sucesso");
       } else if (data.pending) {
-        // n8n processa async — aguarda callback via /retorno + polling /pendentes
+        // n8n processa async - aguarda callback via /retorno + polling /pendentes
         setAutomationStep("aguardando");
       } else {
         setAutomationError("Nenhum lead foi retornado pela automacao. Verifique os parametros e tente novamente.");
       }
-    } catch {
+    } catch (error) {
       setAutomationError("Nao foi possivel conectar ao servico de automacao. Tente novamente.");
     } finally {
       setIsSubmittingAutomation(false);
@@ -2084,7 +2086,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       if (rows.length === 0) {
         setImportError("Nenhum registro valido foi encontrado na planilha.");
       }
-    } catch {
+    } catch (error) {
       setImportError("Nao foi possivel ler o arquivo. Verifique a planilha e tente novamente.");
       setImportFileName("");
       setImportRows([]);
@@ -2175,14 +2177,21 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   };
 
   useEffect(() => {
+    const nextFingerprint = JSON.stringify(leads);
     if (!hasSyncedLeadsRef.current) {
       hasSyncedLeadsRef.current = true;
+      lastPersistedLeadsFingerprintRef.current = nextFingerprint;
       return;
     }
     if (applyingExternalLeadsRef.current) {
       applyingExternalLeadsRef.current = false;
+      lastPersistedLeadsFingerprintRef.current = nextFingerprint;
       return;
     }
+    if (lastPersistedLeadsFingerprintRef.current === nextFingerprint) {
+      return;
+    }
+    lastPersistedLeadsFingerprintRef.current = nextFingerprint;
     setLeadsSnapshot(leads);
   }, [leads]);
 
@@ -2213,7 +2222,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           setAutomationStep("sucesso");
           return;
         }
-      } catch {
+      } catch (error) {
         // Ignora falhas de poll
       }
       if (attempts >= MAX_ATTEMPTS) {
@@ -2260,7 +2269,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               return merged.nextLeads;
             });
           }
-        } catch {
+        } catch (error) {
           // Ignore poll failures silently
         }
       }
@@ -2627,9 +2636,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       <Modal title="Dividir Leads" open={showDivideConfirm} onClose={() => setShowDivideConfirm(false)}>
         <div className="flex flex-col gap-4">
           <p className="text-sm text-slate-300">
-            Os leads outbound <strong className="text-white">não acionados</strong> serão distribuídos igualmente entre os vendedores ativos.
+            Os leads outbound <strong className="text-white">nao acionados</strong> serao distribuidos igualmente entre os vendedores ativos.
           </p>
-          <p className="text-xs text-slate-400">Leads com primeiro contato registrado ou com ligações em histórico não serão alterados.</p>
+          <p className="text-xs text-slate-400">Leads com primeiro contato registrado ou com ligacoes em historico nao serao alterados.</p>
           {divideError ? <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{divideError}</p> : null}
           <div className="flex justify-end gap-2 pt-1">
             <button
@@ -2687,7 +2696,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
               </p>
             </div>
             <button type="button" className="btn-ghost h-9 px-4 text-sm" onClick={closeAutomation}>
-              Fechar — os leads serao adicionados automaticamente ao chegar
+              Fechar - os leads serao adicionados automaticamente ao chegar
             </button>
           </div>
         ) : automationStep === "tipo" ? (
@@ -2873,7 +2882,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                     className="field mt-1"
                     type="number"
                     min={0}
-                    placeholder="Ex: 5 (opcional — busca empresas com pelo menos X anos)"
+                    placeholder="Ex: 5 (opcional - busca empresas com pelo menos X anos)"
                     value={formCnpj.anos}
                     onChange={(e) => setFormCnpj({ ...formCnpj, anos: e.target.value })}
                   />
@@ -3057,3 +3066,4 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     </section>
   );
 }
+

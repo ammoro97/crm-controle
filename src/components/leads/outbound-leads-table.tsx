@@ -218,6 +218,13 @@ function normalizeLeadId(value?: string | null): string {
   return String(value || "").trim();
 }
 
+function buildCallLogsFingerprint(calls: CallLog[]): string {
+  if (calls.length === 0) return "empty";
+  return calls
+    .map((call) => `${String(call.id || "").trim()}|${String(call.updatedAt || "").trim()}`)
+    .join(";");
+}
+
 function isIsoDate(value?: string | null): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
 }
@@ -454,6 +461,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
   const isDraggingRef = useRef(false);
   const suppressClickRef = useRef(false);
   const feedbackTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const callLogsFingerprintRef = useRef<string>("empty");
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [scrollContentWidth, setScrollContentWidth] = useState(2000);
@@ -609,7 +617,8 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
       let data: DialApiResponse | null = null;
       try {
         data = (await response.json()) as DialApiResponse;
-      } catch {
+      } catch (error) {
+        void error;
         data = null;
       }
       if (!response.ok || !data?.success) {
@@ -634,7 +643,8 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
         sourcePath: typeof window !== "undefined" ? window.location.pathname : "/leads",
       });
       onSelectLead(lead);
-    } catch {
+    } catch (error) {
+      void error;
       setCallFeedback(lead.id, { type: "error", message: "Falha de rede ao tentar ligar." });
     } finally {
       setCallingLeadId(null);
@@ -692,8 +702,12 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
         const data = (await response.json()) as InternalCallsApiResponse;
         if (!response.ok || !data.success || !Array.isArray(data.calls)) return;
         if (cancelled) return;
+        const nextFingerprint = buildCallLogsFingerprint(data.calls);
+        if (nextFingerprint === callLogsFingerprintRef.current) return;
+        callLogsFingerprintRef.current = nextFingerprint;
         setCallLogs(data.calls);
-      } catch {
+      } catch (error) {
+        void error;
         // Ignore transient loading failures and keep the last successful snapshot
       }
     };
