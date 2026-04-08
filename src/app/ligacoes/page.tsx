@@ -351,6 +351,12 @@ function buildWrapupsIndexes(wrapups: PostCallWrapup[]): WrapupsIndexes {
   return { byCallId, byExternalCallId, bySessionId };
 }
 
+function buildWrapupsSignature(wrapups: PostCallWrapup[]) {
+  return wrapups
+    .map((item) => `${item.id}:${item.updatedAt}:${item.callId || ""}:${item.conciliationStatus}`)
+    .join("|");
+}
+
 function getUniqueWrapup(index: Map<string, PostCallWrapup[]>, key?: string | null): PostCallWrapup | undefined {
   const normalized = String(key || "").trim();
   if (!normalized) return undefined;
@@ -1148,6 +1154,7 @@ export default function LigacoesPage() {
   const isLoadingCallsRef = useRef(false);
   const internalHistoryAbortRef = useRef<AbortController | null>(null);
   const internalHistoryRunIdRef = useRef(0);
+  const wrapupsSignatureRef = useRef(buildWrapupsSignature(wrapups));
   const responsavelById = useMemo(() => {
     const map: ResponsavelByIdIndex = new Map();
     for (const item of responsaveisRecords) {
@@ -1418,7 +1425,13 @@ export default function LigacoesPage() {
       const session = getActiveCallSession();
       console.log("[POSTCALL_DEBUG] /ligacoes syncSession", session);
       setActiveSession(session);
-      setWrapups(getPostCallWrapups());
+      const nextWrapups = getPostCallWrapups();
+      setWrapups((prev) => {
+        const previousSignature = buildWrapupsSignature(prev);
+        const nextSignature = buildWrapupsSignature(nextWrapups);
+        if (previousSignature === nextSignature) return prev;
+        return nextWrapups;
+      });
     };
     syncSession();
     return subscribePostCallFlow(syncSession);
@@ -1748,6 +1761,9 @@ export default function LigacoesPage() {
 
   useEffect(() => {
     if (!initialLoadDoneRef.current) return;
+    const nextSignature = buildWrapupsSignature(wrapups);
+    if (wrapupsSignatureRef.current === nextSignature) return;
+    wrapupsSignatureRef.current = nextSignature;
     void loadCallsWithRetry("wrapups-changed", 1);
   }, [wrapups]);
 
