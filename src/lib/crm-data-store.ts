@@ -413,15 +413,104 @@ export function subscribeLeadFinalizationsSnapshot(listener: () => void) {
 
 const BACKGROUND_SYNC_INTERVAL_MS = 60_000;
 const BACKGROUND_SYNC_MAX_BACKOFF_MS = 15 * 60_000;
-let backgroundSyncTimer: ReturnType<typeof setInterval> | null = null;
+const BACKGROUND_SYNC_JITTER_MS = 12_000;
+const BACKGROUND_SYNC_LOCK_KEY = "crm:bg-sync:leader:v1";
+const BACKGROUND_SYNC_LOCK_TTL_MS = 90_000;
+const backgroundSyncInstanceId = `bg-sync-${Math.random().toString(36).slice(2)}`;
+let backgroundSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let backgroundSyncActive = false;
 let backgroundSyncFailureCount = 0;
 let backgroundSyncBlockedUntil = 0;
+
+type BackgroundSyncLock = {
+  owner: string;
+  expiresAt: number;
+};
+
+function readBackgroundSyncLock(): BackgroundSyncLock | null {
+  if (!isBrowser()) return null;
+  try {
+    const raw = window.localStorage.getItem(BACKGROUND_SYNC_LOCK_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<BackgroundSyncLock>;
+    if (!parsed || typeof parsed.owner !== "string" || typeof parsed.expiresAt !== "number") {
+      return null;
+    }
+    return {
+      owner: parsed.owner,
+      expiresAt: parsed.expiresAt,
+    };
+  } catch (error) {
+    reportStoreClientError("readBackgroundSyncLock", error);
+    return null;
+  }
+}
+
+function writeBackgroundSyncLock(lock: BackgroundSyncLock) {
+  if (!isBrowser()) return;
+  try {
+    window.localStorage.setItem(BACKGROUND_SYNC_LOCK_KEY, JSON.stringify(lock));
+  } catch (error) {
+    reportStoreClientError("writeBackgroundSyncLock", error);
+  }
+}
+
+function clearBackgroundSyncLockIfOwner() {
+  if (!isBrowser()) return;
+  const lock = readBackgroundSyncLock();
+  if (!lock) return;
+  if (lock.owner !== backgroundSyncInstanceId) return;
+  try {
+    window.localStorage.removeItem(BACKGROUND_SYNC_LOCK_KEY);
+  } catch (error) {
+    reportStoreClientError("clearBackgroundSyncLockIfOwner", error);
+  }
+}
+
+function acquireBackgroundSyncLeadership(): boolean {
+  if (!isBrowser()) return false;
+  const now = Date.now();
+  const lock = readBackgroundSyncLock();
+  if (!lock || lock.expiresAt <= now || lock.owner === backgroundSyncInstanceId) {
+    writeBackgroundSyncLock({
+      owner: backgroundSyncInstanceId,
+      expiresAt: now + BACKGROUND_SYNC_LOCK_TTL_MS,
+    });
+    return true;
+  }
+  return false;
+}
+
+function nextJitterMs() {
+  return Math.floor(Math.random() * BACKGROUND_SYNC_JITTER_MS);
+}
+
+function scheduleBackgroundSyncTick(preferredDelayMs?: number) {
+  if (!isBrowser()) return;
+  if (!backgroundSyncActive) return;
+
+  if (backgroundSyncTimer !== null) {
+    clearTimeout(backgroundSyncTimer);
+    backgroundSyncTimer = null;
+  }
+
+  const baseDelay = preferredDelayMs ?? BACKGROUND_SYNC_INTERVAL_MS + nextJitterMs();
+  const backoffDelay = Math.max(0, backgroundSyncBlockedUntil - Date.now());
+  const delay = Math.max(baseDelay, backoffDelay);
+
+  backgroundSyncTimer = setTimeout(() => {
+    void runBackgroundRehydrate().finally(() => {
+      scheduleBackgroundSyncTick();
+    });
+  }, delay);
+}
 
 async function runBackgroundRehydrate() {
   if (!isBrowser()) return;
   if (document.visibilityState !== "visible") return;
   if (!canBackgroundRehydrate()) return;
   if (Date.now() < backgroundSyncBlockedUntil) return;
+  if (!acquireBackgroundSyncLeadership()) return;
 
   try {
     const success = await hydrateSnapshotsFromServer("background");
@@ -450,7 +539,7 @@ async function runBackgroundRehydrate() {
 
 function onVisibilityChange() {
   if (document.visibilityState === "visible") {
-    void runBackgroundRehydrate();
+    scheduleBackgroundSyncTick(500 + nextJitterMs());
   }
 }
 
@@ -462,16 +551,13 @@ function onVisibilityChange() {
  */
 export function startBackgroundSync() {
   if (!isBrowser()) return;
-  if (backgroundSyncTimer !== null) return;
+  if (backgroundSyncActive) return;
+  backgroundSyncActive = true;
   backgroundSyncFailureCount = 0;
   backgroundSyncBlockedUntil = 0;
 
-  backgroundSyncTimer = setInterval(() => {
-    void runBackgroundRehydrate();
-  }, BACKGROUND_SYNC_INTERVAL_MS);
-
   document.addEventListener("visibilitychange", onVisibilityChange);
-  void runBackgroundRehydrate();
+  scheduleBackgroundSyncTick(1_000 + nextJitterMs());
 }
 
 /**
@@ -479,11 +565,13 @@ export function startBackgroundSync() {
  */
 export function stopBackgroundSync() {
   if (!isBrowser()) return;
+  backgroundSyncActive = false;
   if (backgroundSyncTimer !== null) {
-    clearInterval(backgroundSyncTimer);
+    clearTimeout(backgroundSyncTimer);
     backgroundSyncTimer = null;
   }
   backgroundSyncFailureCount = 0;
   backgroundSyncBlockedUntil = 0;
+  clearBackgroundSyncLockIfOwner();
   document.removeEventListener("visibilitychange", onVisibilityChange);
 }
