@@ -175,6 +175,14 @@ type CallsRuntimeCache = {
 let callsRuntimeCache: CallsRuntimeCache | null = null;
 let callsRuntimeCacheBootstrapped = false;
 
+function hasHydratedCallsHistory(cache: CallsRuntimeCache | null): boolean {
+  if (!cache) return false;
+  if (cache.internalCalls.length >= CALLS_HISTORY_LIMIT) return true;
+  if (!cache.historyHydrated) return false;
+  // Evita considerar "hidratado" um cache antigo/salvo no meio da carga com apenas a 1a página.
+  return cache.rows.length > CALLS_PAGE_SIZE || cache.internalCalls.length > CALLS_PAGE_SIZE;
+}
+
 function readCallsRuntimeCacheFromStorage(): CallsRuntimeCache | null {
   if (typeof window === "undefined") return null;
   try {
@@ -1172,10 +1180,11 @@ function statusBadgeClass(status?: string) {
 
 export default function LigacoesPage() {
   const initialRuntimeCache = getCallsRuntimeCache();
+  const initialHistoryHydrated = hasHydratedCallsHistory(initialRuntimeCache);
   const hasWarmHistoryCache = Boolean(
     initialRuntimeCache &&
       initialRuntimeCache.rows.length > 0 &&
-      (initialRuntimeCache.historyHydrated || initialRuntimeCache.internalCalls.length >= CALLS_HISTORY_LIMIT),
+      initialHistoryHydrated,
   );
   const router = useRouter();
   const { currentUser } = useAuth();
@@ -1222,10 +1231,7 @@ export default function LigacoesPage() {
   const wrapupsSignatureRef = useRef(buildWrapupsSignature(wrapups));
   const lastSuccessfulLoadAtRef = useRef<number>(initialRuntimeCache?.updatedAt || 0);
   const historyHydratedRef = useRef<boolean>(
-    Boolean(
-      initialRuntimeCache &&
-        (initialRuntimeCache.historyHydrated || initialRuntimeCache.internalCalls.length >= CALLS_HISTORY_LIMIT),
-    ),
+    initialHistoryHydrated,
   );
   const responsavelById = useMemo(() => {
     const map: ResponsavelByIdIndex = new Map();
@@ -1398,6 +1404,7 @@ export default function LigacoesPage() {
           let page = 1;
           let hasMore = true;
           let loadedPages = 0;
+          let reachedHistoryBoundary = false;
           while (hasMore && !historyController.signal.aborted && page < CALLS_HISTORY_MAX_PAGES) {
             try {
               const response = await fetch(`/api/ligacoes?page=${page}`, {
@@ -1412,9 +1419,14 @@ export default function LigacoesPage() {
               loadedPages += 1;
               hasMore = Boolean(data.pagination?.hasMore);
               page += 1;
+              reachedHistoryBoundary =
+                !hasMore || page >= CALLS_HISTORY_MAX_PAGES || internalMapById.size >= CALLS_HISTORY_LIMIT;
 
               if (internalHistoryRunIdRef.current !== historyRunId) return;
-              if (loadedPages % 3 === 0 || !hasMore) {
+              if (reachedHistoryBoundary) {
+                historyHydratedRef.current = true;
+              }
+              if (loadedPages % 3 === 0 || reachedHistoryBoundary) {
                 commitVisibleRows(internalMapById);
               }
             } catch (historyError) {
@@ -1422,12 +1434,27 @@ export default function LigacoesPage() {
               break;
             }
           }
+          if (internalHistoryRunIdRef.current === historyRunId && !historyController.signal.aborted && reachedHistoryBoundary) {
+            lastSuccessfulLoadAtRef.current = Date.now();
+            if (callsRuntimeCache) {
+              callsRuntimeCache = {
+                ...callsRuntimeCache,
+                updatedAt: lastSuccessfulLoadAtRef.current,
+                historyHydrated: historyHydratedRef.current,
+              };
+              writeCallsRuntimeCacheToStorage(callsRuntimeCache);
+            }
+          }
         })();
       }
 
       setError(null);
       const visibleRows = mapVisibleRows(internalMapById);
-      historyHydratedRef.current = historyHydratedRef.current || shouldHydrateHistory;
+      if (!shouldHydrateHistory || !hasMoreInternalPages) {
+        historyHydratedRef.current = true;
+      } else {
+        historyHydratedRef.current = false;
+      }
       lastSuccessfulLoadAtRef.current = Date.now();
       if (callsRuntimeCache) {
         callsRuntimeCache = {
@@ -1865,12 +1892,24 @@ export default function LigacoesPage() {
     setCallsPage(0);
   }, [finalizacaoFilter, atendenteFilter, deferredNameSearchTerm, deferredSearchTerm]);
 
+  useEffect(() => {
+    if (filteredCalls.length === 0) {
+      if (callsPage !== 0) setCallsPage(0);
+      return;
+    }
+    const maxPage = Math.max(0, Math.ceil(filteredCalls.length / CALLS_PAGE_SIZE) - 1);
+    if (callsPage > maxPage) {
+      setCallsPage(maxPage);
+    }
+  }, [filteredCalls.length, callsPage]);
+
   const pagedCalls = useMemo(
     () => filteredCalls.slice(callsPage * CALLS_PAGE_SIZE, (callsPage + 1) * CALLS_PAGE_SIZE),
     [filteredCalls, callsPage],
   );
 
-  const totalCallsPages = Math.ceil(filteredCalls.length / CALLS_PAGE_SIZE);
+  const hasFilteredCalls = filteredCalls.length > 0;
+  const totalCallsPages = Math.max(1, Math.ceil(filteredCalls.length / CALLS_PAGE_SIZE));
 
   useEffect(() => {
     if (!selectedIds.length) return;
@@ -2874,10 +2913,11 @@ export default function LigacoesPage() {
                 )}
               </tbody>
             </table>
-            {totalCallsPages > 1 && (
+            {hasFilteredCalls && (
               <div className="flex items-center justify-between border-t border-white/[0.06] px-4 py-3 text-xs text-slate-400">
                 <span>
-                  {callsPage * CALLS_PAGE_SIZE + 1}–{Math.min((callsPage + 1) * CALLS_PAGE_SIZE, filteredCalls.length)} de {filteredCalls.length} ligações
+                  {callsPage * CALLS_PAGE_SIZE + 1}–
+                  {Math.min((callsPage + 1) * CALLS_PAGE_SIZE, filteredCalls.length)} de {filteredCalls.length} ligações
                 </span>
                 <div className="flex items-center gap-2">
                   <button
