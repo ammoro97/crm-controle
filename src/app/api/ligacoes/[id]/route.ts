@@ -154,9 +154,8 @@ export async function PATCH(
         targetCallId = fallback.id;
         updated = await updateCall(targetCallId, patch);
       } else {
-        const createCallId = bodyExternalCallId || callId;
         const created = await upsertCallLog({
-          id: createCallId,
+          id: callId,
           externalCallId: bodyExternalCallId || null,
           sessionId: bodySessionId || null,
           leadId: bodyLeadId || null,

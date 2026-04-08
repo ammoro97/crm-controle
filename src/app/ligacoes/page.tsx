@@ -638,13 +638,6 @@ function mapApiCallToRow(
     if (matchedWrapup) matchSource = "callId";
   }
 
-  if (!matchedWrapup && internal?.externalCallId) {
-    matchedWrapup =
-      getUniqueWrapup(context.wrapupsIndexes.byExternalCallId, internal.externalCallId) ||
-      getUniqueWrapup(context.wrapupsIndexes.byCallId, internal.externalCallId);
-    if (matchedWrapup) matchSource = "externalCallId";
-  }
-
   if (!matchedWrapup && internal?.id) {
     matchedWrapup = getUniqueWrapup(context.wrapupsIndexes.byCallId, internal.id);
     if (matchedWrapup) matchSource = "callId";
@@ -759,24 +752,7 @@ function getCallSortReference(input: {
   return String(input.updatedAt || input.endedAt || input.startedAt || input.createdAt || "");
 }
 
-function hasCrmFinalizacaoData(input: {
-  finalizacao?: string | null;
-  subfinalizacao?: string | null;
-}) {
-  const finalizacao = normalizeFinalizacaoLabel(String(input.finalizacao || ""));
-  if (finalizacao !== "-") return true;
-  const subfinalizacao = String(input.subfinalizacao || "").trim();
-  return Boolean(subfinalizacao && subfinalizacao !== "-");
-}
-
 function shouldReplaceLookupRecord(current: CallLog, incoming: CallLog) {
-  // Prioriza o registro que preserva finalizacao/subfinalizacao salvas no CRM.
-  const currentHasCrmFinalizacao = hasCrmFinalizacaoData(current);
-  const incomingHasCrmFinalizacao = hasCrmFinalizacaoData(incoming);
-  if (incomingHasCrmFinalizacao !== currentHasCrmFinalizacao) {
-    return incomingHasCrmFinalizacao;
-  }
-
   const currentScore = getCallAnalysisPriority(current);
   const incomingScore = getCallAnalysisPriority(incoming);
   if (incomingScore !== currentScore) return incomingScore > currentScore;
