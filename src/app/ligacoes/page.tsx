@@ -1845,19 +1845,6 @@ export default function LigacoesPage() {
     setAtendenteFilter("Todos");
   }, [atendenteFilter, atendenteOptions]);
 
-  const nameSuggestions = useMemo(() => {
-    const uniqueNames = Array.from(
-      new Set(
-        calls
-          .map((call) => String(call.nome || "").trim())
-          .filter((name) => name.length > 0 && name !== "-"),
-      ),
-    ).sort((a, b) => a.localeCompare(b));
-    const normalizedNameSearch = normalizeText(deferredNameSearchTerm);
-    if (!normalizedNameSearch) return uniqueNames.slice(0, 30);
-    return uniqueNames.filter((name) => normalizeText(name).includes(normalizedNameSearch)).slice(0, 30);
-  }, [calls, deferredNameSearchTerm]);
-
   const filteredCalls = useMemo(() => {
     const normalizedSearch = deferredSearchTerm
       .normalize("NFD")
@@ -2535,22 +2522,6 @@ export default function LigacoesPage() {
               />
             </div>
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
-              Nome
-              <input
-                type="text"
-                list="ligacoes-nome-sugestoes"
-                className="field mt-1 h-9 min-w-[220px] border-white/[0.06] bg-[#0A0A0B] px-2.5 py-1.5 text-xs"
-                placeholder="Buscar por nome..."
-                value={nameSearchTerm}
-                onChange={(event) => setNameSearchTerm(event.target.value)}
-              />
-              <datalist id="ligacoes-nome-sugestoes">
-                {nameSuggestions.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </label>
-            <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
               Atendente
               <select
                 className="field mt-1 h-9 min-w-[190px] border-white/[0.06] bg-[#0A0A0B] px-2.5 py-1.5 text-xs"
@@ -2662,7 +2633,18 @@ export default function LigacoesPage() {
       </div>
 
       <div className="panel overflow-hidden border-slate-800/90 bg-slate-950/70">
-        <div className="flex items-center justify-end border-b border-slate-800/90 bg-slate-950/90 px-3 py-2.5">
+        <div className="flex flex-wrap items-end justify-between gap-2 border-b border-slate-800/90 bg-slate-950/90 px-3 py-2.5">
+          <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
+            Nome
+            <input
+              type="text"
+              autoComplete="off"
+              className="field mt-1 h-9 min-w-[240px] border-white/[0.06] bg-[#0A0A0B] px-2.5 py-1.5 text-xs"
+              placeholder="Buscar por nome..."
+              value={nameSearchTerm}
+              onChange={(event) => setNameSearchTerm(event.target.value)}
+            />
+          </label>
           <button
             type="button"
             className="h-9 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-200 transition hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-40"
@@ -2694,7 +2676,7 @@ export default function LigacoesPage() {
                     />
                   </th>
                   <th className="whitespace-nowrap px-3 py-2.5">Ação</th>
-                  <th className="whitespace-nowrap px-3 py-2.5">Empresa</th>
+                  <th className="w-[320px] min-w-[320px] px-3 py-2.5">Empresa</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Telefone</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Atendente</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Data</th>
@@ -2744,7 +2726,14 @@ export default function LigacoesPage() {
                               {isOpen ? "Ocultar detalhes" : "Ver detalhes"}
                             </button>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3">{call.empresa}</td>
+                          <td className="px-3 py-3">
+                            <div
+                              className="max-w-[320px] overflow-x-auto whitespace-nowrap pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20"
+                              title={call.empresa}
+                            >
+                              {call.empresa}
+                            </div>
+                          </td>
                           <td className="whitespace-nowrap px-3 py-3">{call.telefone}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.atendente || "Responsável não vinculado"}</td>
                           <td className="whitespace-nowrap px-3 py-3">{formatDate(call.startedAt)}</td>
