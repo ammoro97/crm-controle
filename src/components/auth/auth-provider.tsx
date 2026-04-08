@@ -31,18 +31,37 @@ async function toPublicUserFromSupabase(user: User): Promise<PublicUser> {
   };
 }
 
+// Tempo máximo para operações Supabase client-side. Evita travamento infinito
+// em "Carregando sessao..." ou "Entrando..." quando o Supabase está lento.
+const CLIENT_AUTH_TIMEOUT_MS = 10_000;
+
+function withClientTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("CLIENT_AUTH_TIMEOUT")), ms),
+    ),
+  ]);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<PublicUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refreshUser = useCallback(async () => {
     try {
-      const { data, error } = await supabase.auth.getUser();
+      const { data, error } = await withClientTimeout(
+        supabase.auth.getUser(),
+        CLIENT_AUTH_TIMEOUT_MS,
+      );
       if (error || !data.user) {
         setCurrentUser(null);
         return;
       }
-      const publicUser = await toPublicUserFromSupabase(data.user);
+      const publicUser = await withClientTimeout(
+        toPublicUserFromSupabase(data.user),
+        CLIENT_AUTH_TIMEOUT_MS,
+      );
       setCurrentUser(publicUser);
     } catch {
       setCurrentUser(null);
@@ -54,8 +73,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let subscription: { unsubscribe: () => void } | null = null;
 
     const bootstrap = async () => {
-      await refreshUser();
-      if (active) setLoading(false);
+      try {
+        await refreshUser();
+      } finally {
+        // Garante que o loading termina mesmo se refreshUser travar ou lançar.
+        if (active) setLoading(false);
+      }
 
       const listener = supabase.auth.onAuthStateChange((_event, session) => {
         if (!active) return;
@@ -64,8 +87,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         void (async () => {
-          const publicUser = await toPublicUserFromSupabase(session.user);
-          if (active) setCurrentUser(publicUser);
+          try {
+            const publicUser = await withClientTimeout(
+              toPublicUserFromSupabase(session.user),
+              CLIENT_AUTH_TIMEOUT_MS,
+            );
+            if (active) setCurrentUser(publicUser);
+          } catch {
+            // Falha ao enriquecer usuário não deve bloquear a sessão.
+          }
         })();
       });
 
@@ -83,18 +113,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (email: string, senha: string) => {
       try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password: senha,
-        });
+        const { data, error } = await withClientTimeout(
+          supabase.auth.signInWithPassword({ email, password: senha }),
+          CLIENT_AUTH_TIMEOUT_MS,
+        );
         if (error || !data.user) {
           return { success: false, message: error?.message || "Nao foi possivel autenticar." };
         }
-        const publicUser = await toPublicUserFromSupabase(data.user);
+        // toPublicUserFromSupabase busca responsável no Supabase — também tem timeout.
+        const publicUser = await withClientTimeout(
+          toPublicUserFromSupabase(data.user),
+          CLIENT_AUTH_TIMEOUT_MS,
+        );
         setCurrentUser(publicUser);
         return { success: true };
-      } catch {
-        return { success: false, message: "Falha de rede ao autenticar." };
+      } catch (err) {
+        const isTimeout = err instanceof Error && err.message === "CLIENT_AUTH_TIMEOUT";
+        return {
+          success: false,
+          message: isTimeout
+            ? "Servico indisponivel. Verifique sua conexao e tente novamente."
+            : "Falha de rede ao autenticar.",
+        };
       }
     },
     [],
