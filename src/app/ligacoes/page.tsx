@@ -164,6 +164,19 @@ const CALLS_HISTORY_MAX_PAGES = Math.ceil(CALLS_HISTORY_LIMIT / CALLS_PAGE_SIZE)
 const CALLS_REFRESH_THROTTLE_MS = 45_000;
 const LIGACOES_DEBUG_ENABLED = process.env.NEXT_PUBLIC_DEBUG_LIGACOES === "1";
 const CALLS_RUNTIME_CACHE_STORAGE_KEY = "crm:ligacoes:runtime-cache:v1";
+const FINALIZACAO_FILTER_ALL = "all";
+const FINALIZACAO_FILTER_PREFIX = "f:";
+const SUBFINALIZACAO_FILTER_PREFIX = "fs:";
+
+type FinalizacaoFilterOption = {
+  value: string;
+  label: string;
+};
+
+type ParsedFinalizacaoFilter =
+  | { type: "all" }
+  | { type: "finalizacao"; finalizacaoKey: string }
+  | { type: "subfinalizacao"; finalizacaoKey: string; subfinalizacaoKey: string };
 
 type CallsRuntimeCache = {
   rows: MappedCall[];
@@ -1045,6 +1058,39 @@ function normalizeFinalizacaoKey(value: string) {
     .trim();
 }
 
+function buildFinalizacaoFilterValue(finalizacaoKey: string) {
+  return `${FINALIZACAO_FILTER_PREFIX}${encodeURIComponent(finalizacaoKey)}`;
+}
+
+function buildSubfinalizacaoFilterValue(finalizacaoKey: string, subfinalizacaoKey: string) {
+  return `${SUBFINALIZACAO_FILTER_PREFIX}${encodeURIComponent(finalizacaoKey)}:${encodeURIComponent(subfinalizacaoKey)}`;
+}
+
+function parseFinalizacaoFilterValue(value: string): ParsedFinalizacaoFilter {
+  if (!value || value === FINALIZACAO_FILTER_ALL) return { type: "all" };
+
+  if (value.startsWith(SUBFINALIZACAO_FILTER_PREFIX)) {
+    const encodedPayload = value.slice(SUBFINALIZACAO_FILTER_PREFIX.length);
+    const separatorIndex = encodedPayload.indexOf(":");
+    if (separatorIndex <= 0) return { type: "all" };
+
+    const finalizacaoEncoded = encodedPayload.slice(0, separatorIndex);
+    const subfinalizacaoEncoded = encodedPayload.slice(separatorIndex + 1);
+    const finalizacaoKey = decodeURIComponent(finalizacaoEncoded || "");
+    const subfinalizacaoKey = decodeURIComponent(subfinalizacaoEncoded || "");
+    if (!finalizacaoKey || !subfinalizacaoKey) return { type: "all" };
+    return { type: "subfinalizacao", finalizacaoKey, subfinalizacaoKey };
+  }
+
+  if (value.startsWith(FINALIZACAO_FILTER_PREFIX)) {
+    const finalizacaoKey = decodeURIComponent(value.slice(FINALIZACAO_FILTER_PREFIX.length));
+    if (!finalizacaoKey) return { type: "all" };
+    return { type: "finalizacao", finalizacaoKey };
+  }
+
+  return { type: "all" };
+}
+
 // CPC classification: only these three finalizations count
 // positivo: falou com cliente | negativo: falou com secretaria | improdutiva: callback
 function classificarCPC(normalizedFinalizacao: string): "positivo" | "negativo" | "improdutiva" | null {
@@ -1200,7 +1246,7 @@ export default function LigacoesPage() {
     return map;
   });
   const [wrapups, setWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
-  const [finalizacaoFilter, setFinalizacaoFilter] = useState("Todas");
+  const [finalizacaoFilter, setFinalizacaoFilter] = useState(FINALIZACAO_FILTER_ALL);
   const [atendenteFilter, setAtendenteFilter] = useState("Todos");
   const [searchTerm, setSearchTerm] = useState("");
   const [nameSearchTerm, setNameSearchTerm] = useState("");
@@ -1827,7 +1873,6 @@ export default function LigacoesPage() {
     };
   }, []);
 
-  const finalizacaoOptions = baseFinalizacaoOptions;
   const atendenteOptions = useMemo(() => {
     const dynamic = Array.from(
       new Set(
@@ -1845,6 +1890,59 @@ export default function LigacoesPage() {
     setAtendenteFilter("Todos");
   }, [atendenteFilter, atendenteOptions]);
 
+  const finalizacaoFilterOptions = useMemo(() => {
+    const officialFinalizacoes = baseFinalizacaoOptions.filter((option) => option !== "Todas");
+    const subfinalizacoesPorFinalizacao = new Map<string, Set<string>>();
+
+    for (const finalizacao of officialFinalizacoes) {
+      subfinalizacoesPorFinalizacao.set(normalizeFinalizacaoKey(finalizacao), new Set<string>());
+    }
+
+    for (const call of calls) {
+      const finalizacao = normalizeFinalizacaoLabel(String(call.finalizacao || ""));
+      if (!OFFICIAL_FINALIZACOES.has(finalizacao)) continue;
+      const finalizacaoKey = normalizeFinalizacaoKey(finalizacao);
+      const subfinalizacao = String(call.subfinalizacao || "").trim();
+      if (!subfinalizacao || subfinalizacao === "-") continue;
+      const bucket = subfinalizacoesPorFinalizacao.get(finalizacaoKey);
+      if (!bucket) continue;
+      bucket.add(subfinalizacao);
+    }
+
+    const options: FinalizacaoFilterOption[] = [
+      { value: FINALIZACAO_FILTER_ALL, label: "Todas finalizações" },
+    ];
+
+    for (const finalizacao of officialFinalizacoes) {
+      const finalizacaoKey = normalizeFinalizacaoKey(finalizacao);
+      options.push({
+        value: buildFinalizacaoFilterValue(finalizacaoKey),
+        label: finalizacao,
+      });
+      const subfinalizacoes = Array.from(subfinalizacoesPorFinalizacao.get(finalizacaoKey) || []).sort((a, b) =>
+        a.localeCompare(b),
+      );
+      for (const subfinalizacao of subfinalizacoes) {
+        options.push({
+          value: buildSubfinalizacaoFilterValue(finalizacaoKey, normalizeFinalizacaoKey(subfinalizacao)),
+          label: `${finalizacao} • ${subfinalizacao}`,
+        });
+      }
+    }
+
+    return options;
+  }, [calls]);
+
+  useEffect(() => {
+    if (finalizacaoFilterOptions.some((option) => option.value === finalizacaoFilter)) return;
+    setFinalizacaoFilter(FINALIZACAO_FILTER_ALL);
+  }, [finalizacaoFilter, finalizacaoFilterOptions]);
+
+  const parsedFinalizacaoFilter = useMemo(
+    () => parseFinalizacaoFilterValue(finalizacaoFilter),
+    [finalizacaoFilter],
+  );
+
   const filteredCalls = useMemo(() => {
     const normalizedSearch = deferredSearchTerm
       .normalize("NFD")
@@ -1854,7 +1952,15 @@ export default function LigacoesPage() {
     const normalizedNameSearch = normalizeText(deferredNameSearchTerm);
 
     return calls.filter((call) => {
-      const matchesFinalizacao = finalizacaoFilter === "Todas" || call.finalizacao === finalizacaoFilter;
+      const callFinalizacaoKey = normalizeFinalizacaoKey(normalizeFinalizacaoLabel(call.finalizacao));
+      const callSubfinalizacaoKey = normalizeFinalizacaoKey(call.subfinalizacao || "");
+      const matchesFinalizacao =
+        parsedFinalizacaoFilter.type === "all" ||
+        (parsedFinalizacaoFilter.type === "finalizacao" &&
+          callFinalizacaoKey === parsedFinalizacaoFilter.finalizacaoKey) ||
+        (parsedFinalizacaoFilter.type === "subfinalizacao" &&
+          callFinalizacaoKey === parsedFinalizacaoFilter.finalizacaoKey &&
+          callSubfinalizacaoKey === parsedFinalizacaoFilter.subfinalizacaoKey);
       const matchesAtendente = atendenteFilter === "Todos" || call.atendente === atendenteFilter;
       const matchesName =
         !normalizedNameSearch ||
@@ -1870,7 +1976,7 @@ export default function LigacoesPage() {
         String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       return [call.empresa, call.nome, call.telefone].some((v) => normalize(v).includes(normalizedSearch));
     });
-  }, [atendenteFilter, calls, deferredNameSearchTerm, deferredSearchTerm, finalizacaoFilter]);
+  }, [atendenteFilter, calls, deferredNameSearchTerm, deferredSearchTerm, parsedFinalizacaoFilter]);
 
   const [callsPage, setCallsPage] = useState(0);
 
@@ -2535,20 +2641,6 @@ export default function LigacoesPage() {
                 ))}
               </select>
             </label>
-            <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
-              Finalização
-              <select
-                className="field mt-1 h-9 min-w-[190px] border-white/[0.06] bg-[#0A0A0B] px-2.5 py-1.5 text-xs"
-                value={finalizacaoFilter}
-                onChange={(event) => setFinalizacaoFilter(event.target.value)}
-              >
-                {finalizacaoOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
             <button
               type="button"
               className="btn-ghost h-9 border-white/[0.06] bg-[#0A0A0B] px-3 py-1.5 text-xs transition-all duration-200 ease-out hover:-translate-y-[2px]"
@@ -2644,6 +2736,20 @@ export default function LigacoesPage() {
               value={nameSearchTerm}
               onChange={(event) => setNameSearchTerm(event.target.value)}
             />
+          </label>
+          <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
+            Finalização
+            <select
+              className="field mt-1 h-9 min-w-[320px] border-white/[0.06] bg-[#0A0A0B] px-2.5 py-1.5 text-xs"
+              value={finalizacaoFilter}
+              onChange={(event) => setFinalizacaoFilter(event.target.value)}
+            >
+              {finalizacaoFilterOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
           <button
             type="button"
