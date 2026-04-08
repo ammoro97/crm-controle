@@ -449,6 +449,7 @@ function phoneQualityBadgeClass(value?: string) {
 
 const RESPONSAVEL_REQUIRED_MESSAGE =
   "Seu usuario ainda nao esta vinculado a um responsavel no CRM. Cadastre esse e-mail em Configuracoes > Responsaveis antes de realizar ligacoes.";
+const OUTBOUND_LEADS_PAGE_SIZE = 100;
 
 export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLeads }: OutboundLeadsTableProps) {
   const { currentUser } = useAuth();
@@ -503,6 +504,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
 
   const [sortCol, setSortCol] = useState<SortCol | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [currentPage, setCurrentPage] = useState(1);
 
   const handleSort = (col: SortCol) => {
     if (sortCol === col) {
@@ -511,6 +513,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
       setSortCol(col);
       setSortDir("asc");
     }
+    setCurrentPage(1);
   };
 
   const sortedRows = useMemo(() => {
@@ -550,6 +553,14 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [tableRows, sortCol, sortDir]);
+
+  const totalRows = sortedRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / OUTBOUND_LEADS_PAGE_SIZE));
+  const currentPageSafe = Math.min(currentPage, totalPages);
+  const pageStartIndex = (currentPageSafe - 1) * OUTBOUND_LEADS_PAGE_SIZE;
+  const pagedRows = sortedRows.slice(pageStartIndex, pageStartIndex + OUTBOUND_LEADS_PAGE_SIZE);
+  const visibleStart = totalRows === 0 ? 0 : pageStartIndex + 1;
+  const visibleEnd = totalRows === 0 ? 0 : pageStartIndex + pagedRows.length;
 
   const setCallFeedback = (leadId: string, feedback: CallFeedback) => {
     setCallFeedbackByLead((prev) => ({ ...prev, [leadId]: feedback }));
@@ -742,13 +753,29 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
     setSelectedIds(new Set());
   }, [leads]);
 
-  const allSelected = sortedRows.length > 0 && sortedRows.every(({ lead }) => selectedIds.has(lead.id));
+  useEffect(() => {
+    setCurrentPage((prev) => Math.min(prev, totalPages));
+  }, [totalPages]);
+
+  const allSelected = pagedRows.length > 0 && pagedRows.every(({ lead }) => selectedIds.has(lead.id));
 
   const toggleSelectAll = () => {
     if (allSelected) {
-      setSelectedIds(new Set());
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        pagedRows.forEach(({ lead }) => {
+          next.delete(lead.id);
+        });
+        return next;
+      });
     } else {
-      setSelectedIds(new Set(sortedRows.map(({ lead }) => lead.id)));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        pagedRows.forEach(({ lead }) => {
+          next.add(lead.id);
+        });
+        return next;
+      });
     }
   };
 
@@ -893,7 +920,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map(({ lead, location, expediente, metrics }) => {
+            {pagedRows.map(({ lead, location, expediente, metrics }) => {
               const phones = getLeadPhones(lead);
               const hasBaseActivation = metrics.totalCalls > 0 || Boolean(String(lead.firstContactDate || "").trim());
               return (
@@ -1056,6 +1083,32 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
             })}
           </tbody>
         </table>
+      </div>
+      <div className="flex items-center justify-between gap-3 border-t border-border/70 bg-slate-950/30 px-3 py-2.5 text-xs text-slate-300 xl:px-3.5">
+        <span>
+          {visibleStart}-{visibleEnd} de {totalRows} leads
+        </span>
+        <div className="flex items-center gap-2">
+          <span>
+            Pagina {currentPageSafe} / {totalPages}
+          </span>
+          <button
+            type="button"
+            className="rounded-md border border-border px-2.5 py-1 transition hover:border-slate-500 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPageSafe <= 1}
+          >
+            Anterior
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-border px-2.5 py-1 transition hover:border-slate-500 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPageSafe >= totalPages}
+          >
+            Proximo
+          </button>
+        </div>
       </div>
 
       <Modal
