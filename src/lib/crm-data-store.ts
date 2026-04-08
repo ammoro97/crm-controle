@@ -46,7 +46,8 @@ let hydrationStarted = false;
 // Lock para evitar hidratações concorrentes (ex: background sync disparando enquanto
 // a hidratação inicial ainda está carregando páginas).
 let hydrationInFlight = false;
-const MAX_HYDRATION_PAGES = 200;
+const MAX_INITIAL_HYDRATION_PAGES = 200;
+const MAX_BACKGROUND_HYDRATION_PAGES = 1;
 
 type HydrationMode = "initial" | "background";
 
@@ -103,7 +104,7 @@ function hasPendingDeletes() {
 }
 
 function canBackgroundRehydrate() {
-  return !hasPendingSyncQueue() && !syncInFlight && !hasPendingDeletes();
+  return !hasPendingSyncQueue() && !syncInFlight && !hasPendingDeletes() && !hydrationInFlight;
 }
 
 function scheduleSyncFlush() {
@@ -212,20 +213,21 @@ function applyHydratedSnapshot(storageKey: string, eventName: string, value: unk
 }
 
 async function hydrateSnapshotsFromServer(mode: HydrationMode = "initial") {
-  if (!isBrowser()) return;
+  if (!isBrowser()) return false;
   // Evita hidratações concorrentes: se o background sync disparar enquanto a
   // hidratação inicial ainda está buscando páginas, ignora a segunda chamada.
-  if (hydrationInFlight) return;
+  if (hydrationInFlight) return false;
   hydrationInFlight = true;
 
   try {
     let page = 0;
     const accumulatedLeads: Lead[] = [];
     let hasLoadedLeadPage = false;
+    let hasSuccessfulPage = false;
     // Limite de segurança: evita loop infinito em caso de bug no servidor.
-    const MAX_PAGES = MAX_HYDRATION_PAGES;
+    const maxPages = mode === "initial" ? MAX_INITIAL_HYDRATION_PAGES : MAX_BACKGROUND_HYDRATION_PAGES;
 
-    while (page < MAX_PAGES) {
+    while (page < maxPages) {
       const response = await fetch(`${SNAPSHOTS_ENDPOINT}?page=${page}`, {
         method: "GET",
         cache: "no-store",
@@ -234,6 +236,7 @@ async function hydrateSnapshotsFromServer(mode: HydrationMode = "initial") {
 
       const data = (await response.json()) as SnapshotResponse;
       if (!data.success || !data.snapshots) break;
+      hasSuccessfulPage = true;
 
       // Dados não-leads (meetings, customers etc.) chegam somente na página 0.
       if (page === 0) {
@@ -268,10 +271,25 @@ async function hydrateSnapshotsFromServer(mode: HydrationMode = "initial") {
       page++;
     }
     if (hasLoadedLeadPage) {
-      applyHydratedSnapshot(LEADS_STORAGE_KEY, LEADS_EVENT, cloneLeads(accumulatedLeads));
+      if (mode === "background") {
+        const existingLeads = parseStorageArray<Lead>(LEADS_STORAGE_KEY);
+        const incomingById = new Map<string, Lead>();
+        for (const lead of accumulatedLeads) {
+          incomingById.set(lead.id, lead);
+        }
+        const mergedLeads: Lead[] = [
+          ...accumulatedLeads,
+          ...existingLeads.filter((lead) => !incomingById.has(lead.id)),
+        ];
+        applyHydratedSnapshot(LEADS_STORAGE_KEY, LEADS_EVENT, cloneLeads(mergedLeads));
+      } else {
+        applyHydratedSnapshot(LEADS_STORAGE_KEY, LEADS_EVENT, cloneLeads(accumulatedLeads));
+      }
     }
+    return hasSuccessfulPage;
   } catch (error) {
     reportStoreClientError(`hydrateSnapshotsFromServer:${mode}`, error);
+    return false;
   } finally {
     hydrationInFlight = false;
   }
@@ -394,15 +412,39 @@ export function subscribeLeadFinalizationsSnapshot(listener: () => void) {
 // ---------------------------------------------------------------------------
 
 const BACKGROUND_SYNC_INTERVAL_MS = 60_000;
+const BACKGROUND_SYNC_MAX_BACKOFF_MS = 15 * 60_000;
 let backgroundSyncTimer: ReturnType<typeof setInterval> | null = null;
+let backgroundSyncFailureCount = 0;
+let backgroundSyncBlockedUntil = 0;
 
 async function runBackgroundRehydrate() {
   if (!isBrowser()) return;
+  if (document.visibilityState !== "visible") return;
   if (!canBackgroundRehydrate()) return;
+  if (Date.now() < backgroundSyncBlockedUntil) return;
+
   try {
-    await hydrateSnapshotsFromServer("background");
+    const success = await hydrateSnapshotsFromServer("background");
+    if (success) {
+      backgroundSyncFailureCount = 0;
+      backgroundSyncBlockedUntil = 0;
+      return;
+    }
+
+    backgroundSyncFailureCount = Math.min(backgroundSyncFailureCount + 1, 8);
+    const backoffMs = Math.min(
+      BACKGROUND_SYNC_INTERVAL_MS * 2 ** (backgroundSyncFailureCount - 1),
+      BACKGROUND_SYNC_MAX_BACKOFF_MS,
+    );
+    backgroundSyncBlockedUntil = Date.now() + backoffMs;
   } catch (error) {
     reportStoreClientError("runBackgroundRehydrate", error);
+    backgroundSyncFailureCount = Math.min(backgroundSyncFailureCount + 1, 8);
+    const backoffMs = Math.min(
+      BACKGROUND_SYNC_INTERVAL_MS * 2 ** (backgroundSyncFailureCount - 1),
+      BACKGROUND_SYNC_MAX_BACKOFF_MS,
+    );
+    backgroundSyncBlockedUntil = Date.now() + backoffMs;
   }
 }
 
@@ -421,12 +463,15 @@ function onVisibilityChange() {
 export function startBackgroundSync() {
   if (!isBrowser()) return;
   if (backgroundSyncTimer !== null) return;
+  backgroundSyncFailureCount = 0;
+  backgroundSyncBlockedUntil = 0;
 
   backgroundSyncTimer = setInterval(() => {
     void runBackgroundRehydrate();
   }, BACKGROUND_SYNC_INTERVAL_MS);
 
   document.addEventListener("visibilitychange", onVisibilityChange);
+  void runBackgroundRehydrate();
 }
 
 /**
@@ -438,5 +483,7 @@ export function stopBackgroundSync() {
     clearInterval(backgroundSyncTimer);
     backgroundSyncTimer = null;
   }
+  backgroundSyncFailureCount = 0;
+  backgroundSyncBlockedUntil = 0;
   document.removeEventListener("visibilitychange", onVisibilityChange);
 }
