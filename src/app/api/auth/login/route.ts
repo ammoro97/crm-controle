@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const token = await createSession(user.id);
+    const token = await createSession(user);
     const response = NextResponse.json({
       success: true,
       user,

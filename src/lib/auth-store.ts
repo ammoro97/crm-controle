@@ -7,6 +7,10 @@ const USERS_FILE = "users.json";
 const SESSIONS_FILE = "auth-sessions.json";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
+const SESSION_TOKEN_VERSION = "v2";
+const SESSION_SECRET = String(
+  process.env.AUTH_SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+).trim();
 
 let usersCache: UserRecord[] | null = null;
 let sessionsCache: AuthSessionRecord[] | null = null;
@@ -20,6 +24,62 @@ function toPublicUser(user: UserRecord): PublicUser {
     responsavelId,
     responsavelVinculado: Boolean(responsavelId),
   };
+}
+
+function encodeBase64Url(value: string) {
+  return Buffer.from(value, "utf8").toString("base64url");
+}
+
+function decodeBase64Url(value: string) {
+  return Buffer.from(value, "base64url").toString("utf8");
+}
+
+function signSessionPayload(encodedPayload: string) {
+  return crypto.createHmac("sha256", SESSION_SECRET).update(encodedPayload).digest("base64url");
+}
+
+type SessionPayload = {
+  v: typeof SESSION_TOKEN_VERSION;
+  exp: number;
+  user: PublicUser;
+};
+
+function parseStatelessSessionToken(token: string): PublicUser | null {
+  if (!token.startsWith(`${SESSION_TOKEN_VERSION}.`)) return null;
+  if (!SESSION_SECRET) return null;
+
+  const [, encodedPayload = "", signature = ""] = token.split(".");
+  if (!encodedPayload || !signature) return null;
+
+  const expectedSignature = signSessionPayload(encodedPayload);
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (
+    signatureBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(decodeBase64Url(encodedPayload)) as Partial<SessionPayload>;
+    if (!payload || payload.v !== SESSION_TOKEN_VERSION || typeof payload.exp !== "number") return null;
+    if (payload.exp <= Date.now()) return null;
+    if (!payload.user || typeof payload.user !== "object") return null;
+
+    const user = payload.user as Partial<PublicUser>;
+    if (typeof user.id !== "string" || typeof user.email !== "string" || typeof user.nome !== "string") return null;
+
+    return {
+      id: user.id,
+      email: user.email,
+      nome: user.nome,
+      responsavelId: String(user.responsavelId || ""),
+      responsavelVinculado: Boolean(user.responsavelVinculado),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function normalizeEmail(value: string) {
@@ -143,22 +203,36 @@ export async function validateCredentials(email: string, password: string): Prom
   return toPublicUser(user);
 }
 
-export async function createSession(userId: string): Promise<string> {
-  const sessions = removeExpiredSessions(await loadSessions());
-  const token = crypto.randomUUID();
-  const now = Date.now();
-  const next: AuthSessionRecord = {
-    token,
-    userId,
-    createdAt: new Date(now).toISOString(),
-    expiresAt: new Date(now + SESSION_TTL_MS).toISOString(),
+export async function createSession(user: PublicUser): Promise<string> {
+  const payload: SessionPayload = {
+    v: SESSION_TOKEN_VERSION,
+    exp: Date.now() + SESSION_TTL_MS,
+    user: {
+      id: user.id,
+      email: user.email,
+      nome: user.nome,
+      responsavelId: String(user.responsavelId || ""),
+      responsavelVinculado: Boolean(user.responsavelVinculado),
+    },
   };
-  await saveSessions([next, ...sessions]);
-  return token;
+
+  if (!SESSION_SECRET) {
+    throw new Error("AUTH_SESSION_SECRET_MISSING");
+  }
+
+  const encodedPayload = encodeBase64Url(JSON.stringify(payload));
+  const signature = signSessionPayload(encodedPayload);
+  return `${SESSION_TOKEN_VERSION}.${encodedPayload}.${signature}`;
 }
 
 export async function getUserBySessionToken(token: string): Promise<PublicUser | null> {
   if (!token) return null;
+
+  const statelessUser = parseStatelessSessionToken(token);
+  if (statelessUser) {
+    return statelessUser;
+  }
+
   const sessions = removeExpiredSessions(await loadSessions());
   if (sessions.length !== (sessionsCache?.length || 0)) {
     await saveSessions(sessions);
@@ -172,6 +246,7 @@ export async function getUserBySessionToken(token: string): Promise<PublicUser |
 
 export async function deleteSession(token: string) {
   if (!token) return;
+  if (token.startsWith(`${SESSION_TOKEN_VERSION}.`)) return;
   const sessions = await loadSessions();
   const next = sessions.filter((session) => session.token !== token);
   await saveSessions(next);

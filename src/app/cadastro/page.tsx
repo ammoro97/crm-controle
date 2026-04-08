@@ -3,24 +3,11 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase-client";
 
-function toDefaultName(email: string) {
-  const localPart = (email || "").split("@")[0] || "usuario";
-  return localPart
-    .replace(/[._-]+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function toResponsavelId(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
+type RegisterResponse = {
+  success?: boolean;
+  message?: string;
+};
 
 export default function CadastroPage() {
   const router = useRouter();
@@ -37,26 +24,17 @@ export default function CadastroPage() {
     setSuccess(null);
 
     try {
-      const nome = toDefaultName(email);
-      const responsavelId = toResponsavelId(nome || email);
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password: senha,
-        options: {
-          data: {
-            nome,
-            responsavelId,
-          },
-        },
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, senha }),
+        credentials: "same-origin",
+        cache: "no-store",
       });
+      const data = (await response.json().catch(() => ({}))) as RegisterResponse;
 
-      if (error) {
-        setError(error.message || "Nao foi possivel criar a conta.");
-        return;
-      }
-
-      if (!data.user) {
-        setError("Nao foi possivel criar a conta.");
+      if (!response.ok || !data.success) {
+        setError(data.message || "Nao foi possivel criar a conta.");
         return;
       }
 
@@ -113,7 +91,7 @@ export default function CadastroPage() {
           </form>
 
           <p className="mt-5 text-center text-sm text-slate-400">
-            Já possui conta?{" "}
+            Ja possui conta?{" "}
             <Link href="/login" className="text-accent hover:text-emerald-300 transition-colors">
               Entrar
             </Link>
