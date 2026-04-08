@@ -41,7 +41,11 @@ export async function GET(request: NextRequest) {
       return second.localeCompare(first);
     });
     return NextResponse.json({ success: true, calls: ordered });
-  } catch {
+  } catch (error) {
+    console.error(
+      "[LIGACOES][GET] Falha ao carregar ligações:",
+      error instanceof Error ? error.message : "erro desconhecido",
+    );
     return NextResponse.json(
       { success: false, message: "Nao foi possivel carregar ligacoes." },
       { status: 500 },

@@ -16,6 +16,8 @@ type LeadTableRow = {
 const LEADS_TABLE: LeadTableName = "crm_leads";
 const CUSTOMERS_TABLE: LeadTableName = "crm_customers";
 const DELETE_BATCH_SIZE = 500;
+const READ_PAGE_SIZE = 1_000;
+const MAX_READ_PAGES = 200;
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -105,12 +107,24 @@ function toLeadsFromRows(rows: LeadTableRow[]): Lead[] {
 }
 
 async function listLeadIds(admin: SupabaseClient, tableName: LeadTableName): Promise<string[] | null> {
-  const { data, error } = await admin.from(tableName).select("lead_id");
-  if (error) {
-    console.error(`[LEAD_TABLE] list ids error table=${tableName}`, error.message);
-    return null;
+  const ids: string[] = [];
+  for (let page = 0; page < MAX_READ_PAGES; page += 1) {
+    const from = page * READ_PAGE_SIZE;
+    const to = from + READ_PAGE_SIZE - 1;
+    const { data, error } = await admin
+      .from(tableName)
+      .select("lead_id")
+      .range(from, to);
+    if (error) {
+      console.error(`[LEAD_TABLE] list ids error table=${tableName}`, error.message);
+      return null;
+    }
+    const pageIds = parseLeadIdRows(data as unknown);
+    if (pageIds.length === 0) break;
+    ids.push(...pageIds);
+    if (pageIds.length < READ_PAGE_SIZE) break;
   }
-  return parseLeadIdRows(data as unknown);
+  return ids;
 }
 
 async function deleteLeadIds(admin: SupabaseClient, tableName: LeadTableName, ids: string[]) {
@@ -150,24 +164,34 @@ async function readFromTable(tableName: LeadTableName): Promise<Lead[] | null> {
 
   const startedAt = Date.now();
   try {
-    const { data, error } = await withTimeout(
-      Promise.resolve(
-        admin
-          .from(tableName)
-          .select("lead_id,payload")
-          .order("updated_at", { ascending: false }),
-      ),
-      LEADS_READ_TIMEOUT_MS,
-      `readFromTable:${tableName}`,
-    );
+    const rows: LeadTableRow[] = [];
+    for (let page = 0; page < MAX_READ_PAGES; page += 1) {
+      const from = page * READ_PAGE_SIZE;
+      const to = from + READ_PAGE_SIZE - 1;
+      const { data, error } = await withTimeout(
+        Promise.resolve(
+          admin
+            .from(tableName)
+            .select("lead_id,payload")
+            .order("updated_at", { ascending: false })
+            .range(from, to),
+        ),
+        LEADS_READ_TIMEOUT_MS,
+        `readFromTable:${tableName}:page=${page}`,
+      );
 
-    if (error) {
-      console.error(`[LEAD_TABLE] read error table=${tableName} elapsed=${Date.now() - startedAt}ms`, error.message);
-      return null;
+      if (error) {
+        console.error(`[LEAD_TABLE] read error table=${tableName} page=${page} elapsed=${Date.now() - startedAt}ms`, error.message);
+        return null;
+      }
+
+      const pageRows = parseLeadTableRows(data as unknown);
+      if (pageRows.length === 0) break;
+      rows.push(...pageRows);
+      if (pageRows.length < READ_PAGE_SIZE) break;
     }
 
-    console.log(`[LEAD_TABLE] read ok table=${tableName} rows=${(data as unknown[])?.length ?? 0} elapsed=${Date.now() - startedAt}ms`);
-    const rows = parseLeadTableRows(data as unknown);
+    console.log(`[LEAD_TABLE] read ok table=${tableName} rows=${rows.length} elapsed=${Date.now() - startedAt}ms`);
     return toLeadsFromRows(rows);
   } catch (err) {
     const isTimeout = err instanceof Error && err.message.startsWith("TIMEOUT:");

@@ -175,6 +175,11 @@ export async function readCallLogsPage(options: {
 
 export async function writeCallLogsCollection(calls: CallLog[]) {
   const normalized = dedupeByCallId(asCallLogArray(calls));
+  await upsertCallLogsRows(normalized);
+}
+
+export async function upsertCallLogsRows(calls: CallLog[]) {
+  const normalized = dedupeByCallId(asCallLogArray(calls));
   const admin = getSupabaseAdmin();
   if (!admin) {
     throw new Error("SUPABASE_REQUIRED_FOR_CALLS_PERSISTENCE");

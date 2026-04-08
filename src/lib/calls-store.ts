@@ -1,7 +1,7 @@
 import { CallAnalysisStatus, CallLog } from "@/types/crm";
 import { getLeadPhones } from "./lead-contact-utils";
 import { readLeadsCollection } from "./leads-customers-store";
-import { readCallLogsCollection, writeCallLogsCollection } from "./calls-collection-store";
+import { readCallLogsCollection, upsertCallLogsRows } from "./calls-collection-store";
 import { readDataFile, writeDataFile } from "./storage-paths";
 
 type LeadLastContactOverrides = Record<string, string>;
@@ -10,6 +10,9 @@ const LEADS_CONTACT_FILE = "lead-last-contact-overrides.json";
 
 let callLogsCache: CallLog[] | null = null;
 let callLogsLoadPromise: Promise<CallLog[]> | null = null;
+let callLogsLastLoadedAt = 0;
+
+const CALL_LOGS_CACHE_TTL_MS = 15_000;
 
 function sortCallLogsInPlace(logs: CallLog[]) {
   logs.sort((a, b) => {
@@ -151,16 +154,18 @@ async function readCallLogsFromDisk(): Promise<CallLog[]> {
     });
 }
 
-async function flushCallLogsToDisk() {
-  if (!callLogsCache) return;
-  await writeCallLogsCollection(callLogsCache);
+async function persistCallLogs(logs: CallLog[]) {
+  if (logs.length === 0) return;
+  await upsertCallLogsRows(logs);
 }
 
 async function ensureCallLogsCache(forceRefresh = false): Promise<CallLog[]> {
-  if (!forceRefresh && callLogsCache) return callLogsCache;
+  const cacheAge = Date.now() - callLogsLastLoadedAt;
+  if (!forceRefresh && callLogsCache && cacheAge < CALL_LOGS_CACHE_TTL_MS) return callLogsCache;
   if (!callLogsLoadPromise) {
     callLogsLoadPromise = readCallLogsFromDisk().then((logs) => {
       callLogsCache = logs;
+      callLogsLastLoadedAt = Date.now();
       callLogsLoadPromise = null;
       return logs;
     });
@@ -169,8 +174,7 @@ async function ensureCallLogsCache(forceRefresh = false): Promise<CallLog[]> {
 }
 
 export async function getCallLogs(): Promise<CallLog[]> {
-  // Sempre busca snapshot mais recente do Supabase para evitar divergencia entre instancias.
-  const logs = await ensureCallLogsCache(true);
+  const logs = await ensureCallLogsCache();
   return [...logs];
 }
 
@@ -187,7 +191,7 @@ export async function upsertCallLog(
 export async function upsertCallLogs(
   inputs: Array<Partial<CallLog> & Pick<CallLog, "id">>,
 ): Promise<{ records: CallLog[]; createdCount: number; updatedCount: number }> {
-  const logs = await ensureCallLogsCache(true);
+  const logs = await ensureCallLogsCache();
   if (inputs.length === 0) {
     return { records: [], createdCount: 0, updatedCount: 0 };
   }
@@ -196,6 +200,7 @@ export async function upsertCallLogs(
   let createdCount = 0;
   let updatedCount = 0;
   let changed = false;
+  const changedRecords: CallLog[] = [];
 
   for (const input of inputs) {
     const now = new Date().toISOString();
@@ -209,6 +214,7 @@ export async function upsertCallLogs(
       });
       logs.unshift(created);
       records.push(created);
+      changedRecords.push(created);
       createdCount += 1;
       changed = true;
       continue;
@@ -229,13 +235,14 @@ export async function upsertCallLogs(
     });
     logs[index] = merged;
     records.push(merged);
+    changedRecords.push(merged);
     updatedCount += 1;
     changed = true;
   }
 
   if (changed) {
     sortCallLogsInPlace(logs);
-    await flushCallLogsToDisk();
+    await persistCallLogs(changedRecords);
   }
 
   return { records, createdCount, updatedCount };
@@ -250,7 +257,7 @@ export async function updateCall(
     throw new Error("CALL_LOG_ID_REQUIRED");
   }
 
-  const logs = await ensureCallLogsCache(true);
+  const logs = await ensureCallLogsCache();
   const index = logs.findIndex((entry) => entry.id === normalizedId);
   if (index < 0) {
     throw new Error("CALL_LOG_NOT_FOUND");
@@ -274,7 +281,7 @@ export async function updateCall(
 
   logs[index] = merged;
   sortCallLogsInPlace(logs);
-  await flushCallLogsToDisk();
+  await persistCallLogs([merged]);
   return merged;
 }
 

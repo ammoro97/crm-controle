@@ -15,8 +15,6 @@ type SaveWebhookOutBody = {
 };
 
 export async function GET() {
-  console.log("[WEBHOOK_OUT][ENV_CHECK] SUPABASE_SERVICE_ROLE_KEY:", process.env.SUPABASE_SERVICE_ROLE_KEY ? "EXISTS" : "MISSING");
-  console.log("[WEBHOOK_OUT][ENV_CHECK] NEXT_PUBLIC_SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL ? "EXISTS" : "MISSING");
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
@@ -27,7 +25,7 @@ export async function GET() {
       configured: isWebhookOutConfigured(config),
       config: toPublicWebhookOutConfig(config),
     });
-  } catch {
+  } catch (_error) {
     return NextResponse.json(
       { success: false, error: "Nao foi possivel carregar configuracao do webhook de saida." },
       { status: 500 },
@@ -36,8 +34,6 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  console.log("[WEBHOOK_OUT][ENV_CHECK] SUPABASE_SERVICE_ROLE_KEY:", process.env.SUPABASE_SERVICE_ROLE_KEY ? "EXISTS" : "MISSING");
-  console.log("[WEBHOOK_OUT][ENV_CHECK] NEXT_PUBLIC_SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL ? "EXISTS" : "MISSING");
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
@@ -65,7 +61,7 @@ export async function POST(request: Request) {
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
         throw new Error("invalid protocol");
       }
-    } catch {
+    } catch (_urlError) {
       return NextResponse.json(
         { success: false, error: "Informe uma URL valida (http/https)." },
         { status: 400 },
@@ -85,7 +81,7 @@ export async function POST(request: Request) {
       configured: isWebhookOutConfigured(next),
       config: toPublicWebhookOutConfig(next),
     });
-  } catch {
+  } catch (_error) {
     return NextResponse.json(
       { success: false, error: "Falha ao salvar webhook de saida." },
       { status: 500 },

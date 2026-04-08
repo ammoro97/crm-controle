@@ -24,7 +24,6 @@ export function getSupabaseAdmin(): SupabaseClient | null {
         autoRefreshToken: false,
       },
     });
-    console.log(`[SUPABASE_ADMIN] client criado. url=${url.slice(0, 40)}...`);
     return _client;
   } catch (err) {
     console.error("[SUPABASE_ADMIN] falha ao criar client:", err instanceof Error ? err.message : err);

@@ -99,12 +99,14 @@ type SnapshotResponse = {
 export type NewCallBlockReason = "active_call" | "pending_wrapup";
 
 const POST_CALL_DEBUG_PREFIX = "[POSTCALL_DEBUG]";
+const POST_CALL_DEBUG_ENABLED = process.env.NEXT_PUBLIC_DEBUG_POSTCALL === "1";
 let wrapupsHydrationStarted = false;
 let wrapupsSyncTimer: number | null = null;
 let wrapupsSyncInFlight = false;
 let pendingWrapupsSync: PostCallWrapup[] | null = null;
 
 function debugLog(message: string, payload?: unknown) {
+  if (!POST_CALL_DEBUG_ENABLED) return;
   if (payload === undefined) {
     console.log(`${POST_CALL_DEBUG_PREFIX} ${message}`);
     return;
@@ -125,7 +127,7 @@ function safeParseJSON<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
   try {
     return JSON.parse(raw) as T;
-  } catch {
+  } catch (_error) {
     return fallback;
   }
 }
@@ -174,7 +176,7 @@ async function hydrateWrapupsFromServer() {
     if (!data.success || !Array.isArray(serverWrapups)) return;
 
     applyMergedWrapups(serverWrapups);
-  } catch {
+  } catch (_error) {
     // Falha de rede/autorizacao nao deve quebrar fluxo local.
   }
 }
@@ -214,7 +216,7 @@ async function flushWrapupsSyncQueue() {
     if (!response.ok) {
       throw new Error("WRAPUPS_SYNC_FAILED");
     }
-  } catch {
+  } catch (_error) {
     if (!pendingWrapupsSync) {
       pendingWrapupsSync = snapshot;
     }
@@ -1184,7 +1186,7 @@ export async function detectCallEnd(session: ActiveCallSession, signal?: AbortSi
         };
       }
     }
-  } catch {
+  } catch (_error) {
     debugLog("Erro ao consultar fonte primaria /api/ligacoes");
   }
 
@@ -1261,7 +1263,7 @@ export async function detectCallEnd(session: ActiveCallSession, signal?: AbortSi
 
     debugLog("Nenhum fim detectado no fallback");
     return { matched: false };
-  } catch {
+  } catch (_error) {
     debugLog("Erro ao consultar fallback /api/api4com/calls");
     return { matched: false };
   }

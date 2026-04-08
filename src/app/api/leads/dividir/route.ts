@@ -3,6 +3,10 @@ import { requireAuth } from "@/lib/require-auth";
 import { readLeadsCollection, writeLeadsCollection } from "@/lib/leads-customers-store";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
+const RESPONSAVEIS_LIMIT = 1_000;
+const CALLS_LEAD_ID_PAGE_SIZE = 1_000;
+const CALLS_LEAD_ID_MAX_PAGES = 200;
+
 /**
  * POST /api/leads/dividir
  *
@@ -23,7 +27,9 @@ export async function POST() {
     }
     const { data: respRows, error: respError } = await admin
       .from("crm_responsaveis")
-      .select("nome, tipo");
+      .select("nome, tipo")
+      .order("nome", { ascending: true })
+      .limit(RESPONSAVEIS_LIMIT);
     if (respError) {
       return NextResponse.json({ success: false, message: `Erro ao carregar vendedores: ${respError.message}` }, { status: 500 });
     }
@@ -41,16 +47,22 @@ export async function POST() {
 
     // 2. Leads com chamadas registradas (considerados acionados)
     const acionadosIds = new Set<string>();
-    if (admin) {
-      const { data } = await admin
+    for (let page = 0; page < CALLS_LEAD_ID_MAX_PAGES; page += 1) {
+      const from = page * CALLS_LEAD_ID_PAGE_SIZE;
+      const to = from + CALLS_LEAD_ID_PAGE_SIZE - 1;
+      const { data, error } = await admin
         .from("crm_calls")
         .select("lead_id")
-        .not("lead_id", "is", null);
-      if (Array.isArray(data)) {
-        for (const row of data) {
-          if (row.lead_id) acionadosIds.add(String(row.lead_id));
-        }
+        .not("lead_id", "is", null)
+        .range(from, to);
+      if (error) {
+        return NextResponse.json({ success: false, message: `Erro ao carregar ligações: ${error.message}` }, { status: 500 });
       }
+      if (!Array.isArray(data) || data.length === 0) break;
+      for (const row of data) {
+        if (row.lead_id) acionadosIds.add(String(row.lead_id));
+      }
+      if (data.length < CALLS_LEAD_ID_PAGE_SIZE) break;
     }
 
     // 3. Carregar todos os leads e filtrar não acionados outbound

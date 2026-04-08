@@ -79,38 +79,26 @@ export async function findAuthUserByEmail(email: string): Promise<AuthUserOption
   const admin = getSupabaseAdmin();
   if (!admin) throw new Error("SUPABASE_ADMIN_UNAVAILABLE");
 
-  // Consulta direta em auth.users — mais confiavel que listUsers com paginacao.
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (admin as any)
-      .schema("auth")
-      .from("users")
-      .select("id, email, raw_user_meta_data")
-      .eq("email", normalizedEmail)
-      .limit(1)
-      .maybeSingle();
-
-    if (!error && data && typeof data === "object") {
-      const row = data as Record<string, unknown>;
-      const id = normalizeText(row.id);
-      const userEmail = normalizeText(row.email);
-      if (id && userEmail) {
-        const meta =
-          row.raw_user_meta_data && typeof row.raw_user_meta_data === "object"
-            ? (row.raw_user_meta_data as Record<string, unknown>)
-            : {};
-        const nome =
-          normalizeText(meta.full_name) ||
-          normalizeText(meta.name) ||
-          userEmail;
-        return { id, email: userEmail, nome };
-      }
+  const perPage = 200;
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      throw new Error(error.message || "AUTH_USERS_LIST_FAILED");
     }
-  } catch {
-    // Se schema auth nao estiver acessivel via PostgREST, usa fallback com listUsers.
+    const currentPageUsers = Array.isArray(data?.users) ? data.users : [];
+    const match = currentPageUsers.find((item) => normalizeText(item.email).toLowerCase() === normalizedEmail);
+    if (match) {
+      const id = normalizeText(match.id);
+      const userEmail = normalizeText(match.email);
+      if (!id || !userEmail) return null;
+      return {
+        id,
+        email: userEmail,
+        nome: resolveUserName(match as unknown as Record<string, unknown>),
+      };
+    }
+    if (currentPageUsers.length < perPage) break;
   }
 
-  // Fallback: paginar todos os usuarios.
-  const users = await listAuthUsers();
-  return users.find((user) => normalizeText(user.email).toLowerCase() === normalizedEmail) || null;
+  return null;
 }

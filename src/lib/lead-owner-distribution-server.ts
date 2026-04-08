@@ -20,10 +20,12 @@ async function loadEligibleOwnersFromDatabase() {
   const admin = getSupabaseAdmin();
   if (!admin) return [];
 
+  const RESPONSAVEIS_LIMIT = 1_000;
   const { data, error } = await admin
     .from("crm_responsaveis")
     .select("nome,tipo")
-    .order("nome", { ascending: true });
+    .order("nome", { ascending: true })
+    .limit(RESPONSAVEIS_LIMIT);
 
   if (error) {
     console.error("[LEAD_OWNER_DISTRIBUTION] erro ao carregar responsaveis", error.message);
@@ -54,4 +56,3 @@ export async function distributeLeadOwnersFromDatabase(params: DistributeFromDat
     eligibleOwners,
   });
 }
-

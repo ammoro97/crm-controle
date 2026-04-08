@@ -6,6 +6,8 @@ import { getSupabaseAdmin } from "./supabase-admin";
 const STORAGE_TABLE = "crm_storage";
 const PENDING_KEY_PREFIX = "leads-auto-pending-";
 const RUNTIME_DATA_DIR = "/tmp/crm-data";
+const PENDING_READ_PAGE_SIZE = 200;
+const PENDING_READ_MAX_PAGES = 25;
 
 export type PendingAutomatedLeadEntry = {
   requestId: string;
@@ -54,17 +56,35 @@ export async function consumePendingAutomatedLeads(): Promise<PendingAutomatedLe
   try {
     const admin = getSupabaseAdmin();
     if (admin) {
-      const { data, error } = await admin
-        .from(STORAGE_TABLE)
-        .select("key, value")
-        .like("key", `${PENDING_KEY_PREFIX}%`);
+      const aggregatedRows: Array<{ key: string; value: PendingAutomatedLeadEntry }> = [];
+      for (let page = 0; page < PENDING_READ_MAX_PAGES; page += 1) {
+        const from = page * PENDING_READ_PAGE_SIZE;
+        const to = from + PENDING_READ_PAGE_SIZE - 1;
+        const { data, error } = await admin
+          .from(STORAGE_TABLE)
+          .select("key, value")
+          .like("key", `${PENDING_KEY_PREFIX}%`)
+          .order("key", { ascending: true })
+          .range(from, to);
 
-      if (error) {
-        console.error("[LEADS_AUTO] consume supabase select error", error.message);
-      } else if (data && data.length > 0) {
-        const keys = data.map((r) => r.key as string);
+        if (error) {
+          console.error("[LEADS_AUTO] consume supabase select error", error.message);
+          return [];
+        }
+        if (!Array.isArray(data) || data.length === 0) break;
+        aggregatedRows.push(
+          ...data.map((row) => ({
+            key: String(row.key || ""),
+            value: row.value as PendingAutomatedLeadEntry,
+          })),
+        );
+        if (data.length < PENDING_READ_PAGE_SIZE) break;
+      }
+
+      if (aggregatedRows.length > 0) {
+        const keys = aggregatedRows.map((r) => r.key);
         await admin.from(STORAGE_TABLE).delete().in("key", keys);
-        const entries = data.map((r) => r.value as PendingAutomatedLeadEntry);
+        const entries = aggregatedRows.map((r) => r.value);
         console.log(`[LEADS_AUTO] consume ok — supabase entries=${entries.length} keys=${keys.join(",")}`);
         return entries;
       } else {
@@ -89,7 +109,7 @@ export async function consumePendingAutomatedLeads(): Promise<PendingAutomatedLe
         const raw = await fs.readFile(filePath, "utf8");
         entries.push(JSON.parse(raw) as PendingAutomatedLeadEntry);
         await fs.unlink(filePath);
-      } catch {
+      } catch (_fileError) {
         // ignora arquivo corrompido
       }
     }

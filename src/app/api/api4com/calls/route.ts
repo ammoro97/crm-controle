@@ -12,6 +12,9 @@ const API4COM_CALLS_ENDPOINTS = [
   "https://api.api4com.com/api/v1/cdr",
 ];
 let preferredCallsEndpoint = API4COM_CALLS_ENDPOINTS[0];
+const API4_FETCH_TIMEOUT_MS = 8_000;
+const API4_FETCH_MAX_ATTEMPTS = 3;
+const API4_FETCH_BASE_BACKOFF_MS = 350;
 
 type Api4ComCallItem = Record<string, unknown> & {
   metadata?: Record<string, unknown>;
@@ -188,9 +191,51 @@ async function parseApiResponse(response: Response): Promise<unknown> {
   if (!text) return null;
   try {
     return JSON.parse(text);
-  } catch {
+  } catch (_parseError) {
     return text;
   }
+}
+
+function isRetriableStatus(status: number) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchApi4PageWithRetry(url: string, token: string): Promise<{ response: Response; raw: unknown }> {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= API4_FETCH_MAX_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API4_FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token,
+        },
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const raw = await parseApiResponse(response);
+      if (response.ok || !isRetriableStatus(response.status) || attempt === API4_FETCH_MAX_ATTEMPTS) {
+        return { response, raw };
+      }
+      await sleep(API4_FETCH_BASE_BACKOFF_MS * attempt);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "API4_FETCH_FAILED";
+      lastError = new Error(message);
+      if (attempt < API4_FETCH_MAX_ATTEMPTS) {
+        await sleep(API4_FETCH_BASE_BACKOFF_MS * attempt);
+        continue;
+      }
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+  throw lastError || new Error("API4_FETCH_FAILED");
 }
 
 export async function GET(request: Request) {
@@ -232,16 +277,7 @@ export async function GET(request: Request) {
 
         while (pagesFetched < maxPages && aggregatedItems.length < maxItems) {
           const query = buildQuery(currentPage, filter);
-          const response = await fetch(`${endpoint}?${query}`, {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: token,
-            },
-            cache: "no-store",
-          });
-
-          const raw = await parseApiResponse(response);
+          const { response, raw } = await fetchApi4PageWithRetry(`${endpoint}?${query}`, token);
 
           if (!response.ok) {
             const message =
@@ -301,10 +337,10 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({ ok: false, error: lastError });
-  } catch {
+  } catch (error) {
     return NextResponse.json({
       ok: false,
-      error: "Erro interno ao buscar ligacoes.",
+      error: error instanceof Error ? error.message : "Erro interno ao buscar ligacoes.",
     });
   }
 }

@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
@@ -161,6 +161,8 @@ const SEM_INTERESSE_SUBFINALIZACAO = "Sem Interesse";
 const CALLS_PAGE_SIZE = 50;
 const CALLS_HISTORY_LIMIT = 1000;
 const CALLS_HISTORY_MAX_PAGES = Math.ceil(CALLS_HISTORY_LIMIT / CALLS_PAGE_SIZE);
+const CALLS_REFRESH_THROTTLE_MS = 45_000;
+const LIGACOES_DEBUG_ENABLED = process.env.NEXT_PUBLIC_DEBUG_LIGACOES === "1";
 
 type CallsRuntimeCache = {
   rows: MappedCall[];
@@ -174,6 +176,24 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function debugLigacoes(message: string, payload?: Record<string, unknown>) {
+  if (!LIGACOES_DEBUG_ENABLED) return;
+  if (payload) {
+    console.log(`${LIGACOES_DEBUG_PREFIX} ${message}`, payload);
+    return;
+  }
+  console.log(`${LIGACOES_DEBUG_PREFIX} ${message}`);
+}
+
+function warnLigacoes(message: string, payload?: unknown) {
+  if (!LIGACOES_DEBUG_ENABLED) return;
+  if (payload !== undefined) {
+    console.warn(`${LIGACOES_DEBUG_PREFIX} ${message}`, payload);
+    return;
+  }
+  console.warn(`${LIGACOES_DEBUG_PREFIX} ${message}`);
 }
 
 function normalizeDigits(value?: string | null) {
@@ -363,7 +383,7 @@ function getUniqueWrapup(index: Map<string, PostCallWrapup[]>, key?: string | nu
   const matches = index.get(normalized) || [];
   if (matches.length === 0) return undefined;
   if (matches.length > 1) {
-    console.warn(`${LIGACOES_DEBUG_PREFIX} WRAPUP_DUPLICATE_KEY`, {
+    warnLigacoes("WRAPUP_DUPLICATE_KEY", {
       key: normalized,
       candidates: matches.map((item) => ({
         wrapupId: item.id,
@@ -450,7 +470,7 @@ function isValidHttpUrl(value?: string | null) {
   try {
     const parsed = new URL(url);
     return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
+  } catch (_error) {
     return false;
   }
 }
@@ -467,7 +487,7 @@ function readWebhookOutClientConfig(): WebhookOutClientConfig | null {
       url,
       secret: String(parsed.secret || "").trim(),
     };
-  } catch {
+  } catch (_error) {
     return null;
   }
 }
@@ -508,7 +528,7 @@ function readHiddenCallIds(): Set<string> {
     const parsed = JSON.parse(window.localStorage.getItem(HIDDEN_CALL_IDS_STORAGE_KEY) || "[]");
     if (!Array.isArray(parsed)) return new Set();
     return new Set(parsed.map((item) => String(item || "").trim()).filter(Boolean));
-  } catch {
+  } catch (_error) {
     return new Set();
   }
 }
@@ -666,7 +686,7 @@ function mapApiCallToRow(
   }
 
   if (matchedWrapup) {
-    console.log(`${LIGACOES_DEBUG_PREFIX} TABLE_ROW_MATCH`, {
+    debugLigacoes("TABLE_ROW_MATCH", {
       tableCallId: callLookupId || internal?.id || null,
       sessionIdCandidate: sessionIdCandidate || null,
       metadataExternalCallId: metadataExternalCallId || null,
@@ -896,7 +916,7 @@ function mapInternalCallToRow(
     getUniqueWrapup(context.wrapupsIndexes.byCallId, item.id);
 
   if (matchedWrapup) {
-    console.log(`${LIGACOES_DEBUG_PREFIX} TABLE_ROW_MATCH`, {
+    debugLigacoes("TABLE_ROW_MATCH", {
       tableCallId: item.id,
       sessionIdCandidate: item.sessionId || null,
       metadataExternalCallId: item.externalCallId || null,
@@ -1155,6 +1175,10 @@ export default function LigacoesPage() {
   const internalHistoryAbortRef = useRef<AbortController | null>(null);
   const internalHistoryRunIdRef = useRef(0);
   const wrapupsSignatureRef = useRef(buildWrapupsSignature(wrapups));
+  const lastSuccessfulLoadAtRef = useRef<number>(callsRuntimeCache?.updatedAt || 0);
+  const historyHydratedRef = useRef<boolean>(
+    Boolean(callsRuntimeCache && callsRuntimeCache.internalCalls.length >= CALLS_PAGE_SIZE),
+  );
   const responsavelById = useMemo(() => {
     const map: ResponsavelByIdIndex = new Map();
     for (const item of responsaveisRecords) {
@@ -1171,21 +1195,65 @@ export default function LigacoesPage() {
     }).catch(() => undefined);
   };
 
-  const loadCalls = async (signal?: AbortSignal, reason = "manual-refresh"): Promise<boolean> => {
+  const mapVisibleRows = useCallback((internalMap: Map<string, CallLog>) => {
+    const leadsIndexes = buildLeadsIndexes(leadsSnapshot);
+    const wrapupsIndexes = buildWrapupsIndexes(wrapups);
+    const internalRows = Array.from(internalMap.values()).map((item) => {
+      const row = mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById });
+      return {
+        ...row,
+        origem: item.externalCallId ? "api4com" : row.origem,
+      };
+    });
+    internalRows.sort((a, b) => {
+      const first = a.startedAt || "";
+      const second = b.startedAt || "";
+      return second.localeCompare(first);
+    });
+    return internalRows
+      .filter((row) => !hiddenCallIdsRef.current.has(row.id))
+      .slice(0, CALLS_HISTORY_LIMIT);
+  }, [leadsSnapshot, wrapups, responsavelById]);
+
+  const commitVisibleRows = useCallback((internalMap: Map<string, CallLog>, updateInternalState = true) => {
+    if (updateInternalState) {
+      setInternalById(new Map(internalMap));
+    }
+    const rows = mapVisibleRows(internalMap);
+    setCalls((prev) => {
+      const nextRows = applyAnalysisOverlay(prev, rows);
+      callsRuntimeCache = {
+        rows: [...nextRows],
+        internalCalls: Array.from(internalMap.values()),
+        updatedAt: Date.now(),
+      };
+      return nextRows;
+    });
+  }, [mapVisibleRows]);
+
+  const loadCalls = async (
+    signal?: AbortSignal,
+    reason = "manual-refresh",
+    mode: "full" | "incremental" = "incremental",
+  ): Promise<boolean> => {
     if (isLoadingCallsRef.current) return false;
     isLoadingCallsRef.current = true;
-    console.log(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD START`, {
+    debugLigacoes("LOAD_START", {
       reason,
+      mode,
       hasSignal: Boolean(signal),
       ts: new Date().toISOString(),
     });
-    const isInitialLoad = !initialLoadDoneRef.current;
+    const isInitialLoad = !initialLoadDoneRef.current && mode === "full";
+    const shouldHydrateHistory = mode === "full" || !historyHydratedRef.current;
     if (isInitialLoad && calls.length === 0) setLoading(true);
     setError(null);
-    internalHistoryAbortRef.current?.abort();
-    internalHistoryAbortRef.current = null;
-    const historyRunId = internalHistoryRunIdRef.current + 1;
-    internalHistoryRunIdRef.current = historyRunId;
+    if (shouldHydrateHistory) {
+      internalHistoryAbortRef.current?.abort();
+      internalHistoryAbortRef.current = null;
+      const historyRunId = internalHistoryRunIdRef.current + 1;
+      internalHistoryRunIdRef.current = historyRunId;
+    }
 
     const fetchStart = Date.now();
     try {
@@ -1232,48 +1300,18 @@ export default function LigacoesPage() {
         throw new Error("CALLS_INTERNAL_LOAD_FAILED");
       }
 
-      const internalMapById = new Map<string, CallLog>();
+      const historyRunId = internalHistoryRunIdRef.current;
+      const internalMapById = shouldHydrateHistory ? new Map<string, CallLog>() : new Map(internalById);
       const internalMapByLookup = new Map<string, CallLog>();
+      if (!shouldHydrateHistory) {
+        for (const item of internalMapById.values()) {
+          registerInternalCall(internalMapById, internalMapByLookup, item);
+        }
+      }
       for (const item of internalData.calls) {
         registerInternalCall(internalMapById, internalMapByLookup, item);
       }
-      setInternalById(internalMapById);
-
-      const leadsIndexes = buildLeadsIndexes(leadsSnapshot);
-      const wrapupsIndexes = buildWrapupsIndexes(wrapups);
-
-      const buildVisibleRows = () => {
-        const internalRows = Array.from(internalMapById.values()).map((item) => {
-          const row = mapInternalCallToRow(item, { leadsIndexes, wrapupsIndexes, responsavelById });
-          return {
-            ...row,
-            origem: item.externalCallId ? "api4com" : row.origem,
-          };
-        });
-        internalRows.sort((a, b) => {
-          const first = a.startedAt || "";
-          const second = b.startedAt || "";
-          return second.localeCompare(first);
-        });
-        return internalRows
-          .filter((row) => !hiddenCallIdsRef.current.has(row.id))
-          .slice(0, CALLS_HISTORY_LIMIT);
-      };
-
-      const commitVisibleRows = (rows: MappedCall[]) => {
-        setInternalById(new Map(internalMapById));
-        setCalls((prev) => {
-          const nextRows = applyAnalysisOverlay(prev, rows);
-          callsRuntimeCache = {
-            rows: [...nextRows],
-            internalCalls: Array.from(internalMapById.values()),
-            updatedAt: Date.now(),
-          };
-          return nextRows;
-        });
-      };
-
-      commitVisibleRows(buildVisibleRows());
+      commitVisibleRows(internalMapById);
 
       const api4Sync = await api4SyncPromise;
       if (api4Sync.ok) {
@@ -1287,18 +1325,18 @@ export default function LigacoesPage() {
             const refreshedInternalData = (await refreshedInternalResponse.json()) as InternalCallsApiResponse;
             if (refreshedInternalData.success && Array.isArray(refreshedInternalData.calls)) {
               refreshedInternalData.calls.forEach((call) => registerInternalCall(internalMapById, internalMapByLookup, call));
-              commitVisibleRows(buildVisibleRows());
+              commitVisibleRows(internalMapById);
             }
           }
         } catch (refreshInternalError) {
           if (!(refreshInternalError instanceof DOMException && refreshInternalError.name === "AbortError")) {
-            console.warn(`${LIGACOES_DEBUG_PREFIX} REFRESH_INTERNAL_AFTER_SYNC_FAIL`, refreshInternalError);
+            warnLigacoes("REFRESH_INTERNAL_AFTER_SYNC_FAIL", refreshInternalError);
           }
         }
       }
 
       const hasMoreInternalPages = Boolean(internalData.pagination?.hasMore);
-      if (hasMoreInternalPages) {
+      if (shouldHydrateHistory && hasMoreInternalPages) {
         const historyController = new AbortController();
         internalHistoryAbortRef.current = historyController;
         if (signal) {
@@ -1326,7 +1364,7 @@ export default function LigacoesPage() {
 
               if (internalHistoryRunIdRef.current !== historyRunId) return;
               if (loadedPages % 3 === 0 || !hasMore) {
-                commitVisibleRows(buildVisibleRows());
+                commitVisibleRows(internalMapById);
               }
             } catch (historyError) {
               if (historyError instanceof DOMException && historyError.name === "AbortError") return;
@@ -1337,9 +1375,12 @@ export default function LigacoesPage() {
       }
 
       setError(null);
-      const visibleRows = buildVisibleRows();
-      console.log(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD SUCCESS`, {
+      const visibleRows = mapVisibleRows(internalMapById);
+      historyHydratedRef.current = historyHydratedRef.current || shouldHydrateHistory;
+      lastSuccessfulLoadAtRef.current = Date.now();
+      debugLigacoes("LOAD_SUCCESS", {
         reason,
+        mode,
         externalOk: api4Sync.ok,
         externalCount: Array.isArray(api4Sync.data.items) ? api4Sync.data.items.length : 0,
         internalCount: internalMapById.size,
@@ -1352,7 +1393,7 @@ export default function LigacoesPage() {
       const errMsg = requestError instanceof Error ? requestError.message : "erro desconhecido";
       sendPerfLog({ etapa: "fetch_ligacoes", erro: errMsg, tempoRespostaMs: Date.now() - fetchStart });
       setError("Não foi possível carregar ligações.");
-      console.error(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD FAIL`, { reason, message: errMsg });
+      console.error(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD FAIL`, { reason, mode, message: errMsg });
       return false;
     } finally {
       if (isInitialLoad) setLoading(false);
@@ -1361,10 +1402,15 @@ export default function LigacoesPage() {
     return false;
   };
 
-  const loadCallsWithRetry = async (reason: string, attempts: number, signal?: AbortSignal) => {
+  const loadCallsWithRetry = async (
+    reason: string,
+    attempts: number,
+    signal?: AbortSignal,
+    mode: "full" | "incremental" = "incremental",
+  ) => {
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       if (signal?.aborted) return;
-      const ok = await loadCalls(signal, `${reason}#${attempt}`);
+      const ok = await loadCalls(signal, `${reason}#${attempt}`, mode);
       if (ok) return;
       if (attempt < attempts) {
         await sleep(400 * attempt);
@@ -1392,7 +1438,7 @@ export default function LigacoesPage() {
       }
       const local = readWebhookOutClientConfig();
       setWebhookOutConfigured(Boolean(data.configured || local?.url));
-    } catch {
+    } catch (_error) {
       const local = readWebhookOutClientConfig();
       setWebhookOutConfigured(Boolean(local?.url));
       if (!local?.url) {
@@ -1415,15 +1461,14 @@ export default function LigacoesPage() {
       const data = (await response.json()) as InternalCallsApiResponse;
       if (!data.success || !Array.isArray(data.calls)) return;
       reconcileWrapupsWithCallLogs(data.calls);
-    } catch {
-      // noop
+    } catch (_error) {
+      // noop: reconciliacao e best-effort
     }
   };
 
   useEffect(() => {
     const syncSession = () => {
       const session = getActiveCallSession();
-      console.log("[POSTCALL_DEBUG] /ligacoes syncSession", session);
       setActiveSession(session);
       const nextWrapups = getPostCallWrapups();
       setWrapups((prev) => {
@@ -1447,29 +1492,24 @@ export default function LigacoesPage() {
 
 
   useEffect(() => {
-    console.log("[POSTCALL_DEBUG] /ligacoes carregada", {
-      href: typeof window !== "undefined" ? window.location.href : "",
-      activeSession,
-    });
-  }, [activeSession]);
-
-  useEffect(() => {
     return () => {
       internalHistoryAbortRef.current?.abort();
     };
   }, []);
 
   useEffect(() => {
-    console.log(`${LIGACOES_DEBUG_PREFIX} PAGE MOUNT`);
+    debugLigacoes("PAGE_MOUNT");
     hiddenCallIdsRef.current = readHiddenCallIds();
     const controller = new AbortController();
     isInitialLoadRunningRef.current = true;
-    void loadCallsWithRetry("initial-mount", 3, controller.signal).finally(() => {
+    void loadCallsWithRetry("initial-mount", 3, controller.signal, "full").finally(() => {
       isInitialLoadRunningRef.current = false;
       initialLoadDoneRef.current = true;
     });
     void runWrapupReconciliation();
     return () => controller.abort();
+    // loadCallsWithRetry e runWrapupReconciliation sao intencionalmente "mount-only".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1479,17 +1519,25 @@ export default function LigacoesPage() {
   useEffect(() => {
     if (responsavelById.size === 0) return;
     if (!initialLoadDoneRef.current && isInitialLoadRunningRef.current) return;
-    void loadCallsWithRetry("responsaveis-ready", 2);
-  }, [responsavelById]);
+    commitVisibleRows(internalById, false);
+  }, [responsavelById, internalById, commitVisibleRows]);
 
   useEffect(() => {
+    if (!initialLoadDoneRef.current) return;
+    commitVisibleRows(internalById, false);
+  }, [leadsSnapshot, internalById, commitVisibleRows]);
+
+  useEffect(() => {
+    const shouldRefresh = () => Date.now() - lastSuccessfulLoadAtRef.current > CALLS_REFRESH_THROTTLE_MS;
     const onFocus = () => {
-      void loadCallsWithRetry("window-focus", 2);
+      if (!shouldRefresh()) return;
+      void loadCallsWithRetry("window-focus", 2, undefined, "incremental");
       void loadWebhookOutStatus();
     };
     const onVisible = () => {
       if (document.visibilityState === "visible") {
-        void loadCallsWithRetry("visibility-visible", 2);
+        if (!shouldRefresh()) return;
+        void loadCallsWithRetry("visibility-visible", 2, undefined, "incremental");
         void loadWebhookOutStatus();
       }
     };
@@ -1499,12 +1547,14 @@ export default function LigacoesPage() {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
     };
+    // Handlers registram listeners globais uma vez e usam throttle por ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       void runWrapupReconciliation();
-    }, 20000);
+    }, 30000);
     return () => window.clearInterval(intervalId);
   }, []);
 
@@ -1623,7 +1673,7 @@ export default function LigacoesPage() {
 
           return changed ? next : prev;
         });
-      } catch {
+      } catch (_error) {
         // noop: mantém mecanismos existentes
       }
     };
@@ -1653,7 +1703,7 @@ export default function LigacoesPage() {
         const detection = await detectCallEnd(session, controller.signal);
         if (!detection.matched || !detection.detectionSource) return;
         if (unmounted) return;
-        console.log(`${LIGACOES_DEBUG_PREFIX} CALL_ENDED_DETECTED`, {
+        debugLigacoes("CALL_ENDED_DETECTED", {
           sessionId: session.sessionId,
           externalCallId: session.externalCallId || null,
           callId: detection.callId || null,
@@ -1764,8 +1814,8 @@ export default function LigacoesPage() {
     const nextSignature = buildWrapupsSignature(wrapups);
     if (wrapupsSignatureRef.current === nextSignature) return;
     wrapupsSignatureRef.current = nextSignature;
-    void loadCallsWithRetry("wrapups-changed", 1);
-  }, [wrapups]);
+    commitVisibleRows(internalById, false);
+  }, [wrapups, internalById, commitVisibleRows]);
 
   const allFilteredSelected = filteredCalls.length > 0 && filteredCalls.every((call) => selectedIds.includes(call.id));
 
@@ -1886,7 +1936,7 @@ export default function LigacoesPage() {
       }`;
       const response = await fetch(endpoint);
       const payload = (await response.json().catch(() => null)) as ResolveAnaliseIaResponse | null;
-      console.log(`${LIGACOES_DEBUG_PREFIX} VIEW_ANALYSIS_RESOLVE`, {
+      debugLigacoes("VIEW_ANALYSIS_RESOLVE", {
         callId: call.id,
         canonicalCallId,
         endpoint,
@@ -1912,7 +1962,7 @@ export default function LigacoesPage() {
       const isAvailable = payload.available && leadId && observationId;
 
       if (!isAvailable) {
-        console.warn(`${LIGACOES_DEBUG_PREFIX} VIEW_ANALYSIS_NOT_AVAILABLE`, {
+        warnLigacoes("VIEW_ANALYSIS_NOT_AVAILABLE", {
           callId: call.id,
           canonicalCallId,
           payload,
@@ -1932,7 +1982,7 @@ export default function LigacoesPage() {
       params.set("tab", "observacoes");
       params.set("highlightObservation", observationId);
       params.set("source", "ligacoes");
-      console.log(`${LIGACOES_DEBUG_PREFIX} VIEW_ANALYSIS_NAVIGATE`, {
+      debugLigacoes("VIEW_ANALYSIS_NAVIGATE", {
         callId: call.id,
         leadId,
         observationId,
@@ -2012,7 +2062,7 @@ export default function LigacoesPage() {
       gateway: call.ramal || null,
       recordUrl: getCallRecordingUrl(call) || null,
     } as const;
-    console.log(`${LIGACOES_DEBUG_PREFIX} GERAR_ANALISE_IDS`, {
+    debugLigacoes("GERAR_ANALISE_IDS", {
       tableCallId: call.id,
       storeCallId: call.storeCallId || null,
       externalCallId: call.externalCallId || null,
@@ -2143,7 +2193,7 @@ export default function LigacoesPage() {
       try {
         rawResponseText = await response.text();
         data = rawResponseText ? (JSON.parse(rawResponseText) as GenerateAnaliseIaResponse) : { success: false };
-      } catch {
+      } catch (_error) {
         data = { success: false, detail: rawResponseText || "Resposta invalida da API interna." };
       }
 
@@ -2212,7 +2262,7 @@ export default function LigacoesPage() {
           : item,
         ),
       );
-      await loadCallsWithRetry("analysis-requested", 1);
+      await loadCallsWithRetry("analysis-requested", 1, undefined, "incremental");
     } catch (requestError) {
       const errorMessage =
         requestError instanceof Error
@@ -2423,7 +2473,7 @@ export default function LigacoesPage() {
               type="button"
               className="btn-ghost h-9 border-white/[0.06] bg-[#0A0A0B] px-3 py-1.5 text-xs transition-all duration-200 ease-out hover:-translate-y-[2px]"
               onClick={() => {
-                void loadCallsWithRetry("manual-refresh", 1);
+                void loadCallsWithRetry("manual-refresh", 1, undefined, "full");
               }}
               disabled={loading}
             >
