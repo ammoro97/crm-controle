@@ -32,6 +32,24 @@ type SortCol =
 
 type SortDir = "asc" | "desc";
 
+const tableTextCollator = new Intl.Collator("pt-BR", { sensitivity: "base", numeric: true });
+
+function compareRowsByStableIdentity(
+  a: { lead: Lead },
+  b: { lead: Lead },
+): number {
+  const byName = tableTextCollator.compare(String(a.lead.name || ""), String(b.lead.name || ""));
+  if (byName !== 0) return byName;
+
+  const byCompany = tableTextCollator.compare(String(a.lead.company || ""), String(b.lead.company || ""));
+  if (byCompany !== 0) return byCompany;
+
+  return String(a.lead.id || "").localeCompare(String(b.lead.id || ""), "pt-BR", {
+    sensitivity: "base",
+    numeric: true,
+  });
+}
+
 function SortHeader({
   col, label, width, active, dir, onSort,
 }: {
@@ -488,7 +506,9 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
   };
 
   const sortedRows = useMemo(() => {
-    if (!sortCol) return tableRows;
+    if (!sortCol) {
+      return [...tableRows].sort(compareRowsByStableIdentity);
+    }
     return [...tableRows].sort((a, b) => {
       let cmp = 0;
       switch (sortCol) {
@@ -515,6 +535,9 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
           break;
         }
         default: break;
+      }
+      if (cmp === 0) {
+        return compareRowsByStableIdentity(a, b);
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
@@ -1143,4 +1166,3 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
     </div>
   );
 }
-

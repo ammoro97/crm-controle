@@ -607,6 +607,21 @@ function normalizeQueryText(value: string): string {
     .trim();
 }
 
+const leadNameCollator = new Intl.Collator("pt-BR", { sensitivity: "base", numeric: true });
+
+function compareLeadsByVisualOrder(a: Lead, b: Lead): number {
+  const byName = leadNameCollator.compare(String(a.name || ""), String(b.name || ""));
+  if (byName !== 0) return byName;
+
+  const byCompany = leadNameCollator.compare(String(a.company || ""), String(b.company || ""));
+  if (byCompany !== 0) return byCompany;
+
+  return String(a.id || "").localeCompare(String(b.id || ""), "pt-BR", {
+    sensitivity: "base",
+    numeric: true,
+  });
+}
+
 function normalizeLeadStatus(value: string): LeadStatus {
   const normalized = normalizeQueryText(value);
   if (normalized === "novo") return "Novo";
@@ -1292,7 +1307,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       effectiveOwnerFilter === "Todos"
         ? withoutCallback
         : withoutCallback.filter((lead) => normalizeQueryText(lead.owner) === normalizeQueryText(effectiveOwnerFilter));
-    const sorted = [...base].sort((a, b) => a.name.localeCompare(b.name));
+    const sorted = [...base].sort(compareLeadsByVisualOrder);
     const normalizedSearch = normalizeQueryText(deferredSearchTerm);
     if (!normalizedSearch) return sorted;
 
