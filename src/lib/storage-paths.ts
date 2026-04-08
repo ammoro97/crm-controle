@@ -20,6 +20,7 @@ const SUPABASE_REQUIRED_PREFIXES = [
   "call-analysis-requests",
   "lead-ai-observations",
   "lead-last-contact-overrides",
+  "api4com-integracoes",
 ];
 
 export function bundlePath(filename: string) {

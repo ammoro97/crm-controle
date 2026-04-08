@@ -14,6 +14,7 @@ type Api4RamaisResponse = {
   success: boolean;
   message?: string;
   error?: string;
+  warning?: string | null;
   items?: Api4RamalView[];
   template?: Api4TemplateView;
   responsaveis?: Api4RamalResponsavelOption[];
@@ -42,6 +43,7 @@ export function Api4Module() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
@@ -52,6 +54,7 @@ export function Api4Module() {
   const loadRamais = async () => {
     setLoading(true);
     setError(null);
+    setWarning(null);
     try {
       const response = await fetch("/api/integrations/api4com/ramais", {
         method: "GET",
@@ -65,6 +68,7 @@ export function Api4Module() {
       setItems(Array.isArray(data.items) ? data.items : []);
       setTemplate(data.template || null);
       setResponsaveis(Array.isArray(data.responsaveis) ? data.responsaveis : []);
+      setWarning(data.warning || null);
     } catch {
       setError("Nao foi possivel carregar ramais da API4.");
     } finally {
@@ -88,6 +92,7 @@ export function Api4Module() {
     setFormOpen(true);
     setMessage(null);
     setError(null);
+    setWarning(null);
   };
 
   const openEdit = (item: Api4RamalView) => {
@@ -105,6 +110,7 @@ export function Api4Module() {
     setFormOpen(true);
     setMessage(null);
     setError(null);
+    setWarning(null);
   };
 
   const handleSubmit = async (values: Api4RamalFormValues) => {
@@ -140,6 +146,7 @@ export function Api4Module() {
       setItems(Array.isArray(data.items) ? data.items : []);
       setTemplate(data.template || null);
       setResponsaveis(Array.isArray(data.responsaveis) ? data.responsaveis : []);
+      setWarning(data.warning || null);
       setMessage(data.message || "Ramal salvo com sucesso.");
       setFormOpen(false);
     } catch {
@@ -167,6 +174,7 @@ export function Api4Module() {
       }
 
       if (Array.isArray(data.items)) setItems(data.items);
+      setWarning(data.warning || null);
       setMessage(data.message || "Conexao testada com sucesso.");
     } catch {
       setError("Nao foi possivel testar a conexao do ramal.");
@@ -203,6 +211,7 @@ export function Api4Module() {
         </div>
 
         {message ? <p className="text-xs text-emerald-300">{message}</p> : null}
+        {warning ? <p className="text-xs text-amber-300">{warning}</p> : null}
         {error ? <p className="text-xs text-rose-300">{error}</p> : null}
       </div>
 

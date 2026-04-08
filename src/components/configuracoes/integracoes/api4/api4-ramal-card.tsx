@@ -13,6 +13,7 @@ export type Api4RamalView = {
   responsavelEmail: string | null;
   responsavelNome: string | null;
   responsavelAuthLinked?: boolean;
+  responsavelLookupUnavailable?: boolean;
   createdAt: string | null;
   updatedAt: string | null;
   isPrimary: boolean;
@@ -125,6 +126,9 @@ export function Api4RamalCard({ item, testingId, onEdit, onTest }: Api4RamalCard
             {item.responsavelNome || item.responsavelEmail || "-"}
             {item.responsavelNome && item.responsavelEmail ? (
               <span className="ml-1 text-xs text-slate-400">({item.responsavelEmail})</span>
+            ) : null}
+            {item.responsavelLookupUnavailable ? (
+              <span className="ml-2 text-xs text-amber-300">nao foi possivel carregar dados do responsavel</span>
             ) : null}
             {item.responsavelId && item.responsavelAuthLinked === false ? (
               <span className="ml-2 text-xs text-amber-300">sem login vinculado</span>

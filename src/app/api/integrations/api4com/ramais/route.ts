@@ -37,6 +37,7 @@ type RamalPayload = {
   items: Awaited<ReturnType<typeof listPublicApi4ComIntegracoes>>;
   template: Awaited<ReturnType<typeof getApi4ComIntegracaoTemplate>>;
   responsaveis: Awaited<ReturnType<typeof listResponsaveisForVinculo>>;
+  warning: string | null;
 };
 
 class RamalValidationError extends Error {
@@ -64,26 +65,37 @@ function normalizeStatus(value: unknown, fallback: StatusIntegracao = "inativo")
 }
 
 async function buildRamaisPayload(): Promise<RamalPayload> {
-  const [items, template, responsaveis] = await Promise.all([
+  const [items, template, responsaveisResult] = await Promise.all([
     listPublicApi4ComIntegracoes(),
     getApi4ComIntegracaoTemplate(),
-    listResponsaveisForVinculo().catch((error) => {
-      console.error(
-        "[API4_RAMAIS] falha ao carregar responsaveis para vinculo",
-        error instanceof Error ? error.message : error,
-      );
-      return [];
-    }),
+    listResponsaveisForVinculo()
+      .then((responsaveis) => ({ responsaveis, warning: null as string | null }))
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : "erro desconhecido";
+        console.error("[API4_RAMAIS] falha ao carregar responsaveis para vinculo", message);
+        return {
+          responsaveis: [] as Awaited<ReturnType<typeof listResponsaveisForVinculo>>,
+          warning: "Nao foi possivel resolver nomes de responsaveis no momento. Vinculos permanecem salvos.",
+        };
+      }),
   ]);
+
+  const responsaveis = responsaveisResult.responsaveis;
+  const warning = responsaveisResult.warning;
 
   const responsaveisMap = new Map(responsaveis.map((item) => [item.id, item]));
   const enrichedItems = items.map((item) => {
     const responsavel = item.responsavelId ? responsaveisMap.get(item.responsavelId) : null;
+    const hasResponsavelVinculado = Boolean(item.responsavelId);
+    const responsavelLookupUnavailable = Boolean(warning && hasResponsavelVinculado && !responsavel);
     return {
       ...item,
-      responsavelNome: responsavel?.nome || null,
+      responsavelNome:
+        responsavel?.nome ||
+        (responsavelLookupUnavailable ? "Responsavel vinculado (nome indisponivel)" : null),
       responsavelEmail: responsavel?.emailLogin || null,
-      responsavelAuthLinked: Boolean(responsavel?.authLinked),
+      responsavelAuthLinked: responsavel ? Boolean(responsavel.authLinked) : undefined,
+      responsavelLookupUnavailable,
     };
   });
 
@@ -91,6 +103,7 @@ async function buildRamaisPayload(): Promise<RamalPayload> {
     items: enrichedItems,
     template,
     responsaveis,
+    warning,
   };
 }
 
@@ -138,12 +151,13 @@ export async function GET() {
   if (!auth.authenticated) return auth.response;
 
   try {
-    const { items, template, responsaveis } = await buildRamaisPayload();
+    const { items, template, responsaveis, warning } = await buildRamaisPayload();
     return NextResponse.json({
       success: true,
       items,
       template,
       responsaveis,
+      warning,
     });
   } catch {
     return NextResponse.json(
@@ -212,13 +226,14 @@ export async function POST(request: Request) {
       setAsPrimary: Boolean(body.setAsPrimary),
     });
 
-    const { items, template: nextTemplate, responsaveis } = await buildRamaisPayload();
+    const { items, template: nextTemplate, responsaveis, warning } = await buildRamaisPayload();
     return NextResponse.json({
       success: true,
       message: "Novo ramal cadastrado com sucesso.",
       items,
       template: nextTemplate,
       responsaveis,
+      warning,
     });
   } catch (error) {
     if (error instanceof RamalValidationError || error instanceof ResponsavelByAuthError) {
@@ -335,13 +350,14 @@ export async function PUT(request: Request) {
       status_after: updated.status,
     });
 
-    const { items, template, responsaveis } = await buildRamaisPayload();
+    const { items, template, responsaveis, warning } = await buildRamaisPayload();
     return NextResponse.json({
       success: true,
       message: "Ramal atualizado com sucesso.",
       items,
       template,
       responsaveis,
+      warning,
     });
   } catch (error) {
     if (error instanceof RamalValidationError || error instanceof ResponsavelByAuthError) {

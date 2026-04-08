@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
-import { readDataFile, writeDataFile } from "./storage-paths";
+import { readDataFile } from "./storage-paths";
 import type { Api4Integracao, StatusIntegracao } from "@/types/integrations";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { withTimeout } from "@/lib/server/with-timeout";
 
 export type Api4ComConfig = {
   integrationId: string | null;
@@ -90,6 +92,12 @@ export type Api4ComIntegracaoTemplate = {
 
 const LEGACY_FILENAME = "api4com-config.json";
 const STORAGE_FILENAME = "api4com-integracoes.json";
+const STORAGE_TABLE = "crm_storage";
+const STORAGE_KEY = STORAGE_FILENAME.replace(/\.json$/, "");
+const STORAGE_READ_TIMEOUT_MS = 8_000;
+const STORAGE_WRITE_TIMEOUT_MS = 8_000;
+const STORAGE_MAX_WRITE_RETRIES = 5;
+const ENABLE_API4_LEGACY_MIGRATION = process.env.API4_ENABLE_LEGACY_MIGRATION === "1";
 
 const EMPTY_CONFIG: Api4ComConfig = {
   integrationId: null,
@@ -103,6 +111,18 @@ const EMPTY_CONFIG: Api4ComConfig = {
   createdAt: "",
   updatedAt: "",
 };
+
+export class Api4ComStorageError extends Error {
+  public readonly status: number;
+  public readonly code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "Api4ComStorageError";
+    this.status = status;
+    this.code = code;
+  }
+}
 
 function normalizeText(value: unknown): string {
   return String(value || "").trim();
@@ -223,17 +243,181 @@ function sanitizeStorage(raw: unknown): Api4ComIntegracoesStorage {
   };
 }
 
-async function readStorage(): Promise<Api4ComIntegracoesStorage> {
-  const raw = await readDataFile<unknown>(STORAGE_FILENAME, null);
-  const parsed = sanitizeStorage(raw);
-  if (parsed.items.length > 0) {
-    return parsed;
+type StorageSnapshot = {
+  storage: Api4ComIntegracoesStorage;
+  updatedAt: string | null;
+};
+
+type StorageMutationResult<T> = {
+  next: Api4ComIntegracoesStorage;
+  result: T;
+  shouldWrite: boolean;
+};
+
+function normalizeStorageTimestamp(value: unknown): string | null {
+  const normalized = normalizeIsoDate(value);
+  return normalized || null;
+}
+
+function normalizeStorageWriteErrorMessage(error: { message?: string } | null | undefined): string {
+  return normalizeText(error?.message) || "Falha ao acessar storage de integracoes da API4.";
+}
+
+function isUniqueViolation(error: { code?: string } | null | undefined): boolean {
+  return normalizeText(error?.code) === "23505";
+}
+
+function isSerializationConflict(error: { code?: string } | null | undefined): boolean {
+  const code = normalizeText(error?.code);
+  return code === "40001" || code === "40P01";
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function readStorageSnapshot(): Promise<StorageSnapshot> {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    throw new Api4ComStorageError(500, "API4_STORAGE_ADMIN_UNAVAILABLE", "Supabase admin indisponivel para API4.");
   }
 
-  const legacy = await readLegacyConfig();
-  if (!legacy) {
-    return parsed;
+  const { data, error } = await withTimeout(
+    Promise.resolve(
+      admin
+        .from(STORAGE_TABLE)
+        .select("value,updated_at")
+        .eq("key", STORAGE_KEY)
+        .limit(1)
+        .maybeSingle(),
+    ),
+    STORAGE_READ_TIMEOUT_MS,
+    `api4-storage:read:${STORAGE_KEY}`,
+  );
+
+  if (error) {
+    throw new Api4ComStorageError(
+      500,
+      "API4_STORAGE_READ_FAILED",
+      normalizeStorageWriteErrorMessage(error),
+    );
   }
+
+  const row = (data as { value?: unknown; updated_at?: string } | null) || null;
+  const parsed = sanitizeStorage(row?.value ?? null);
+  return {
+    storage: parsed,
+    updatedAt: normalizeStorageTimestamp(row?.updated_at),
+  };
+}
+
+async function tryPersistStorage(
+  nextStorage: Api4ComIntegracoesStorage,
+  expectedUpdatedAt: string | null,
+): Promise<{ ok: true; updatedAt: string } | { ok: false }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    throw new Api4ComStorageError(500, "API4_STORAGE_ADMIN_UNAVAILABLE", "Supabase admin indisponivel para API4.");
+  }
+
+  const nextUpdatedAt = new Date().toISOString();
+  if (expectedUpdatedAt) {
+    const { data, error } = await withTimeout(
+      Promise.resolve(
+        admin
+          .from(STORAGE_TABLE)
+          .update({
+            value: nextStorage,
+            updated_at: nextUpdatedAt,
+          })
+          .eq("key", STORAGE_KEY)
+          .eq("updated_at", expectedUpdatedAt)
+          .select("updated_at")
+          .limit(1)
+          .maybeSingle(),
+      ),
+      STORAGE_WRITE_TIMEOUT_MS,
+      `api4-storage:update:${STORAGE_KEY}`,
+    );
+
+    if (error) {
+      if (isSerializationConflict(error)) return { ok: false };
+      throw new Api4ComStorageError(
+        500,
+        "API4_STORAGE_WRITE_FAILED",
+        normalizeStorageWriteErrorMessage(error),
+      );
+    }
+
+    if (!data) return { ok: false };
+    const updatedAt = normalizeStorageTimestamp((data as { updated_at?: string } | null)?.updated_at) || nextUpdatedAt;
+    return { ok: true, updatedAt };
+  }
+
+  const { data, error } = await withTimeout(
+    Promise.resolve(
+      admin
+        .from(STORAGE_TABLE)
+        .insert({
+          key: STORAGE_KEY,
+          value: nextStorage,
+          updated_at: nextUpdatedAt,
+        })
+        .select("updated_at")
+        .limit(1)
+        .maybeSingle(),
+    ),
+    STORAGE_WRITE_TIMEOUT_MS,
+    `api4-storage:insert:${STORAGE_KEY}`,
+  );
+
+  if (error) {
+    if (isUniqueViolation(error) || isSerializationConflict(error)) {
+      return { ok: false };
+    }
+    throw new Api4ComStorageError(
+      500,
+      "API4_STORAGE_WRITE_FAILED",
+      normalizeStorageWriteErrorMessage(error),
+    );
+  }
+
+  const updatedAt = normalizeStorageTimestamp((data as { updated_at?: string } | null)?.updated_at) || nextUpdatedAt;
+  return { ok: true, updatedAt };
+}
+
+async function runStorageMutation<T>(
+  mutate: (current: Api4ComIntegracoesStorage) => StorageMutationResult<T>,
+): Promise<T> {
+  for (let attempt = 1; attempt <= STORAGE_MAX_WRITE_RETRIES; attempt += 1) {
+    const snapshot = await readStorageSnapshot();
+    const mutation = mutate(snapshot.storage);
+    if (!mutation.shouldWrite) return mutation.result;
+
+    const normalizedNext = sanitizeStorage(mutation.next);
+    const persisted = await tryPersistStorage(normalizedNext, snapshot.updatedAt);
+    if (persisted.ok) return mutation.result;
+
+    if (attempt < STORAGE_MAX_WRITE_RETRIES) {
+      await sleep(40 * attempt);
+      continue;
+    }
+  }
+
+  throw new Api4ComStorageError(
+    409,
+    "API4_STORAGE_WRITE_CONFLICT",
+    "Conflito de escrita ao salvar integracao da API4. Tente novamente.",
+  );
+}
+
+async function tryLegacyMigrationWhenExplicitlyEnabled(): Promise<Api4ComIntegracoesStorage | null> {
+  if (!ENABLE_API4_LEGACY_MIGRATION) return null;
+
+  const legacy = await readLegacyConfig();
+  if (!legacy) return null;
 
   const migrated = toIntegrationFromLegacy(legacy);
   const migratedStorage: Api4ComIntegracoesStorage = {
@@ -242,14 +426,24 @@ async function readStorage(): Promise<Api4ComIntegracoesStorage> {
     items: [migrated],
   };
 
-  await writeDataFile(STORAGE_FILENAME, migratedStorage);
-  return migratedStorage;
+  const persistedStorage = await runStorageMutation<Api4ComIntegracoesStorage>((current) => {
+    if (current.items.length > 0) {
+      return { next: current, result: current, shouldWrite: false };
+    }
+    return { next: migratedStorage, result: migratedStorage, shouldWrite: true };
+  });
+
+  return persistedStorage;
 }
 
-async function persistStorage(input: Api4ComIntegracoesStorage): Promise<Api4ComIntegracoesStorage> {
-  const normalized = sanitizeStorage(input);
-  await writeDataFile(STORAGE_FILENAME, normalized);
-  return normalized;
+async function readStorage(): Promise<Api4ComIntegracoesStorage> {
+  const snapshot = await readStorageSnapshot();
+  if (snapshot.storage.items.length > 0) return snapshot.storage;
+
+  const migrated = await tryLegacyMigrationWhenExplicitlyEnabled();
+  if (migrated) return migrated;
+
+  return snapshot.storage;
 }
 
 function toLegacyConfig(integration: Api4Integracao | null): Api4ComConfig {
@@ -442,72 +636,96 @@ export async function resolveApi4ComIntegracaoForResponsavel(
 }
 
 export async function createApi4ComIntegracao(input: CreateApi4ComIntegracaoInput): Promise<Api4Integracao> {
-  const storage = await readStorage();
-  const base = pickBaseIntegration(storage, input.baseIntegrationId);
-  const now = new Date().toISOString();
+  return runStorageMutation<Api4Integracao>((currentStorage) => {
+    const base = pickBaseIntegration(currentStorage, input.baseIntegrationId);
+    const now = new Date().toISOString();
+    const nome = normalizeText(input.nome) || (base?.nome ? `${base.nome} copia` : "API4COM");
+    const ramal = normalizeText(input.ramal);
+    const gatewayInput = normalizeNullableText(input.gateway);
+    const tokenInput = normalizeText(input.token);
+    const status = normalizeStatus(input.status, base?.status || "inativo");
 
-  const nome = normalizeText(input.nome) || (base?.nome ? `${base.nome} copia` : "API4COM");
-  const ramal = normalizeText(input.ramal);
-  const gatewayInput = normalizeNullableText(input.gateway);
-  const tokenInput = normalizeText(input.token);
-  const status = normalizeStatus(input.status, base?.status || "inativo");
+    const next: Api4Integracao = {
+      id: randomUUID(),
+      nome,
+      ramal,
+      gateway: gatewayInput ?? base?.gateway ?? null,
+      token: tokenInput || base?.token || null,
+      status,
+      responsavelId: normalizeNullableText(input.responsavelId),
+      createdAt: now,
+      updatedAt: now,
+    };
 
-  const next: Api4Integracao = {
-    id: randomUUID(),
-    nome,
-    ramal,
-    gateway: gatewayInput ?? base?.gateway ?? null,
-    token: tokenInput || base?.token || null,
-    status,
-    responsavelId: normalizeNullableText(input.responsavelId),
-    createdAt: now,
-    updatedAt: now,
-  };
+    const nextStorage: Api4ComIntegracoesStorage = {
+      ...currentStorage,
+      items: [...currentStorage.items, next],
+      selectedId: input.setAsPrimary || !currentStorage.selectedId ? next.id : currentStorage.selectedId,
+    };
 
-  const nextStorage: Api4ComIntegracoesStorage = {
-    ...storage,
-    items: [...storage.items, next],
-    selectedId: input.setAsPrimary || !storage.selectedId ? next.id : storage.selectedId,
-  };
-
-  await persistStorage(nextStorage);
-  return next;
+    return {
+      next: nextStorage,
+      result: next,
+      shouldWrite: true,
+    };
+  });
 }
 
 export async function updateApi4ComIntegracao(input: UpdateApi4ComIntegracaoInput): Promise<Api4Integracao | null> {
   const targetId = normalizeText(input.id);
   if (!targetId) return null;
 
-  const storage = await readStorage();
-  const index = storage.items.findIndex((item) => item.id === targetId);
-  if (index < 0) return null;
+  return runStorageMutation<Api4Integracao | null>((currentStorage) => {
+    const index = currentStorage.items.findIndex((item) => item.id === targetId);
+    if (index < 0) {
+      return {
+        next: currentStorage,
+        result: null,
+        shouldWrite: false,
+      };
+    }
 
-  const current = storage.items[index];
-  const updated = mergeIntegration(current, input);
-  const items = [...storage.items];
-  items[index] = updated;
+    const current = currentStorage.items[index];
+    const updated = mergeIntegration(current, input);
+    const items = [...currentStorage.items];
+    items[index] = updated;
 
-  const nextStorage: Api4ComIntegracoesStorage = {
-    ...storage,
-    items,
-    selectedId: input.setAsPrimary ? updated.id : storage.selectedId || updated.id,
-  };
+    const nextStorage: Api4ComIntegracoesStorage = {
+      ...currentStorage,
+      items,
+      selectedId: input.setAsPrimary ? updated.id : currentStorage.selectedId || updated.id,
+    };
 
-  await persistStorage(nextStorage);
-  return updated;
+    return {
+      next: nextStorage,
+      result: updated,
+      shouldWrite: true,
+    };
+  });
 }
 
 export async function setApi4ComIntegracaoPrimary(id: string): Promise<Api4Integracao | null> {
   const targetId = normalizeText(id);
   if (!targetId) return null;
-  const storage = await readStorage();
-  const target = storage.items.find((item) => item.id === targetId) || null;
-  if (!target) return null;
-  await persistStorage({
-    ...storage,
-    selectedId: target.id,
+
+  return runStorageMutation<Api4Integracao | null>((currentStorage) => {
+    const target = currentStorage.items.find((item) => item.id === targetId) || null;
+    if (!target) {
+      return {
+        next: currentStorage,
+        result: null,
+        shouldWrite: false,
+      };
+    }
+    return {
+      next: {
+        ...currentStorage,
+        selectedId: target.id,
+      },
+      result: target,
+      shouldWrite: true,
+    };
   });
-  return target;
 }
 
 export async function updateApi4ComIntegracaoStatus(
@@ -516,19 +734,30 @@ export async function updateApi4ComIntegracaoStatus(
 ): Promise<Api4Integracao | null> {
   const targetId = normalizeText(id);
   if (!targetId) return null;
-  const storage = await readStorage();
-  const index = storage.items.findIndex((item) => item.id === targetId);
-  if (index < 0) return null;
-  const target = storage.items[index];
-  const updated: Api4Integracao = {
-    ...target,
-    status: normalizeStatus(status, target.status),
-    updatedAt: new Date().toISOString(),
-  };
-  const items = [...storage.items];
-  items[index] = updated;
-  await persistStorage({ ...storage, items });
-  return updated;
+
+  return runStorageMutation<Api4Integracao | null>((currentStorage) => {
+    const index = currentStorage.items.findIndex((item) => item.id === targetId);
+    if (index < 0) {
+      return {
+        next: currentStorage,
+        result: null,
+        shouldWrite: false,
+      };
+    }
+    const target = currentStorage.items[index];
+    const updated: Api4Integracao = {
+      ...target,
+      status: normalizeStatus(status, target.status),
+      updatedAt: new Date().toISOString(),
+    };
+    const items = [...currentStorage.items];
+    items[index] = updated;
+    return {
+      next: { ...currentStorage, items },
+      result: updated,
+      shouldWrite: true,
+    };
+  });
 }
 
 export async function getApi4ComIntegracaoTemplate(): Promise<Api4ComIntegracaoTemplate> {
@@ -556,56 +785,65 @@ export async function saveApi4ComConfig(input: {
   nome?: string;
   responsavelId?: string | null;
 }): Promise<Api4ComConfig> {
-  const storage = await readStorage();
-  const current = pickPrimaryIntegration(storage);
-  const now = new Date().toISOString();
-  const nextToken = normalizeText(input.token);
-  const nextRamal = normalizeText(input.extension);
-  const nextGateway = normalizeText(input.gateway);
-  const nextNome = normalizeText(input.nome) || current?.nome || (nextRamal ? `API4COM - Ramal ${nextRamal}` : "API4COM");
+  const updated = await runStorageMutation<Api4Integracao>((currentStorage) => {
+    const current = pickPrimaryIntegration(currentStorage);
+    const now = new Date().toISOString();
+    const nextToken = normalizeText(input.token);
+    const nextRamal = normalizeText(input.extension);
+    const nextGateway = normalizeText(input.gateway);
+    const nextNome =
+      normalizeText(input.nome) || current?.nome || (nextRamal ? `API4COM - Ramal ${nextRamal}` : "API4COM");
 
-  let updated: Api4Integracao;
+    let nextIntegration: Api4Integracao;
+    let nextStorage: Api4ComIntegracoesStorage;
 
-  if (current) {
-    updated = {
-      ...current,
-      nome: nextNome,
-      ramal: nextRamal,
-      gateway: nextGateway || current.gateway,
-      token: nextToken || current.token,
-      // Nunca sobrescrever responsavelId com null automaticamente via saveApi4ComConfig (legado).
-      responsavelId:
-        input.responsavelId !== undefined && input.responsavelId !== null
-          ? normalizeNullableText(input.responsavelId)
-          : current.responsavelId,
-      status: "inativo",
-      updatedAt: now,
+    if (current) {
+      nextIntegration = {
+        ...current,
+        nome: nextNome,
+        ramal: nextRamal,
+        gateway: nextGateway || current.gateway,
+        token: nextToken || current.token,
+        // Nunca sobrescrever responsavelId com null automaticamente via saveApi4ComConfig (legado).
+        responsavelId:
+          input.responsavelId !== undefined && input.responsavelId !== null
+            ? normalizeNullableText(input.responsavelId)
+            : current.responsavelId,
+        status: "inativo",
+        updatedAt: now,
+      };
+
+      const items = currentStorage.items.map((item) => (item.id === current.id ? nextIntegration : item));
+      nextStorage = {
+        ...currentStorage,
+        items,
+        selectedId: current.id,
+      };
+    } else {
+      nextIntegration = {
+        id: randomUUID(),
+        nome: nextNome,
+        ramal: nextRamal,
+        gateway: nextGateway || null,
+        token: nextToken || null,
+        status: "inativo",
+        responsavelId: normalizeNullableText(input.responsavelId),
+        createdAt: now,
+        updatedAt: now,
+      };
+      nextStorage = {
+        version: 2,
+        selectedId: nextIntegration.id,
+        items: [nextIntegration],
+      };
+    }
+
+    return {
+      next: nextStorage,
+      result: nextIntegration,
+      shouldWrite: true,
     };
-
-    const items = storage.items.map((item) => (item.id === current.id ? updated : item));
-    await persistStorage({
-      ...storage,
-      items,
-      selectedId: current.id,
-    });
-  } else {
-    updated = {
-      id: randomUUID(),
-      nome: nextNome,
-      ramal: nextRamal,
-      gateway: nextGateway || null,
-      token: nextToken || null,
-      status: "inativo",
-      responsavelId: normalizeNullableText(input.responsavelId),
-      createdAt: now,
-      updatedAt: now,
-    };
-    await persistStorage({
-      version: 2,
-      selectedId: updated.id,
-      items: [updated],
-    });
-  }
+  });
 
   return toLegacyConfig(updated);
 }
@@ -615,25 +853,37 @@ export async function updateApi4ComConnectionStatus(
   isConnected: boolean,
   integrationId?: string,
 ): Promise<Api4ComConfig> {
-  const storage = await readStorage();
-  const target =
-    (integrationId ? storage.items.find((item) => item.id === normalizeText(integrationId)) : null) ||
-    pickPrimaryIntegration(storage);
+  const updated = await runStorageMutation<Api4Integracao | null>((currentStorage) => {
+    const target =
+      (integrationId ? currentStorage.items.find((item) => item.id === normalizeText(integrationId)) : null) ||
+      pickPrimaryIntegration(currentStorage);
 
-  if (!target) return { ...EMPTY_CONFIG };
+    if (!target) {
+      return {
+        next: currentStorage,
+        result: null,
+        shouldWrite: false,
+      };
+    }
 
-  const updated: Api4Integracao = {
-    ...target,
-    status: isConnected ? "ativo" : "inativo",
-    updatedAt: new Date().toISOString(),
-  };
+    const nextIntegration: Api4Integracao = {
+      ...target,
+      status: isConnected ? "ativo" : "inativo",
+      updatedAt: new Date().toISOString(),
+    };
 
-  const items = storage.items.map((item) => (item.id === target.id ? updated : item));
-  await persistStorage({
-    ...storage,
-    items,
-    selectedId: storage.selectedId || updated.id,
+    const items = currentStorage.items.map((item) => (item.id === target.id ? nextIntegration : item));
+    return {
+      next: {
+        ...currentStorage,
+        items,
+        selectedId: currentStorage.selectedId || nextIntegration.id,
+      },
+      result: nextIntegration,
+      shouldWrite: true,
+    };
   });
 
+  if (!updated) return { ...EMPTY_CONFIG };
   return toLegacyConfig(updated);
 }
