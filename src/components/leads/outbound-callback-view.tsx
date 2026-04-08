@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   getLeadsSnapshot,
   getMeetingsSnapshot,
   setLeadsSnapshot,
   subscribeLeadsSnapshot,
 } from "@/lib/crm-data-store";
+import { getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
 import { Lead, LeadFinalizationReason } from "@/types/crm";
 import { LeadDetailDrawer } from "./lead-detail-drawer";
 import { OutboundLeadsTable } from "./outbound-leads-table";
@@ -20,6 +21,14 @@ function normalizeLead(lead: Lead): Lead {
   };
 }
 
+function normalizeQueryText(value?: string | null) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 export function OutboundCallbackView() {
   const [leads, setLeads] = useState<Lead[]>(() =>
     getLeadsSnapshot()
@@ -30,6 +39,8 @@ export function OutboundCallbackView() {
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailInitialIsEditing, setDetailInitialIsEditing] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const deferredSearchTerm = useDeferredValue(searchTerm);
 
   useEffect(() => {
     return subscribeLeadsSnapshot(() => {
@@ -45,6 +56,24 @@ export function OutboundCallbackView() {
     () => leads.find((lead) => lead.id === detailLeadId) ?? null,
     [detailLeadId, leads],
   );
+
+  const filteredLeads = useMemo(() => {
+    const normalizedSearch = normalizeQueryText(deferredSearchTerm);
+    if (!normalizedSearch) return leads;
+
+    return leads.filter((lead) => {
+      const haystack = [
+        normalizeQueryText(lead.name),
+        ...getLeadNames(lead).map((name) => normalizeQueryText(name)),
+        normalizeQueryText(lead.company),
+        normalizeQueryText(lead.phone),
+        ...getLeadPhones(lead).map((phone) => normalizeQueryText(phone)),
+        normalizeQueryText(lead.email),
+        ...getLeadEmails(lead).map((email) => normalizeQueryText(email)),
+      ];
+      return haystack.some((value) => value.includes(normalizedSearch));
+    });
+  }, [deferredSearchTerm, leads]);
 
   const openLeadDetails = (lead: Lead) => {
     setDetailInitialIsEditing(false);
@@ -113,12 +142,38 @@ export function OutboundCallbackView() {
             </p>
           </div>
         ) : (
-          <OutboundLeadsTable
-            leads={leads}
-            onSelectLead={openLeadDetails}
-            onEditLead={openLeadForEditing}
-            onDeleteLeads={deleteLeadsById}
-          />
+          <>
+            <section className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-lg">
+                <svg
+                  className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <circle cx="6.5" cy="6.5" r="4.5" />
+                  <path d="M10.5 10.5l3 3" strokeLinecap="round" />
+                </svg>
+                <input
+                  className="field h-9 w-full pl-8 pr-3 text-[13px]"
+                  placeholder="Buscar contato por nome, empresa, telefone ou email..."
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                />
+              </div>
+              <span className="text-[11px] text-slate-400">
+                {filteredLeads.length} de {leads.length} leads
+              </span>
+            </section>
+            <OutboundLeadsTable
+              leads={filteredLeads}
+              onSelectLead={openLeadDetails}
+              onEditLead={openLeadForEditing}
+              onDeleteLeads={deleteLeadsById}
+              mode="callback"
+            />
+          </>
         )}
       </div>
 

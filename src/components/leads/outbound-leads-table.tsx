@@ -22,13 +22,14 @@ type OutboundLeadsTableProps = {
   onSelectLead: (lead: Lead) => void;
   onEditLead: (lead: Lead) => void;
   onDeleteLeads: (ids: string[]) => void;
+  mode?: "outbound" | "callback";
 };
 
 type SortCol =
   | "company" | "name" | "owner" | "entryDate" | "firstContactDate"
   | "lastInteraction" | "nota" | "avaliacoes" | "city" | "state"
   | "source" | "totalCalls" | "totalFollowUps" | "conversionDate"
-  | "acionadoBase";
+  | "acionadoBase" | "retornos";
 
 type SortDir = "asc" | "desc";
 
@@ -94,6 +95,7 @@ type LeadInteractionMetrics = {
   totalFollowUps: number;
   hasScheduledCall: boolean;
   conversionDate: string | null;
+  callbackCalls: number;
 };
 
 type FollowUpChannel = "call" | "message" | "email" | "other";
@@ -200,6 +202,7 @@ const EMPTY_INTERACTION_METRICS: LeadInteractionMetrics = {
   totalFollowUps: 0,
   hasScheduledCall: false,
   conversionDate: null,
+  callbackCalls: 0,
 };
 
 function normalizeText(value?: string | null): string {
@@ -265,6 +268,13 @@ function buildLocalDateTime(date?: string | null, time?: string | null): Date | 
   }
 
   return localDate;
+}
+
+function parseTimestampMs(value?: string | null): number | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function resolveFollowUpChannel(nextAction?: string | null): FollowUpChannel {
@@ -345,6 +355,7 @@ function buildLeadInteractionMetricsById(params: {
   const metricsByLead: Record<string, LeadInteractionMetrics> = {};
   const validLeadIds = new Set<string>();
   const leadPhoneIndex = buildLeadPhoneIndex(leads);
+  const callbackStartByLead = new Map<string, number>();
   const callFollowUpsByLead = new Map<string, FollowUpScheduleCandidate[]>();
 
   for (const lead of leads) {
@@ -352,6 +363,10 @@ function buildLeadInteractionMetricsById(params: {
     if (!leadId) continue;
     validLeadIds.add(leadId);
     metricsByLead[leadId] = { ...EMPTY_INTERACTION_METRICS };
+    const callbackStart = parseTimestampMs(lead.callbackAt || null);
+    if (callbackStart !== null) {
+      callbackStartByLead.set(leadId, callbackStart);
+    }
   }
 
   for (const call of calls) {
@@ -361,6 +376,18 @@ function buildLeadInteractionMetricsById(params: {
       resolveLeadIdByPhone([call.telefone, call.called, call.caller], leadPhoneIndex);
     if (!resolvedLeadId || !metricsByLead[resolvedLeadId]) continue;
     metricsByLead[resolvedLeadId].totalCalls += 1;
+
+    const callbackStart = callbackStartByLead.get(resolvedLeadId);
+    if (callbackStart !== undefined) {
+      const callTimestamp =
+        parseTimestampMs(call.startedAt) ??
+        parseTimestampMs(call.answeredAt) ??
+        parseTimestampMs(call.endedAt) ??
+        parseTimestampMs(call.createdAt);
+      if (callTimestamp !== null && callTimestamp >= callbackStart) {
+        metricsByLead[resolvedLeadId].callbackCalls += 1;
+      }
+    }
   }
 
   for (const wrapup of wrapups) {
@@ -451,7 +478,13 @@ const RESPONSAVEL_REQUIRED_MESSAGE =
   "Seu usuario ainda nao esta vinculado a um responsavel no CRM. Cadastre esse e-mail em Configuracoes > Responsaveis antes de realizar ligacoes.";
 const OUTBOUND_LEADS_PAGE_SIZE = 100;
 
-export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLeads }: OutboundLeadsTableProps) {
+export function OutboundLeadsTable({
+  leads,
+  onSelectLead,
+  onEditLead,
+  onDeleteLeads,
+  mode = "outbound",
+}: OutboundLeadsTableProps) {
   const { currentUser } = useAuth();
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const bottomScrollRef = useRef<HTMLDivElement | null>(null);
@@ -539,12 +572,16 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
         case "totalFollowUps": cmp = a.metrics.totalFollowUps - b.metrics.totalFollowUps; break;
         case "acionadoBase": {
           const getVal = (row: typeof a) => {
-            const v = row.metrics.totalCalls > 0 || Boolean(String(row.lead.firstContactDate || "").trim());
+            const v =
+              mode === "callback"
+                ? row.metrics.callbackCalls > 0
+                : row.metrics.totalCalls > 0 || Boolean(String(row.lead.firstContactDate || "").trim());
             return v ? 1 : 0;
           };
           cmp = getVal(a) - getVal(b);
           break;
         }
+        case "retornos": cmp = a.metrics.callbackCalls - b.metrics.callbackCalls; break;
         default: break;
       }
       if (cmp === 0) {
@@ -552,7 +589,7 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [tableRows, sortCol, sortDir]);
+  }, [mode, sortCol, sortDir, tableRows]);
 
   const totalRows = sortedRows.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / OUTBOUND_LEADS_PAGE_SIZE));
@@ -898,6 +935,9 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
               </th>
               <th className="w-[6rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Ações</th>
               <SortHeader col="acionadoBase" label="Acionado Base" active={sortCol === "acionadoBase"} dir={sortDir} onSort={handleSort} />
+              {mode === "callback" ? (
+                <SortHeader col="retornos" label="Retornos" active={sortCol === "retornos"} dir={sortDir} onSort={handleSort} />
+              ) : null}
               <SortHeader col="company"        label="Empresa"           width="w-[14rem]"  active={sortCol === "company"}        dir={sortDir} onSort={handleSort} />
               <SortHeader col="name"           label="Responsavel"       width="w-[12rem]"  active={sortCol === "name"}           dir={sortDir} onSort={handleSort} />
               <SortHeader col="owner"          label="Vendedor"          width="w-[12rem]"  active={sortCol === "owner"}          dir={sortDir} onSort={handleSort} />
@@ -922,7 +962,10 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
           <tbody>
             {pagedRows.map(({ lead, location, expediente, metrics }) => {
               const phones = getLeadPhones(lead);
-              const hasBaseActivation = metrics.totalCalls > 0 || Boolean(String(lead.firstContactDate || "").trim());
+              const hasBaseActivation =
+                mode === "callback"
+                  ? metrics.callbackCalls > 0
+                  : metrics.totalCalls > 0 || Boolean(String(lead.firstContactDate || "").trim());
               return (
                 <tr
                 key={lead.id}
@@ -965,6 +1008,9 @@ export function OutboundLeadsTable({ leads, onSelectLead, onEditLead, onDeleteLe
                     {hasBaseActivation ? "Sim" : "Nao"}
                   </span>
                 </td>
+                {mode === "callback" ? (
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{metrics.callbackCalls}</td>
+                ) : null}
                 <td className="whitespace-nowrap px-3 py-2.5 font-medium xl:px-3.5 2xl:py-2">
                   <TruncatedCellText value={lead.company} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
                 </td>

@@ -82,6 +82,18 @@ type FollowUpScheduleOutcome = {
   message?: string;
 };
 
+type CallbackHistoryDispatchPayload = {
+  wrapupId: string;
+  lead: Lead;
+  callbackAt: string;
+  callbackBy: string;
+  sessionId: string;
+  callId?: string | null;
+  externalCallId?: string | null;
+  finalizacao: string;
+  subfinalizacao?: string | null;
+};
+
 const postCallResultOptions: Array<{ value: PostCallResultOption; label: string }> = [
   { value: "Ligacao caiu", label: "Ligação caiu" },
   { value: "Caixa postal", label: "Caixa postal" },
@@ -149,6 +161,11 @@ function normalizeText(value?: string | null) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
+}
+
+function isLeadsOutboundSourcePath(sourcePath?: string | null): boolean {
+  const path = String(sourcePath || "").trim();
+  return path === "/leads/outbound" || path === "/leads/outbound/callback";
 }
 
 function normalizePostCallResultOption(value: unknown): PostCallResultOption {
@@ -588,7 +605,7 @@ export function GlobalWrapupModal() {
       const defaultEmailItems = buildInitialEmailItemsForSession(relatedLead);
       const defaultCompany = String(relatedLead?.name || activeSession.nome || relatedLead?.company || activeSession.empresa || "").trim();
       const defaultPrimaryEmail = String(relatedLead?.email || defaultEmailItems[0]?.value || "").trim();
-      const isLeadsOutboundSession = activeSession.sourcePath === "/leads/outbound";
+      const isLeadsOutboundSession = isLeadsOutboundSourcePath(activeSession.sourcePath);
       const nextForm: PostCallFormState = {
         ...createDefaultPostCallForm(),
         result: isLeadsOutboundSession ? "Enviar para callback" : "Caixa postal",
@@ -618,7 +635,7 @@ export function GlobalWrapupModal() {
     };
   }, [activeSession, postCallForm]);
 
-  const isLeadsOutboundFlow = activeSession?.sourcePath === "/leads/outbound";
+  const isLeadsOutboundFlow = isLeadsOutboundSourcePath(activeSession?.sourcePath);
   const visibleResultOptions = isLeadsOutboundFlow ? postCallResultOptionsLeadsOutbound : postCallResultOptions;
 
   const showReasonField =
@@ -932,6 +949,20 @@ export function GlobalWrapupModal() {
     }
   };
 
+  const dispatchCallbackHistory = async (payload: CallbackHistoryDispatchPayload): Promise<void> => {
+    const response = await fetch("/api/leads/callback-history", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error("CALLBACK_HISTORY_PERSISTENCE_FAILED");
+    }
+  };
+
   const reserveFollowUpSlot = async (params: {
     date: string;
     time: string;
@@ -991,7 +1022,7 @@ export function GlobalWrapupModal() {
     formState: PostCallFormState,
     ownerName: string,
     callEvidence?: CurrentCallEvidence,
-  ) => {
+  ): { lead: Lead; isCallbackResult: boolean } | null => {
     const leads = getLeadsSnapshot();
     const now = nowDateAndTime();
     const leadIndex = findLeadIndexForSession(leads, session);
@@ -1002,7 +1033,7 @@ export function GlobalWrapupModal() {
         leadId: session.leadId,
         telefone: session.telefone,
       });
-      return;
+      return null;
     }
 
     const lead = leads[leadIndex];
@@ -1090,6 +1121,7 @@ export function GlobalWrapupModal() {
     const nextLeads = [...leads];
     nextLeads[leadIndex] = nextLead;
     setLeadsSnapshot(nextLeads);
+    return { lead: nextLead, isCallbackResult };
   };
 
   const createFollowUpMeetingIfNeeded = (
@@ -1351,8 +1383,33 @@ export function GlobalWrapupModal() {
         }).catch(() => undefined);
       }
 
-      applyWrapupToLead(activeSession, safePostCallForm, ownerName, currentCallEvidence);
+      const wrapupLeadResult = applyWrapupToLead(activeSession, safePostCallForm, ownerName, currentCallEvidence);
       createFollowUpMeetingIfNeeded(activeSession, safePostCallForm, ownerName);
+
+      if (wrapupLeadResult?.isCallbackResult) {
+        const callbackAt = String(wrapupLeadResult.lead.callbackAt || "").trim();
+        if (callbackAt) {
+          try {
+            await dispatchCallbackHistory({
+              wrapupId: savedWrapup.id,
+              lead: wrapupLeadResult.lead,
+              callbackAt,
+              callbackBy: ownerName,
+              sessionId: activeSession.sessionId,
+              callId: activeSession.matchedCallId || null,
+              externalCallId: activeSession.externalCallId || null,
+              finalizacao: safePostCallForm.result,
+              subfinalizacao: safePostCallForm.nextAction.trim() || null,
+            });
+          } catch (error) {
+            console.warn("[WRAPUP_GLOBAL] CALLBACK_HISTORY_PERSISTENCE_FAILED", {
+              message: error instanceof Error ? error.message : "erro desconhecido",
+              leadId: wrapupLeadResult.lead.id,
+              wrapupId: savedWrapup.id,
+            });
+          }
+        }
+      }
 
       let emailDispatchOutcome: WrapupEmailDispatchOutcome = {
         attempted: false,
