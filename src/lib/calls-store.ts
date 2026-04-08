@@ -215,9 +215,12 @@ export async function upsertCallLogs(
     }
 
     const current = logs[index];
+    const definedInput = Object.fromEntries(
+      Object.entries(input).filter(([, v]) => v !== undefined),
+    ) as typeof input;
     const merged = normalizeCallLog({
       ...current,
-      ...input,
+      ...definedInput,
       id: current.id,
       externalCallId: input.externalCallId ?? current.externalCallId ?? null,
       sessionId: input.sessionId ?? current.sessionId ?? null,
@@ -255,9 +258,13 @@ export async function updateCall(
 
   const current = logs[index];
   const now = new Date().toISOString();
+  // Strip undefined values to avoid overwriting existing data with nullish defaults.
+  const definedPatch = Object.fromEntries(
+    Object.entries(patch).filter(([, v]) => v !== undefined),
+  ) as typeof patch;
   const merged = normalizeCallLog({
     ...current,
-    ...patch,
+    ...definedPatch,
     id: current.id,
     externalCallId: patch.externalCallId ?? current.externalCallId ?? null,
     sessionId: patch.sessionId ?? current.sessionId ?? null,

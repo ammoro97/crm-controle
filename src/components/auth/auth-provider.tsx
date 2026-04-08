@@ -120,11 +120,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error || !data.user) {
           return { success: false, message: error?.message || "Nao foi possivel autenticar." };
         }
-        // toPublicUserFromSupabase busca responsável no Supabase — também tem timeout.
-        const publicUser = await withClientTimeout(
-          toPublicUserFromSupabase(data.user),
-          CLIENT_AUTH_TIMEOUT_MS,
-        );
+
+        // Enriquecimento com dados do responsável é best-effort.
+        // Falha ou timeout aqui não bloqueia o login — o usuário entra com dados mínimos
+        // e o refreshUser (onAuthStateChange) complementa na próxima oportunidade.
+        let publicUser: PublicUser;
+        try {
+          publicUser = await withClientTimeout(
+            toPublicUserFromSupabase(data.user),
+            CLIENT_AUTH_TIMEOUT_MS,
+          );
+        } catch {
+          const normalizedEmail = normalizeEmailForMatch(data.user.email || "");
+          publicUser = {
+            id: data.user.id,
+            email: normalizedEmail,
+            nome: "Responsavel nao vinculado",
+            responsavelId: "",
+            responsavelVinculado: false,
+          };
+        }
+
         setCurrentUser(publicUser);
         return { success: true };
       } catch (err) {
