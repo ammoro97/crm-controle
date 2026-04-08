@@ -163,14 +163,53 @@ const CALLS_HISTORY_LIMIT = 1000;
 const CALLS_HISTORY_MAX_PAGES = Math.ceil(CALLS_HISTORY_LIMIT / CALLS_PAGE_SIZE);
 const CALLS_REFRESH_THROTTLE_MS = 45_000;
 const LIGACOES_DEBUG_ENABLED = process.env.NEXT_PUBLIC_DEBUG_LIGACOES === "1";
+const CALLS_RUNTIME_CACHE_STORAGE_KEY = "crm:ligacoes:runtime-cache:v1";
 
 type CallsRuntimeCache = {
   rows: MappedCall[];
   internalCalls: CallLog[];
   updatedAt: number;
+  historyHydrated: boolean;
 };
 
 let callsRuntimeCache: CallsRuntimeCache | null = null;
+let callsRuntimeCacheBootstrapped = false;
+
+function readCallsRuntimeCacheFromStorage(): CallsRuntimeCache | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(CALLS_RUNTIME_CACHE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CallsRuntimeCache>;
+    const rows = Array.isArray(parsed?.rows) ? (parsed.rows as MappedCall[]) : [];
+    const internalCalls = Array.isArray(parsed?.internalCalls) ? (parsed.internalCalls as CallLog[]) : [];
+    const updatedAt = Number(parsed?.updatedAt || 0);
+    const historyHydrated = Boolean(parsed?.historyHydrated);
+    if (rows.length === 0 || !Number.isFinite(updatedAt) || updatedAt <= 0) return null;
+    return { rows, internalCalls, updatedAt, historyHydrated };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeCallsRuntimeCacheToStorage(cache: CallsRuntimeCache) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = JSON.stringify(cache);
+    if (raw.length > 4_000_000) return;
+    window.sessionStorage.setItem(CALLS_RUNTIME_CACHE_STORAGE_KEY, raw);
+  } catch (_error) {
+    // ignora erro de quota/serializacao e mantém cache em memória
+  }
+}
+
+function getCallsRuntimeCache(): CallsRuntimeCache | null {
+  if (!callsRuntimeCacheBootstrapped) {
+    callsRuntimeCacheBootstrapped = true;
+    callsRuntimeCache = readCallsRuntimeCacheFromStorage();
+  }
+  return callsRuntimeCache;
+}
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
@@ -1132,17 +1171,23 @@ function statusBadgeClass(status?: string) {
 }
 
 export default function LigacoesPage() {
+  const initialRuntimeCache = getCallsRuntimeCache();
+  const hasWarmHistoryCache = Boolean(
+    initialRuntimeCache &&
+      initialRuntimeCache.rows.length > 0 &&
+      (initialRuntimeCache.historyHydrated || initialRuntimeCache.internalCalls.length >= CALLS_HISTORY_LIMIT),
+  );
   const router = useRouter();
   const { currentUser } = useAuth();
   const responsaveisRecords = useResponsaveisRecords();
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
-  const [calls, setCalls] = useState<MappedCall[]>(() => callsRuntimeCache?.rows || []);
-  const [loading, setLoading] = useState(() => !(callsRuntimeCache && callsRuntimeCache.rows.length > 0));
+  const [calls, setCalls] = useState<MappedCall[]>(() => initialRuntimeCache?.rows || []);
+  const [loading, setLoading] = useState(() => !(initialRuntimeCache && initialRuntimeCache.rows.length > 0));
   const [error, setError] = useState<string | null>(null);
   const [leadsSnapshot, setLeadsSnapshotState] = useState<Lead[]>(() => getLeadsSnapshot());
   const [internalById, setInternalById] = useState<Map<string, CallLog>>(() => {
     const map = new Map<string, CallLog>();
-    (callsRuntimeCache?.internalCalls || []).forEach((call) => map.set(call.id, call));
+    (initialRuntimeCache?.internalCalls || []).forEach((call) => map.set(call.id, call));
     return map;
   });
   const [wrapups, setWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
@@ -1175,9 +1220,12 @@ export default function LigacoesPage() {
   const internalHistoryAbortRef = useRef<AbortController | null>(null);
   const internalHistoryRunIdRef = useRef(0);
   const wrapupsSignatureRef = useRef(buildWrapupsSignature(wrapups));
-  const lastSuccessfulLoadAtRef = useRef<number>(callsRuntimeCache?.updatedAt || 0);
+  const lastSuccessfulLoadAtRef = useRef<number>(initialRuntimeCache?.updatedAt || 0);
   const historyHydratedRef = useRef<boolean>(
-    Boolean(callsRuntimeCache && callsRuntimeCache.internalCalls.length >= CALLS_PAGE_SIZE),
+    Boolean(
+      initialRuntimeCache &&
+        (initialRuntimeCache.historyHydrated || initialRuntimeCache.internalCalls.length >= CALLS_HISTORY_LIMIT),
+    ),
   );
   const responsavelById = useMemo(() => {
     const map: ResponsavelByIdIndex = new Map();
@@ -1222,11 +1270,14 @@ export default function LigacoesPage() {
     const rows = mapVisibleRows(internalMap);
     setCalls((prev) => {
       const nextRows = applyAnalysisOverlay(prev, rows);
-      callsRuntimeCache = {
+      const nextCache: CallsRuntimeCache = {
         rows: [...nextRows],
         internalCalls: Array.from(internalMap.values()),
         updatedAt: Date.now(),
+        historyHydrated: historyHydratedRef.current,
       };
+      callsRuntimeCache = nextCache;
+      writeCallsRuntimeCacheToStorage(nextCache);
       return nextRows;
     });
   }, [mapVisibleRows]);
@@ -1378,6 +1429,14 @@ export default function LigacoesPage() {
       const visibleRows = mapVisibleRows(internalMapById);
       historyHydratedRef.current = historyHydratedRef.current || shouldHydrateHistory;
       lastSuccessfulLoadAtRef.current = Date.now();
+      if (callsRuntimeCache) {
+        callsRuntimeCache = {
+          ...callsRuntimeCache,
+          updatedAt: lastSuccessfulLoadAtRef.current,
+          historyHydrated: historyHydratedRef.current,
+        };
+        writeCallsRuntimeCacheToStorage(callsRuntimeCache);
+      }
       debugLigacoes("LOAD_SUCCESS", {
         reason,
         mode,
@@ -1501,11 +1560,21 @@ export default function LigacoesPage() {
     debugLigacoes("PAGE_MOUNT");
     hiddenCallIdsRef.current = readHiddenCallIds();
     const controller = new AbortController();
-    isInitialLoadRunningRef.current = true;
-    void loadCallsWithRetry("initial-mount", 3, controller.signal, "full").finally(() => {
-      isInitialLoadRunningRef.current = false;
+    if (hasWarmHistoryCache) {
       initialLoadDoneRef.current = true;
-    });
+      isInitialLoadRunningRef.current = false;
+      setLoading(false);
+      const isCacheStale = Date.now() - lastSuccessfulLoadAtRef.current > CALLS_REFRESH_THROTTLE_MS;
+      if (isCacheStale) {
+        void loadCallsWithRetry("initial-mount-warm-cache", 1, controller.signal, "incremental");
+      }
+    } else {
+      isInitialLoadRunningRef.current = true;
+      void loadCallsWithRetry("initial-mount", 3, controller.signal, "full").finally(() => {
+        isInitialLoadRunningRef.current = false;
+        initialLoadDoneRef.current = true;
+      });
+    }
     void runWrapupReconciliation();
     return () => controller.abort();
     // loadCallsWithRetry e runWrapupReconciliation sao intencionalmente "mount-only".
@@ -1852,6 +1921,7 @@ export default function LigacoesPage() {
         rows: callsRuntimeCache.rows.filter((call) => !nextHidden.has(call.id)),
         updatedAt: Date.now(),
       };
+      writeCallsRuntimeCacheToStorage(callsRuntimeCache);
     }
     if (selectedCallId && nextHidden.has(selectedCallId)) {
       setSelectedCallId(null);
