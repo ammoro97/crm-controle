@@ -143,13 +143,9 @@ type ResponsavelByIdIndex = Map<string, string>;
 
 const baseFinalizacaoOptions = [
   "Todas",
-  "Ligação caiu",
-  "Caixa postal",
-  "Ligação muda",
-  "Número inválido",
-  "Pessoa não conhece",
   "Falou com cliente",
   "Falou com secretária",
+  "Enviar para callback",
 ];
 
 const OFFICIAL_FINALIZACOES = new Set(baseFinalizacaoOptions.filter((value) => value !== "Todas"));
@@ -292,33 +288,18 @@ function normalizeFinalizacaoLabel(value: string) {
 
   const legacyMap: Record<string, string> = {
     "falou com cliente": "Falou com cliente",
-    "falou com secretaria": "Falou com secretária",
     "cliente sem interesse": "Falou com cliente",
     "falou com a pessoa": "Falou com cliente",
-    "era a pessoa errada": "Pessoa não conhece",
-    "pessoa errada": "Pessoa não conhece",
-    "nao atendeu": "Caixa postal",
-    "não atendeu": "Caixa postal",
-    "caixa postal": "Caixa postal",
-    "numero invalido": "Número inválido",
-    "número inválido": "Número inválido",
-    "ligacao caiu": "Ligação caiu",
-    "ligação caiu": "Ligação caiu",
-    "ligacao muda": "Ligação muda",
-    "ligação muda": "Ligação muda",
     "pediu retorno": "Falou com cliente",
-    "deixou recado": "Falou com secretária",
     outro: "Falou com cliente",
     falou_com_pessoa: "Falou com cliente",
-    pessoa_errada: "Pessoa não conhece",
-    nao_atendeu: "Caixa postal",
-    caixa_postal: "Caixa postal",
-    numero_invalido: "Número inválido",
-    ligacao_caiu: "Ligação caiu",
-    ligacao_muda: "Ligação muda",
     pediu_retorno: "Falou com cliente",
-    deixou_recado: "Falou com secretária",
     cliente_sem_interesse: "Falou com cliente",
+    "falou com secretaria": "Falou com secretária",
+    deixou_recado: "Falou com secretária",
+    callback: "Enviar para callback",
+    "enviar para callback": "Enviar para callback",
+    "enviado para callback": "Enviar para callback",
   };
 
   return legacyMap[normalized] || "-";
@@ -657,6 +638,13 @@ function mapApiCallToRow(
     if (matchedWrapup) matchSource = "callId";
   }
 
+  if (!matchedWrapup && internal?.externalCallId) {
+    matchedWrapup =
+      getUniqueWrapup(context.wrapupsIndexes.byExternalCallId, internal.externalCallId) ||
+      getUniqueWrapup(context.wrapupsIndexes.byCallId, internal.externalCallId);
+    if (matchedWrapup) matchSource = "externalCallId";
+  }
+
   if (!matchedWrapup && internal?.id) {
     matchedWrapup = getUniqueWrapup(context.wrapupsIndexes.byCallId, internal.id);
     if (matchedWrapup) matchSource = "callId";
@@ -771,7 +759,24 @@ function getCallSortReference(input: {
   return String(input.updatedAt || input.endedAt || input.startedAt || input.createdAt || "");
 }
 
+function hasCrmFinalizacaoData(input: {
+  finalizacao?: string | null;
+  subfinalizacao?: string | null;
+}) {
+  const finalizacao = normalizeFinalizacaoLabel(String(input.finalizacao || ""));
+  if (finalizacao !== "-") return true;
+  const subfinalizacao = String(input.subfinalizacao || "").trim();
+  return Boolean(subfinalizacao && subfinalizacao !== "-");
+}
+
 function shouldReplaceLookupRecord(current: CallLog, incoming: CallLog) {
+  // Prioriza o registro que preserva finalizacao/subfinalizacao salvas no CRM.
+  const currentHasCrmFinalizacao = hasCrmFinalizacaoData(current);
+  const incomingHasCrmFinalizacao = hasCrmFinalizacaoData(incoming);
+  if (incomingHasCrmFinalizacao !== currentHasCrmFinalizacao) {
+    return incomingHasCrmFinalizacao;
+  }
+
   const currentScore = getCallAnalysisPriority(current);
   const incomingScore = getCallAnalysisPriority(incoming);
   if (incomingScore !== currentScore) return incomingScore > currentScore;
