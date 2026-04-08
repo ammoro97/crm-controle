@@ -1334,6 +1334,23 @@ export function GlobalWrapupModal() {
         externalCallId: activeSession.externalCallId || null,
         callId: activeSession.matchedCallId || null,
       });
+      // Persist finalizacao/subfinalizacao to the CallLog in Supabase so it
+      // survives page refreshes and cross-device sessions without wrapup sync.
+      const callIdentifier =
+        activeSession.matchedCallId || activeSession.externalCallId || activeSession.sessionId;
+      if (callIdentifier) {
+        void fetch(`/api/ligacoes/${encodeURIComponent(callIdentifier)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            finalizacao: safePostCallForm.result,
+            subfinalizacao: safePostCallForm.nextAction.trim() || null,
+            sessionId: activeSession.sessionId || null,
+            externalCallId: activeSession.externalCallId || null,
+          }),
+        }).catch(() => undefined);
+      }
+
       applyWrapupToLead(activeSession, safePostCallForm, ownerName, currentCallEvidence);
       createFollowUpMeetingIfNeeded(activeSession, safePostCallForm, ownerName);
 

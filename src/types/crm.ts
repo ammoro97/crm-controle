@@ -279,6 +279,8 @@ export type CallLog = {
   createdAt: string;
   updatedAt: string;
   transcript?: string | null;
+  finalizacao?: string | null;
+  subfinalizacao?: string | null;
   aiAnalysis?: string | null;
   analysisStatus?: CallAnalysisStatus;
   processingStatus?: "pending" | "processing" | "done" | "error";

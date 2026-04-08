@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
@@ -674,8 +674,12 @@ function mapApiCallToRow(
     });
   }
 
-  const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
-  const subfinalizacao = resolveWrapupSubfinalizacaoLabel(matchedWrapup);
+  const finalizacao = matchedWrapup
+    ? normalizeFinalizacaoLabel(matchedWrapup.result)
+    : normalizeFinalizacaoLabel(internal?.finalizacao || "");
+  const subfinalizacao = matchedWrapup
+    ? resolveWrapupSubfinalizacaoLabel(matchedWrapup)
+    : (internal?.subfinalizacao || "-");
   const atendenteFromWrapupResponsavelId =
     matchedWrapup?.responsavelId ? context.responsavelById.get(matchedWrapup.responsavelId) : undefined;
   const atendenteFromResponsavelId = metadataResponsavelId
@@ -805,8 +809,12 @@ function mapInternalCallToRow(
     });
   }
 
-  const finalizacao = matchedWrapup ? normalizeFinalizacaoLabel(matchedWrapup.result) : "-";
-  const subfinalizacao = resolveWrapupSubfinalizacaoLabel(matchedWrapup);
+  const finalizacao = matchedWrapup
+    ? normalizeFinalizacaoLabel(matchedWrapup.result)
+    : normalizeFinalizacaoLabel(item.finalizacao || "");
+  const subfinalizacao = matchedWrapup
+    ? resolveWrapupSubfinalizacaoLabel(matchedWrapup)
+    : (item.subfinalizacao || "-");
   const atendenteFromWrapupResponsavelId =
     matchedWrapup?.responsavelId ? context.responsavelById.get(matchedWrapup.responsavelId) : undefined;
 
@@ -1018,6 +1026,8 @@ export default function LigacoesPage() {
   const [wrapups, setWrapups] = useState<PostCallWrapup[]>(() => getPostCallWrapups());
   const [finalizacaoFilter, setFinalizacaoFilter] = useState("Todas");
   const [atendenteFilter, setAtendenteFilter] = useState("Todos");
+  const [searchTerm, setSearchTerm] = useState("");
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [webhookOutConfigured, setWebhookOutConfigured] = useState(false);
   const [webhookOutLoading, setWebhookOutLoading] = useState(true);
@@ -1530,12 +1540,23 @@ export default function LigacoesPage() {
   }, [atendenteFilter, atendenteOptions]);
 
   const filteredCalls = useMemo(() => {
+    const normalizedSearch = deferredSearchTerm
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+
     return calls.filter((call) => {
       const matchesFinalizacao = finalizacaoFilter === "Todas" || call.finalizacao === finalizacaoFilter;
       const matchesAtendente = atendenteFilter === "Todos" || call.atendente === atendenteFilter;
-      return matchesFinalizacao && matchesAtendente;
+      if (!matchesFinalizacao || !matchesAtendente) return false;
+
+      if (!normalizedSearch) return true;
+      const normalize = (v?: string | null) =>
+        String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      return [call.empresa, call.nome, call.telefone].some((v) => normalize(v).includes(normalizedSearch));
     });
-  }, [atendenteFilter, calls, finalizacaoFilter]);
+  }, [atendenteFilter, calls, deferredSearchTerm, finalizacaoFilter]);
 
   const CALLS_PAGE_SIZE = 50;
   const [callsPage, setCallsPage] = useState(0);
@@ -1543,7 +1564,7 @@ export default function LigacoesPage() {
   // Reseta a página ao trocar filtros para não mostrar página vazia.
   useEffect(() => {
     setCallsPage(0);
-  }, [finalizacaoFilter, atendenteFilter]);
+  }, [finalizacaoFilter, atendenteFilter, deferredSearchTerm]);
 
   const pagedCalls = useMemo(
     () => filteredCalls.slice(callsPage * CALLS_PAGE_SIZE, (callsPage + 1) * CALLS_PAGE_SIZE),
@@ -2151,6 +2172,19 @@ export default function LigacoesPage() {
             <p className="mt-1 text-[13px] text-[#6B7280]">Acompanhe o histórico de chamadas realizadas no CRM.</p>
           </div>
           <div className="flex w-full flex-wrap items-end justify-start gap-2 rounded-xl border border-white/[0.06] bg-[#111827] p-2 lg:w-auto lg:justify-end">
+            <div className="relative flex-1 min-w-[240px]">
+              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#6B7280]" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="6.5" cy="6.5" r="4.5" />
+                <path d="M10.5 10.5l3 3" strokeLinecap="round" />
+              </svg>
+              <input
+                type="text"
+                className="field h-9 w-full pl-8 pr-3 border-white/[0.06] bg-[#0A0A0B] text-xs"
+                placeholder="Buscar por empresa, nome ou telefone..."
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+              />
+            </div>
             <label className="text-[11px] uppercase tracking-[0.08em] text-muted">
               Atendente
               <select
@@ -2282,7 +2316,7 @@ export default function LigacoesPage() {
             onMouseDown={handleCallsTableMouseDown}
             className={`overflow-x-auto ${isCallsTableDragging ? "cursor-grabbing select-none" : "cursor-grab"}`}
           >
-            <table className="min-w-[1260px] w-full text-left">
+            <table className="min-w-[1120px] w-full text-left">
               <thead className="border-b border-slate-800/90 bg-slate-950/90 text-[11px] uppercase tracking-[0.08em] text-slate-400">
                 <tr>
                   <th className="whitespace-nowrap px-3 py-2.5">
@@ -2295,7 +2329,6 @@ export default function LigacoesPage() {
                     />
                   </th>
                   <th className="whitespace-nowrap px-3 py-2.5">Ação</th>
-                  <th className="whitespace-nowrap px-3 py-2.5">Nome</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Empresa</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Telefone</th>
                   <th className="whitespace-nowrap px-3 py-2.5">Atendente</th>
@@ -2312,7 +2345,7 @@ export default function LigacoesPage() {
               <tbody>
                 {filteredCalls.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-sm text-slate-400" colSpan={14}>
+                    <td className="px-3 py-4 text-sm text-slate-400" colSpan={13}>
                       Nenhuma ligação encontrada.
                     </td>
                   </tr>
@@ -2346,7 +2379,6 @@ export default function LigacoesPage() {
                               {isOpen ? "Ocultar detalhes" : "Ver detalhes"}
                             </button>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3">{call.nome}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.empresa}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.telefone}</td>
                           <td className="whitespace-nowrap px-3 py-3">{call.atendente || "Responsável não vinculado"}</td>
@@ -2373,12 +2405,8 @@ export default function LigacoesPage() {
                         </tr>
                         {isOpen ? (
                           <tr className="border-b border-border/70 bg-slate-950/40">
-                            <td colSpan={14} className="px-3 py-3">
+                            <td colSpan={13} className="px-3 py-3">
                               <div className="grid gap-3 rounded-lg border border-border bg-slate-900/50 p-4 md:grid-cols-2 xl:grid-cols-4">
-                                <div>
-                                  <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Nome</p>
-                                  <p className="mt-1 text-sm text-slate-100">{call.nome}</p>
-                                </div>
                                 <div>
                                   <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Empresa</p>
                                   <p className="mt-1 text-sm text-slate-100">{call.empresa}</p>

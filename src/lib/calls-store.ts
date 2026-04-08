@@ -86,6 +86,8 @@ function normalizeCallLog(input: Partial<CallLog> & Pick<CallLog, "id">): CallLo
     eventType: input.eventType || "",
     status: input.status || "Nao atendida",
     transcript: input.transcript || null,
+    finalizacao: input.finalizacao || null,
+    subfinalizacao: input.subfinalizacao || null,
     aiAnalysis: aiAnalysis || null,
     analysisStatus,
     processingStatus: legacyProcessingStatus,

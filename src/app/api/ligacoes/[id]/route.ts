@@ -25,6 +25,8 @@ type PatchCallBody = {
   gateway?: string | null;
   recordUrl?: string | null;
   sourceCallId?: string | null;
+  finalizacao?: string | null;
+  subfinalizacao?: string | null;
 };
 
 function normalizeAnalysisStatus(value?: string | null): CallAnalysisStatus | null {
@@ -71,6 +73,8 @@ export async function PATCH(
     const patch = {
       analysisStatus: analysisStatus || undefined,
       processingStatus: mapLegacyProcessingStatus(analysisStatus),
+      finalizacao: body.finalizacao === undefined ? undefined : String(body.finalizacao || "").trim() || null,
+      subfinalizacao: body.subfinalizacao === undefined ? undefined : String(body.subfinalizacao || "").trim() || null,
       analysisRequestId:
         body.analysisRequestId === undefined ? undefined : String(body.analysisRequestId || "").trim() || null,
       analysisObservationId:
