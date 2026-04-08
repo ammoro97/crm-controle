@@ -34,6 +34,7 @@ async function toPublicUserFromSupabase(user: User): Promise<PublicUser> {
 // Tempo máximo para operações Supabase client-side. Evita travamento infinito
 // em "Carregando sessao..." ou "Entrando..." quando o Supabase está lento.
 const CLIENT_AUTH_TIMEOUT_MS = 10_000;
+const AUTH_LAST_USER_CACHE_KEY = "crm:auth:last-user:v1";
 
 function withClientTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -42,6 +43,51 @@ function withClientTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       setTimeout(() => reject(new Error("CLIENT_AUTH_TIMEOUT")), ms),
     ),
   ]);
+}
+
+function isBrowser() {
+  return typeof window !== "undefined";
+}
+
+function readCachedUser(): PublicUser | null {
+  if (!isBrowser()) return null;
+  try {
+    const raw = window.localStorage.getItem(AUTH_LAST_USER_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PublicUser | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.id !== "string" || typeof parsed.email !== "string") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedUser(user: PublicUser | null) {
+  if (!isBrowser()) return;
+  try {
+    if (!user) {
+      window.localStorage.removeItem(AUTH_LAST_USER_CACHE_KEY);
+      return;
+    }
+    window.localStorage.setItem(AUTH_LAST_USER_CACHE_KEY, JSON.stringify(user));
+  } catch {
+    // noop
+  }
+}
+
+function isTransientClientAuthError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message = err.message.toLowerCase();
+  return (
+    message.includes("client_auth_timeout") ||
+    message.includes("timeout") ||
+    message.includes("network") ||
+    message.includes("fetch") ||
+    message.includes("authunknownerror") ||
+    message.includes("unexpected token") ||
+    message.includes("database error")
+  );
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -54,8 +100,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         supabase.auth.getUser(),
         CLIENT_AUTH_TIMEOUT_MS,
       );
-      if (error || !data.user) {
+      if (error) {
+        if (isTransientClientAuthError(error)) {
+          const cached = readCachedUser();
+          if (cached) {
+            setCurrentUser(cached);
+            return;
+          }
+        }
         setCurrentUser(null);
+        writeCachedUser(null);
+        return;
+      }
+      if (!data.user) {
+        setCurrentUser(null);
+        writeCachedUser(null);
         return;
       }
       const publicUser = await withClientTimeout(
@@ -63,7 +122,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         CLIENT_AUTH_TIMEOUT_MS,
       );
       setCurrentUser(publicUser);
+      writeCachedUser(publicUser);
     } catch {
+      const cached = readCachedUser();
+      if (cached) {
+        setCurrentUser(cached);
+        return;
+      }
       setCurrentUser(null);
     }
   }, []);
@@ -92,7 +157,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               toPublicUserFromSupabase(session.user),
               CLIENT_AUTH_TIMEOUT_MS,
             );
-            if (active) setCurrentUser(publicUser);
+            if (active) {
+              setCurrentUser(publicUser);
+              writeCachedUser(publicUser);
+            }
           } catch {
             // Falha ao enriquecer usuário não deve bloquear a sessão.
           }
@@ -142,8 +210,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         setCurrentUser(publicUser);
+        writeCachedUser(publicUser);
         return { success: true };
       } catch (err) {
+        if (isTransientClientAuthError(err)) {
+          const cached = readCachedUser();
+          if (cached) {
+            setCurrentUser(cached);
+            return { success: true };
+          }
+        }
         const isTimeout = err instanceof Error && err.message === "CLIENT_AUTH_TIMEOUT";
         return {
           success: false,
@@ -161,6 +237,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await supabase.auth.signOut();
     } finally {
       setCurrentUser(null);
+      writeCachedUser(null);
     }
   }, []);
 
