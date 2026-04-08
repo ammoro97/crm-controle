@@ -18,7 +18,7 @@ const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const BR_DATE_PATTERN = /^(\d{2})\/(\d{2})\/(\d{4})$/;
 const MIN_HISTORY_DATE = "1970-01-01";
 const MAX_HISTORY_DATE = "9999-12-31";
-const PRESET_PERIOD_DAYS: Record<Exclude<PresetPeriodo, "max" | "custom">, number> = {
+const PRESET_PERIOD_DAYS: Record<Exclude<PresetPeriodo, "max" | "custom" | "today" | "yesterday">, number> = {
   "3d": 3,
   "7d": 7,
   "15d": 15,
@@ -96,6 +96,13 @@ function getDateRangeForDays(days: number): { from: string; to: string } {
   };
 }
 
+function getSingleDayRangeFromOffset(offsetDays: number): { from: string; to: string } {
+  const baseDate = new Date();
+  baseDate.setDate(baseDate.getDate() + offsetDays);
+  const day = toDateInputValue(baseDate);
+  return { from: day, to: day };
+}
+
 function getDefaultDateRange(): { from: string; to: string } {
   return getDateRangeForDays(DEFAULT_PERIOD_DAYS);
 }
@@ -103,6 +110,8 @@ function getDefaultDateRange(): { from: string; to: string } {
 function normalizePeriodo(rawPeriodo: string | null, hasCustomRange: boolean): PresetPeriodo {
   const normalized = String(rawPeriodo || "").trim().toLowerCase();
   if (normalized === "max") return "max";
+  if (normalized === "today") return "today";
+  if (normalized === "yesterday") return "yesterday";
   if (normalized === "3d") return "3d";
   if (normalized === "7d") return "7d";
   if (normalized === "15d") return "15d";
@@ -162,6 +171,14 @@ function parseFiltersFromRequest(request: Request): MetricsRequestFilters {
     const defaults = getDefaultDateRange();
     fromRaw = fromParam || defaults.from;
     toRaw = toParam || defaults.to;
+  } else if (periodo === "today") {
+    const range = getSingleDayRangeFromOffset(0);
+    fromRaw = range.from;
+    toRaw = range.to;
+  } else if (periodo === "yesterday") {
+    const range = getSingleDayRangeFromOffset(-1);
+    fromRaw = range.from;
+    toRaw = range.to;
   } else {
     const days = PRESET_PERIOD_DAYS[periodo];
     const presetRange = getDateRangeForDays(days);

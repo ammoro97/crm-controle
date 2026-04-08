@@ -16,6 +16,8 @@ type DashboardFiltersProps = {
 
 const PERIODO_OPTIONS: Array<{ value: PresetPeriodo; label: string }> = [
   { value: "max", label: "Maximo" },
+  { value: "today", label: "Hoje" },
+  { value: "yesterday", label: "Ontem" },
   { value: "3d", label: "Ultimos 3 dias" },
   { value: "7d", label: "Ultimos 7 dias" },
   { value: "15d", label: "Ultimos 15 dias" },
@@ -121,4 +123,3 @@ export function DashboardFilters({ value, vendedores, loading = false, onChange 
     </section>
   );
 }
-

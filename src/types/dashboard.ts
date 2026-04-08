@@ -1,4 +1,4 @@
-export type PresetPeriodo = "max" | "3d" | "7d" | "15d" | "30d" | "custom";
+export type PresetPeriodo = "max" | "today" | "yesterday" | "3d" | "7d" | "15d" | "30d" | "custom";
 
 export type DashboardFilters = {
   periodo: PresetPeriodo;

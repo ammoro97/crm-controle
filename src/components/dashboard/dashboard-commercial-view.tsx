@@ -72,6 +72,8 @@ function getDefaultDashboardDateRange(): Required<Pick<DashboardFilters, "from" 
 function sanitizePreset(value: string | null | undefined): PresetPeriodo {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "max") return "max";
+  if (normalized === "today") return "today";
+  if (normalized === "yesterday") return "yesterday";
   if (normalized === "3d") return "3d";
   if (normalized === "7d") return "7d";
   if (normalized === "15d") return "15d";
