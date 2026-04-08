@@ -8,7 +8,6 @@ import {
   subscribeLeadsSnapshot,
 } from "@/lib/crm-data-store";
 import { useResponsaveisRecords } from "@/lib/responsaveis-store";
-import { getFinalizacaoClassification } from "@/lib/finalizacao-classification";
 import {
   ActiveCallSession,
   PostCallWrapup,
@@ -873,17 +872,14 @@ function normalizeFinalizacaoKey(value: string) {
     .trim();
 }
 
-const CPC_POSITIVE_FINALIZACOES = new Set(["falou com cliente"]);
-const CPC_NEGATIVE_FINALIZACOES = ["cliente sem interesse", "cliente nao tem interesse"];
-const CPC_NEGATIVE_SUBFINALIZACOES = new Set(["sem interesse"]);
-const IMPRODUTIVE_FINALIZACOES = new Set([
-  "nao atendeu",
-  "caixa postal",
-  "ligacao caiu",
-  "ligacao muda",
-  "numero invalido",
-  "pessoa nao conhece",
-]);
+// CPC classification: only these three finalizations count
+// positivo: falou com cliente | negativo: falou com secretaria | improdutiva: callback
+function classificarCPC(normalizedFinalizacao: string): "positivo" | "negativo" | "improdutiva" | null {
+  if (normalizedFinalizacao.includes("falou com cliente")) return "positivo";
+  if (normalizedFinalizacao.includes("falou com secretaria")) return "negativo";
+  if (normalizedFinalizacao.includes("callback")) return "improdutiva";
+  return null;
+}
 const FOLLOWUP_VALID_SUBFINALIZACOES = new Set([
   "agendar ligacao",
   "agendar whatsapp",
@@ -1050,6 +1046,14 @@ export default function LigacoesPage() {
     return map;
   }, [responsaveisRecords]);
 
+  const sendPerfLog = (payload: { etapa: "fetch_ligacoes" | "persistencia" | "renderizacao"; erro?: string; tempoRespostaMs?: number }) => {
+    void fetch("/api/logs/performance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origem: "analise_ligacoes", created_at: new Date().toISOString(), ...payload }),
+    }).catch(() => undefined);
+  };
+
   const loadCalls = async (signal?: AbortSignal, reason = "manual-refresh"): Promise<boolean> => {
     if (isLoadingCallsRef.current) return false;
     isLoadingCallsRef.current = true;
@@ -1062,19 +1066,27 @@ export default function LigacoesPage() {
     if (isInitialLoad) setLoading(true);
     setError(null);
 
+    const fetchStart = Date.now();
     try {
+      const timeoutController = new AbortController();
+      const timeoutId = window.setTimeout(() => timeoutController.abort(), 10_000);
+
+      const buildCombinedSignal = (): AbortSignal => {
+        if (!signal) return timeoutController.signal;
+        const ac = new AbortController();
+        signal.addEventListener("abort", () => ac.abort());
+        timeoutController.signal.addEventListener("abort", () => ac.abort());
+        return ac.signal;
+      };
+      const combinedSignal = buildCombinedSignal();
+
       const [externalResponse, internalResponse] = await Promise.all([
-        fetch("/api/api4com/calls", {
-          method: "GET",
-          cache: "no-store",
-          signal,
-        }),
-        fetch("/api/ligacoes", {
-          method: "GET",
-          cache: "no-store",
-          signal,
-        }),
-      ]);
+        fetch("/api/api4com/calls", { method: "GET", cache: "no-store", signal: combinedSignal }),
+        fetch("/api/ligacoes", { method: "GET", cache: "no-store", signal: combinedSignal }),
+      ]).finally(() => window.clearTimeout(timeoutId));
+
+      const elapsed = Date.now() - fetchStart;
+      if (elapsed > 3000) sendPerfLog({ etapa: "fetch_ligacoes", tempoRespostaMs: elapsed });
       const externalData = (await externalResponse.json()) as CallsApiResponse;
       const internalData = (await internalResponse.json()) as InternalCallsApiResponse;
 
@@ -1178,12 +1190,11 @@ export default function LigacoesPage() {
       return true;
     } catch (requestError) {
       if (requestError instanceof DOMException && requestError.name === "AbortError") return false;
+      const errMsg = requestError instanceof Error ? requestError.message : "erro desconhecido";
+      sendPerfLog({ etapa: "fetch_ligacoes", erro: errMsg, tempoRespostaMs: Date.now() - fetchStart });
       setError("Não foi possível carregar ligações.");
       setCalls([]);
-      console.error(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD FAIL`, {
-        reason,
-        message: requestError instanceof Error ? requestError.message : "erro desconhecido",
-      });
+      console.error(`${LIGACOES_DEBUG_PREFIX} INITIAL LOAD FAIL`, { reason, message: errMsg });
       return false;
     } finally {
       if (isInitialLoad) setLoading(false);
@@ -2069,60 +2080,19 @@ export default function LigacoesPage() {
     };
   }, [filteredCalls]);
 
-  const tmaSegmentado = useMemo(() => {
-    const build = (finalizacaoKey?: string) => {
-      let totalSeconds = 0;
-      let count = 0;
-
-      for (const call of filteredCalls) {
-        if (finalizacaoKey && normalizeFinalizacaoKey(call.finalizacao) !== finalizacaoKey) continue;
-        totalSeconds += Math.max(0, Number(call.durationSeconds || 0));
-        count += 1;
-      }
-
-      return {
-        totalSeconds,
-        count,
-        tma: formatAverageTime(totalSeconds, count),
-      };
-    };
-
-    return {
-      cliente: build("falou com cliente"),
-      secretaria: build("falou com secretaria"),
-      geral: build(),
-    };
-  }, [filteredCalls]);
-
   const contactQuality = useMemo(() => {
     let cpcPositive = 0;
     let cpcNegative = 0;
     let improdutivas = 0;
 
     for (const call of filteredCalls) {
-      const normalized = normalizeFinalizacaoKey(call.finalizacao);
-      const normalizedSubfinalizacao = normalizeFinalizacaoKey(call.subfinalizacao);
-      const isNegative =
-        hasFinalizacaoKeyword(normalized, CPC_NEGATIVE_FINALIZACOES) ||
-        CPC_NEGATIVE_SUBFINALIZACOES.has(normalizedSubfinalizacao);
-      const isPositive = CPC_POSITIVE_FINALIZACOES.has(normalized) && !isNegative;
-      const classification = getFinalizacaoClassification(call.finalizacao);
-      const isImprodutiva =
-        !isPositive &&
-        !isNegative &&
-        (IMPRODUTIVE_FINALIZACOES.has(normalized) || Boolean(classification && !classification.conectado));
-
-      if (isPositive) {
-        cpcPositive += 1;
-      } else if (isNegative) {
-        cpcNegative += 1;
-      } else if (isImprodutiva) {
-        improdutivas += 1;
-      }
+      const cpc = classificarCPC(normalizeFinalizacaoKey(call.finalizacao));
+      if (cpc === "positivo") cpcPositive += 1;
+      else if (cpc === "negativo") cpcNegative += 1;
+      else if (cpc === "improdutiva") improdutivas += 1;
     }
 
     const cpc = cpcPositive + cpcNegative;
-
     const total = filteredCalls.length;
     const cpcRate = total > 0 ? Math.round((cpc / total) * 100) : 0;
     const cpcPositiveRate = total > 0 ? Math.round((cpcPositive / total) * 100) : 0;
@@ -2170,28 +2140,6 @@ export default function LigacoesPage() {
       return normalized;
     });
   }, [contactQuality.cpcNegative, contactQuality.cpcPositive, contactQuality.improdutivas]);
-
-  const finalizacaoChart = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const call of filteredCalls) {
-      const label = call.finalizacao && call.finalizacao !== "-" ? call.finalizacao : "Sem finalizacao";
-      counts.set(label, (counts.get(label) || 0) + 1);
-    }
-    const total = filteredCalls.length;
-    const sorted = Array.from(counts.entries())
-      .map(([label, count]) => ({
-        label,
-        count,
-        percent: total > 0 ? Math.round((count / total) * 100) : 0,
-      }))
-      .sort((a, b) => b.count - a.count);
-    return sorted;
-  }, [filteredCalls]);
-
-  const maxFinalizacaoPercent = useMemo(
-    () => finalizacaoChart.reduce((max, item) => Math.max(max, item.percent), 0),
-    [finalizacaoChart],
-  );
 
   return (
     <section className="space-y-6 bg-[#0A0A0B]">
@@ -2245,50 +2193,7 @@ export default function LigacoesPage() {
         </div>
       </div>
 
-      <div className="space-y-6">
-        <div className="panel rounded-xl border border-white/[0.06] bg-[#111827] p-5">
-          <div className="mb-4">
-            <p className="text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">Volume e Eficiência</p>
-            <p className="mt-1 text-[13px] text-[#6B7280]">Tempo médio por tipo de atendimento</p>
-          </div>
-          {loading ? (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr_1fr]">
-              {[0, 1, 2].map((item) => (
-                <div
-                  key={`tma-loading-${item}`}
-                  className="min-h-[148px] max-h-[164px] animate-pulse rounded-[14px] border border-white/[0.06] bg-[#0F172A] px-6 py-5"
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr_1fr]">
-              <article className="flex min-h-[148px] max-h-[164px] flex-col items-start justify-center gap-[14px] rounded-[14px] border border-white/[0.06] bg-[#0F172A] px-6 py-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
-                <p className="text-[12px] font-medium uppercase tracking-[0.08em] text-[#7C89A0]">TMA Geral</p>
-                <p className="text-[44px] font-semibold leading-none text-[#F3F7FF]">{tmaSegmentado.geral.tma}</p>
-                <p className="text-[15px] font-normal text-[#8A94A6]">
-                  {tmaSegmentado.geral.count} ligação{tmaSegmentado.geral.count === 1 ? "" : "ões"} no período filtrado
-                </p>
-              </article>
-
-              <article className="flex min-h-[148px] max-h-[164px] flex-col items-start justify-center gap-[14px] rounded-[14px] border border-white/[0.06] bg-[#0F172A] px-6 py-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
-                <p className="text-[12px] font-medium uppercase tracking-[0.08em] text-[#7C89A0]">TMA Cliente</p>
-                <p className="text-[44px] font-semibold leading-none text-[#F3F7FF]">{tmaSegmentado.cliente.tma}</p>
-                <p className="text-[15px] font-normal text-[#8A94A6]">
-                  {tmaSegmentado.cliente.count} ligação{tmaSegmentado.cliente.count === 1 ? "" : "ões"}
-                </p>
-              </article>
-
-              <article className="flex min-h-[148px] max-h-[164px] flex-col items-start justify-center gap-[14px] rounded-[14px] border border-white/[0.06] bg-[#0F172A] px-6 py-5 transition-all duration-200 ease-out hover:-translate-y-[2px]">
-                <p className="text-[12px] font-medium uppercase tracking-[0.08em] text-[#7C89A0]">TMA Secretaria</p>
-                <p className="text-[44px] font-semibold leading-none text-[#F3F7FF]">{tmaSegmentado.secretaria.tma}</p>
-                <p className="text-[15px] font-normal text-[#8A94A6]">
-                  {tmaSegmentado.secretaria.count} ligação{tmaSegmentado.secretaria.count === 1 ? "" : "ões"}
-                </p>
-              </article>
-            </div>
-          )}
-        </div>
-
+      <div>
         <div className="panel rounded-xl border border-white/[0.06] bg-[#111827] p-5">
           <div className="mb-4">
             <p className="text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">Qualidade (CPC)</p>
@@ -2355,55 +2260,6 @@ export default function LigacoesPage() {
           )}
         </div>
 
-        <article className="panel rounded-xl border border-white/[0.06] bg-[#111827] p-5">
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p className="text-[20px] font-semibold tracking-[-0.02em] text-[#E6EAF2]">Distribuição de Finalizações</p>
-              <p className="mt-1 text-[13px] text-[#6B7280]">Participação percentual e comparação entre resultados</p>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="rounded-md border border-white/[0.06] bg-[#111827] px-2 py-1 text-[11px] text-[#6B7280]">
-                {filteredCalls.length} ligações
-              </span>
-            </div>
-          </div>
-
-          {finalizacaoChart.length === 0 ? (
-            <p className="text-sm text-[#6B7280]">Sem dados para exibir.</p>
-          ) : (
-            <div className="space-y-2 rounded-xl border border-white/[0.06] bg-[#111827] p-2">
-              {finalizacaoChart.map((item) => {
-                const isDominant = maxFinalizacaoPercent > 0 && item.percent === maxFinalizacaoPercent;
-                return (
-                  <div
-                    key={item.label}
-                    className={`grid h-12 grid-cols-[180px_minmax(0,1fr)_40px] items-center gap-3 rounded-lg border px-4 transition-all duration-200 ease-out ${
-                      isDominant
-                        ? "border-white/20 bg-white/[0.04]"
-                        : "border-white/[0.06] bg-[#111827] hover:border-white/15 hover:bg-white/[0.02]"
-                    }`}
-                  >
-                    <span className={`truncate text-[13px] ${isDominant ? "font-semibold text-[#E6EAF2]" : "font-medium text-[#E6EAF2]"}`}>
-                      {item.label}
-                    </span>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-[rgba(255,255,255,0.08)]">
-                      <div
-                        className={`h-full rounded-full ${finalizacaoBarColor(item.label)}`}
-                        style={{
-                          width: `${item.percent}%`,
-                          boxShadow: isDominant ? "0 0 10px rgba(255,255,255,0.3)" : "none",
-                        }}
-                      />
-                    </div>
-                    <span className={`text-right text-[13px] ${isDominant ? "font-semibold text-[#E6EAF2]" : "font-medium text-[#E6EAF2]"}`}>
-                      {item.percent}%
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </article>
       </div>
 
       <div className="panel overflow-hidden border-slate-800/90 bg-slate-950/70">
