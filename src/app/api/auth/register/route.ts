@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { registerUser } from "@/lib/auth-store";
+import { enforceRateLimit, getRequestClientIdentifier } from "@/lib/server/request-rate-limit";
 
 type RegisterBody = {
   email?: string;
@@ -10,8 +11,30 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+const REGISTER_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const REGISTER_RATE_LIMIT_MAX_ATTEMPTS = 5;
+
+function buildRateLimitResponse(retryAfterSeconds: number) {
+  const response = NextResponse.json(
+    { success: false, message: "Muitas tentativas de cadastro. Tente novamente em instantes." },
+    { status: 429 },
+  );
+  response.headers.set("Retry-After", String(retryAfterSeconds));
+  return response;
+}
+
 export async function POST(request: Request) {
   try {
+    const clientIdentifier = getRequestClientIdentifier(request);
+    const rateLimitResult = enforceRateLimit({
+      key: `auth:register:${clientIdentifier}`,
+      limit: REGISTER_RATE_LIMIT_MAX_ATTEMPTS,
+      windowMs: REGISTER_RATE_LIMIT_WINDOW_MS,
+    });
+    if (!rateLimitResult.allowed) {
+      return buildRateLimitResponse(rateLimitResult.retryAfterSeconds);
+    }
+
     const body = (await request.json()) as RegisterBody;
     const email = String(body.email || "").trim().toLowerCase();
     const senha = String(body.senha || "");
@@ -55,4 +78,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

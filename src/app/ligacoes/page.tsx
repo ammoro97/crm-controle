@@ -162,6 +162,7 @@ const CALLS_PAGE_SIZE = 50;
 const CALLS_HISTORY_LIMIT = 1000;
 const CALLS_HISTORY_MAX_PAGES = Math.ceil(CALLS_HISTORY_LIMIT / CALLS_PAGE_SIZE);
 const CALLS_REFRESH_THROTTLE_MS = 45_000;
+const API4_SYNC_THROTTLE_MS = 120_000;
 const LIGACOES_DEBUG_ENABLED = process.env.NEXT_PUBLIC_DEBUG_LIGACOES === "1";
 const CALLS_RUNTIME_CACHE_STORAGE_KEY = "crm:ligacoes:runtime-cache:v1";
 const FINALIZACAO_FILTER_ALL = "all";
@@ -1276,6 +1277,7 @@ export default function LigacoesPage() {
   const internalHistoryRunIdRef = useRef(0);
   const wrapupsSignatureRef = useRef(buildWrapupsSignature(wrapups));
   const lastSuccessfulLoadAtRef = useRef<number>(initialRuntimeCache?.updatedAt || 0);
+  const lastApi4SyncAtRef = useRef<number>(0);
   const historyHydratedRef = useRef<boolean>(
     initialHistoryHydrated,
   );
@@ -1371,23 +1373,33 @@ export default function LigacoesPage() {
         return ac.signal;
       };
       const combinedSignal = buildCombinedSignal();
+      const shouldSyncApi4Now =
+        mode === "full" ||
+        reason.startsWith("manual-refresh") ||
+        Date.now() - lastApi4SyncAtRef.current >= API4_SYNC_THROTTLE_MS;
 
-      const api4SyncPromise = (async () => {
-        try {
-          const response = await fetch(`/api/api4com/calls?page=1&maxPages=1&maxItems=${CALLS_PAGE_SIZE}`, {
-            method: "GET",
-            cache: "no-store",
-            signal: combinedSignal,
-          });
-          const data = (await response.json()) as CallsApiResponse;
-          return { ok: response.ok && Boolean(data.ok), data };
-        } catch (api4SyncError) {
-          if (api4SyncError instanceof DOMException && api4SyncError.name === "AbortError") {
-            return { ok: false, data: { ok: false } as CallsApiResponse };
-          }
-          return { ok: false, data: { ok: false } as CallsApiResponse };
-        }
-      })();
+      const api4SyncPromise = shouldSyncApi4Now
+        ? (async () => {
+            try {
+              const response = await fetch(`/api/api4com/calls?page=1&maxPages=1&maxItems=${CALLS_PAGE_SIZE}`, {
+                method: "GET",
+                cache: "no-store",
+                signal: combinedSignal,
+              });
+              const data = (await response.json()) as CallsApiResponse;
+              const ok = response.ok && Boolean(data.ok);
+              if (ok) {
+                lastApi4SyncAtRef.current = Date.now();
+              }
+              return { ok, data, skipped: false };
+            } catch (api4SyncError) {
+              if (api4SyncError instanceof DOMException && api4SyncError.name === "AbortError") {
+                return { ok: false, data: { ok: false } as CallsApiResponse, skipped: false };
+              }
+              return { ok: false, data: { ok: false } as CallsApiResponse, skipped: false };
+            }
+          })()
+        : Promise.resolve({ ok: false, data: { ok: false } as CallsApiResponse, skipped: true });
 
       const internalResponse = await fetch("/api/ligacoes?page=0", {
         method: "GET",
@@ -1514,6 +1526,7 @@ export default function LigacoesPage() {
         reason,
         mode,
         externalOk: api4Sync.ok,
+        externalSkipped: api4Sync.skipped,
         externalCount: Array.isArray(api4Sync.data.items) ? api4Sync.data.items.length : 0,
         internalCount: internalMapById.size,
         renderedCount: visibleRows.length,

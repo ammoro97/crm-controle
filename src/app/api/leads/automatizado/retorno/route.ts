@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { savePendingAutomatedLeads } from "@/lib/leads-automatizado-store";
 import {
   LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE,
@@ -7,6 +8,8 @@ import {
 import { distributeLeadOwnersFromDatabase } from "@/lib/lead-owner-distribution-server";
 import { resolveLeadExpedienteStatusFromHorario } from "@/lib/lead-expediente";
 import { readLeadsCollection } from "@/lib/leads-customers-store";
+import { getWebhookOutConfig } from "@/lib/webhook-out-config-store";
+import { CALL_ANALYSIS_SECRET_HEADER } from "@/types/call-analysis";
 import { Lead } from "@/types/crm";
 
 export type OutboundLeadPayload = {
@@ -43,6 +46,18 @@ type RetornoBody = {
 };
 
 type HorarioItem = { dia?: unknown; horario?: unknown };
+const REQUIRE_RETORNO_SECRET = String(process.env.LEADS_AUTOMATIZADO_REQUIRE_SECRET || "").trim() === "1";
+
+function hasValidRetornoSecret(request: Request, expectedSecret: string): boolean {
+  if (!expectedSecret) return false;
+  const receivedSecret = String(request.headers.get(CALL_ANALYSIS_SECRET_HEADER) || "").trim();
+  const expectedBuffer = Buffer.from(expectedSecret, "utf8");
+  const receivedBuffer = Buffer.from(receivedSecret, "utf8");
+  if (expectedBuffer.length === 0 || expectedBuffer.length !== receivedBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(expectedBuffer, receivedBuffer);
+}
 
 function normalizeHorarioFuncionamento(value: unknown): string | null {
   if (!value) return null;
@@ -161,6 +176,21 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
+    const config = await getWebhookOutConfig();
+    const expectedSecret = String(process.env.LEADS_AUTOMATIZADO_WEBHOOK_SECRET || config.secret || "").trim();
+    if (expectedSecret && !hasValidRetornoSecret(request, expectedSecret)) {
+      return NextResponse.json(
+        { success: false, message: "Assinatura invalida no retorno automatizado." },
+        { status: 401 },
+      );
+    }
+    if (!expectedSecret && REQUIRE_RETORNO_SECRET) {
+      return NextResponse.json(
+        { success: false, message: "Secret de webhook nao configurado para retorno automatizado." },
+        { status: 401 },
+      );
+    }
+
     const raw = await request.json();
 
     // Aceita corpo como array direto [ {...}, {...} ] ou como objeto { leads: [...] }
@@ -181,22 +211,9 @@ export async function POST(request: Request): Promise<NextResponse> {
           : [];
     }
 
-    console.log("[RETORNO] payload_bruto", {
-      requestId,
-      tipoAutomacao,
-      rawCount: rawLeads.length,
-      primeiraEmpresa: rawLeads[0]?.nome ?? rawLeads[0]?.empresa ?? "(vazio)",
-    });
-
     const leads: Lead[] = rawLeads
       .map((item) => buildOutboundLead(item, tipoAutomacao))
       .filter((lead): lead is Lead => lead !== null);
-
-    console.log("[RETORNO] leads_normalizados", {
-      count: leads.length,
-      ids: leads.map((l) => l.id),
-      empresas: leads.map((l) => l.company),
-    });
 
     if (leads.length === 0) {
       return NextResponse.json(
@@ -217,8 +234,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       leads: distributed.leads,
       savedAt: new Date().toISOString(),
     });
-
-    console.log("[RETORNO] salvo_pendente", { requestId, count: leads.length });
 
     return NextResponse.json({ success: true, count: distributed.leads.length });
   } catch (error) {

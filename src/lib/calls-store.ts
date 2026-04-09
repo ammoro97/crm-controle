@@ -105,6 +105,15 @@ function normalizeCallLog(input: Partial<CallLog> & Pick<CallLog, "id">): CallLo
   };
 }
 
+function buildComparableCallLog(call: CallLog): Omit<CallLog, "updatedAt"> {
+  const { updatedAt: _ignoredUpdatedAt, ...comparable } = call;
+  return comparable;
+}
+
+function hasCallLogChanged(current: CallLog, candidate: CallLog): boolean {
+  return JSON.stringify(buildComparableCallLog(current)) !== JSON.stringify(buildComparableCallLog(candidate));
+}
+
 /**
  * Regra centralizada: se causaDesligamento === "Atendida" (exato, API4) → atendida.
  * Não depende de outros campos. Um único ponto de verdade.
@@ -231,11 +240,19 @@ export async function upsertCallLogs(
       externalCallId: input.externalCallId ?? current.externalCallId ?? null,
       sessionId: input.sessionId ?? current.sessionId ?? null,
       createdAt: current.createdAt,
-      updatedAt: now,
+      updatedAt: current.updatedAt,
     });
-    logs[index] = merged;
-    records.push(merged);
-    changedRecords.push(merged);
+    if (!hasCallLogChanged(current, merged)) {
+      records.push(current);
+      continue;
+    }
+    const changedRecord: CallLog = {
+      ...merged,
+      updatedAt: now,
+    };
+    logs[index] = changedRecord;
+    records.push(changedRecord);
+    changedRecords.push(changedRecord);
     updatedCount += 1;
     changed = true;
   }
@@ -276,13 +293,20 @@ export async function updateCall(
     externalCallId: patch.externalCallId ?? current.externalCallId ?? null,
     sessionId: patch.sessionId ?? current.sessionId ?? null,
     createdAt: current.createdAt,
-    updatedAt: now,
+    updatedAt: current.updatedAt,
   });
+  if (!hasCallLogChanged(current, merged)) {
+    return current;
+  }
+  const changedRecord: CallLog = {
+    ...merged,
+    updatedAt: now,
+  };
 
-  logs[index] = merged;
+  logs[index] = changedRecord;
   sortCallLogsInPlace(logs);
-  await persistCallLogs([merged]);
-  return merged;
+  await persistCallLogs([changedRecord]);
+  return changedRecord;
 }
 
 export async function findLeadByPhone(phone?: string | null) {

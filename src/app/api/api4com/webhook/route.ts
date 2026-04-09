@@ -86,7 +86,8 @@ function extractCallId(payload: Api4ComWebhookPayload) {
 
 function verifyWebhookSignature(request: Request, body: string): boolean {
   const secret = process.env.API4COM_WEBHOOK_SECRET;
-  if (!secret) return true; // signature check is opt-in until configured
+  const strictMode = String(process.env.API4COM_WEBHOOK_STRICT || "").trim() === "1";
+  if (!secret) return !strictMode;
 
   const receivedSig = String(
     request.headers.get("x-api4com-signature") ||
@@ -125,7 +126,7 @@ export async function POST(request: Request) {
     let payload: Api4ComWebhookPayload;
     try {
       payload = JSON.parse(rawBody) as Api4ComWebhookPayload;
-    } catch {
+    } catch (_parseError) {
       return NextResponse.json(
         { success: false, message: "Payload invalido." },
         { status: 400 },

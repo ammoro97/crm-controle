@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { requireAuth } from "@/lib/require-auth";
 
@@ -7,8 +8,36 @@ const STORAGE_KEYS_TO_CLEAR = [
   "crm.leads.finalizations.v1",
   "crm.calls.wrapups.v1",
 ];
+const DEV_RESET_SECRET_HEADER = "x-dev-reset-secret";
 
-export async function POST() {
+function isDevResetEnabled(): boolean {
+  const value = String(process.env.ENABLE_DEV_RESET_ENDPOINT || "")
+    .trim()
+    .toLowerCase();
+  return value === "1" || value === "true";
+}
+
+function hasValidDevResetSecret(request: Request): boolean {
+  const expectedSecret = String(process.env.DEV_RESET_SECRET || "").trim();
+  if (!expectedSecret) return false;
+  const receivedSecret = String(request.headers.get(DEV_RESET_SECRET_HEADER) || "").trim();
+  const expectedBuffer = Buffer.from(expectedSecret, "utf8");
+  const receivedBuffer = Buffer.from(receivedSecret, "utf8");
+  if (expectedBuffer.length === 0 || expectedBuffer.length !== receivedBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(expectedBuffer, receivedBuffer);
+}
+
+export async function POST(request: Request) {
+  if (!isDevResetEnabled()) {
+    return NextResponse.json({ success: false, message: "Endpoint indisponivel." }, { status: 404 });
+  }
+
+  if (!hasValidDevResetSecret(request)) {
+    return NextResponse.json({ success: false, message: "Nao autorizado." }, { status: 401 });
+  }
+
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 

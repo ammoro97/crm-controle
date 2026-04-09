@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSession, validateCredentials } from "@/lib/auth-store";
+import { enforceRateLimit, getRequestClientIdentifier } from "@/lib/server/request-rate-limit";
 
 type LoginBody = {
   email?: string;
@@ -7,9 +8,30 @@ type LoginBody = {
 };
 
 const SESSION_COOKIE = "crm_auth_token";
+const LOGIN_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 15;
+
+function buildRateLimitResponse(retryAfterSeconds: number) {
+  const response = NextResponse.json(
+    { success: false, message: "Muitas tentativas de login. Tente novamente em instantes." },
+    { status: 429 },
+  );
+  response.headers.set("Retry-After", String(retryAfterSeconds));
+  return response;
+}
 
 export async function POST(request: Request) {
   try {
+    const clientIdentifier = getRequestClientIdentifier(request);
+    const rateLimitResult = enforceRateLimit({
+      key: `auth:login:${clientIdentifier}`,
+      limit: LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
+      windowMs: LOGIN_RATE_LIMIT_WINDOW_MS,
+    });
+    if (!rateLimitResult.allowed) {
+      return buildRateLimitResponse(rateLimitResult.retryAfterSeconds);
+    }
+
     const body = (await request.json()) as LoginBody;
     const email = String(body.email || "").trim();
     const senha = String(body.senha || "");
