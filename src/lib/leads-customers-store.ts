@@ -18,6 +18,18 @@ const CUSTOMERS_TABLE: LeadTableName = "crm_customers";
 const DELETE_BATCH_SIZE = 500;
 const READ_PAGE_SIZE = 1_000;
 const MAX_READ_PAGES = 200;
+const COLLECTION_CACHE_TTL_MS = 20_000;
+
+type CollectionCacheState = {
+  value: Lead[];
+  loadedAt: number;
+  inFlight: Promise<Lead[] | null> | null;
+};
+
+const collectionCacheByTable: Record<LeadTableName, CollectionCacheState> = {
+  crm_leads: { value: [], loadedAt: 0, inFlight: null },
+  crm_customers: { value: [], loadedAt: 0, inFlight: null },
+};
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -93,6 +105,18 @@ function dedupeByLeadId(leads: Lead[]): Lead[] {
     map.set(normalizedId, { ...lead, id: normalizedId });
   });
   return Array.from(map.values());
+}
+
+function cloneLeadArray(leads: Lead[]): Lead[] {
+  return leads.map((lead) => ({ ...lead }));
+}
+
+function invalidateCollectionCache(tableName: LeadTableName) {
+  collectionCacheByTable[tableName] = {
+    value: [],
+    loadedAt: 0,
+    inFlight: null,
+  };
 }
 
 function parseLeadTableRows(value: unknown): LeadTableRow[] {
@@ -278,8 +302,31 @@ async function writeToTable(tableName: LeadTableName, leads: Lead[]): Promise<bo
 }
 
 async function readCollection(tableName: LeadTableName): Promise<Lead[]> {
-  const tableLeads = await readFromTable(tableName);
-  return tableLeads ?? [];
+  const cacheState = collectionCacheByTable[tableName];
+  const cacheFresh = cacheState.loadedAt > 0 && Date.now() - cacheState.loadedAt <= COLLECTION_CACHE_TTL_MS;
+  if (cacheFresh) {
+    return cloneLeadArray(cacheState.value);
+  }
+
+  if (!cacheState.inFlight) {
+    cacheState.inFlight = readFromTable(tableName);
+  }
+
+  const tableLeads = await cacheState.inFlight.finally(() => {
+    cacheState.inFlight = null;
+  });
+
+  if (tableLeads && tableLeads.length >= 0) {
+    cacheState.value = cloneLeadArray(tableLeads);
+    cacheState.loadedAt = Date.now();
+    return cloneLeadArray(cacheState.value);
+  }
+
+  if (cacheState.loadedAt > 0) {
+    return cloneLeadArray(cacheState.value);
+  }
+
+  return [];
 }
 
 async function writeCollection(tableName: LeadTableName, leads: Lead[]) {
@@ -298,6 +345,12 @@ async function writeCollection(tableName: LeadTableName, leads: Lead[]) {
   if (!tableWriteOk) {
     throw new Error(`SUPABASE_REQUIRED_FOR_${tableName.toUpperCase()}_PERSISTENCE`);
   }
+
+  collectionCacheByTable[tableName] = {
+    value: cloneLeadArray(normalized),
+    loadedAt: Date.now(),
+    inFlight: null,
+  };
 }
 
 export async function readLeadsCollection() {
@@ -314,9 +367,9 @@ export async function readLeadsCollection() {
 export async function readLeadsPage(options: {
   limit: number;
   offset: number;
-}): Promise<{ leads: Lead[]; hasMore: boolean }> {
+}): Promise<{ leads: Lead[]; hasMore: boolean; sourceHealthy: boolean }> {
   const admin = getSupabaseAdmin();
-  if (!admin) return { leads: [], hasMore: false };
+  if (!admin) return { leads: [], hasMore: false, sourceHealthy: false };
 
   const fetchLimit = options.limit + 1; // +1 para detectar hasMore sem COUNT
   const startedAt = Date.now();
@@ -337,21 +390,21 @@ export async function readLeadsPage(options: {
 
     if (error) {
       reportLeadTableError(`page error offset=${options.offset} elapsed=${Date.now() - startedAt}ms`, error.message);
-      return { leads: [], hasMore: false };
+      return { leads: [], hasMore: false, sourceHealthy: false };
     }
 
     const rows = parseLeadTableRows(data as unknown);
     const hasMore = rows.length > options.limit;
     const pageRows = hasMore ? rows.slice(0, options.limit) : rows;
 
-    return { leads: toLeadsFromRows(pageRows), hasMore };
+    return { leads: toLeadsFromRows(pageRows), hasMore, sourceHealthy: true };
   } catch (err) {
     const isTimeout = err instanceof Error && err.message.startsWith("TIMEOUT:");
     reportLeadTableError(
       `page ${isTimeout ? "timeout" : "exception"} offset=${options.offset} elapsed=${Date.now() - startedAt}ms`,
       isTimeout ? "" : err,
     );
-    return { leads: [], hasMore: false };
+    return { leads: [], hasMore: false, sourceHealthy: false };
   }
 }
 
@@ -372,6 +425,7 @@ export async function deleteLeadsFromCollection(ids: string[]): Promise<void> {
   const admin = getSupabaseAdmin();
   if (!admin) return;
   await deleteLeadIds(admin, LEADS_TABLE, ids);
+  invalidateCollectionCache(LEADS_TABLE);
 }
 
 export async function deleteCustomersFromCollection(ids: string[]): Promise<void> {
@@ -379,6 +433,7 @@ export async function deleteCustomersFromCollection(ids: string[]): Promise<void
   const admin = getSupabaseAdmin();
   if (!admin) return;
   await deleteLeadIds(admin, CUSTOMERS_TABLE, ids);
+  invalidateCollectionCache(CUSTOMERS_TABLE);
 }
 
 export type LeadArchiveEntry = {
@@ -422,4 +477,5 @@ export async function archiveLeadsToHistory(entries: LeadArchiveEntry[]): Promis
 
   // Só deleta da tabela ativa após confirmar o insert
   await deleteLeadIds(admin, LEADS_TABLE, entries.map((e) => e.lead.id));
+  invalidateCollectionCache(LEADS_TABLE);
 }

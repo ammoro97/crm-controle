@@ -259,6 +259,17 @@ export async function GET(request: NextRequest) {
       isFirstPage ? readDataFile<PostCallWrapup[]>(WRAPUPS_FILE, []) : Promise.resolve([]),
     ]);
 
+    if (!leadsResult.sourceHealthy) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Fonte de dados de leads indisponivel no momento. Tente novamente em instantes.",
+          code: "LEADS_SOURCE_UNAVAILABLE",
+        },
+        { status: 503 },
+      );
+    }
+
     return NextResponse.json({
       success: true,
       snapshots: {
