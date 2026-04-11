@@ -17,7 +17,13 @@ import {
   subscribeLeadsSnapshot,
   subscribeMeetingsSnapshot,
 } from "@/lib/crm-data-store";
-import { getLeadContacts, getLeadEmails, getLeadNames, getLeadPhones } from "@/lib/lead-contact-utils";
+import {
+  getLeadContacts,
+  getLeadEmails,
+  getLeadNames,
+  getLeadPhones,
+  parseLeadPhoneColumnValue,
+} from "@/lib/lead-contact-utils";
 import {
   LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE,
   LeadOwnerDistributionError,
@@ -59,8 +65,9 @@ type ImportedLeadRow = {
   socios: string;
   company: string;
   phone: string;
-  phoneGoogle: string;
-  phoneCnpj: string;
+  phones: string[];
+  phoneGoogle: string[];
+  phoneCnpj: string[];
   email: string;
   site: string;
   rlSite: string;
@@ -593,7 +600,9 @@ function isSameDashboardLayoutItems(a: DashboardWidgetLayoutItem[], b: Dashboard
 function normalizeLead(lead: Lead): Lead {
   const names = getLeadNames(lead);
   const contacts = getLeadContacts(lead);
-  const phones = getLeadPhones(lead);
+  const phones = uniqPhones(getLeadPhones(lead));
+  const telefoneGoogle = parseLeadPhoneColumnValue(lead.telefone_google);
+  const telefoneCnpj = parseLeadPhoneColumnValue(lead.telefone_cnpj);
   const emails = getLeadEmails(lead);
   return {
     ...lead,
@@ -602,6 +611,8 @@ function normalizeLead(lead: Lead): Lead {
     contacts,
     phone: phones[0] || "",
     phones,
+    telefone_google: telefoneGoogle.length > 0 ? telefoneGoogle : null,
+    telefone_cnpj: telefoneCnpj.length > 0 ? telefoneCnpj : null,
     email: emails[0] || "",
     emails,
     firstContactDate: lead.firstContactDate ?? "",
@@ -853,8 +864,9 @@ function buildImportedLeadRow(overrides: Partial<ImportedLeadRow>): ImportedLead
     socios: "",
     company: "",
     phone: "",
-    phoneGoogle: "",
-    phoneCnpj: "",
+    phones: [],
+    phoneGoogle: [],
+    phoneCnpj: [],
     email: "",
     site: "",
     rlSite: "",
@@ -894,6 +906,37 @@ function sanitizeImportedSocios(values: string[], company?: string): string[] {
   return next;
 }
 
+function normalizePhoneNumber(value?: string | null): string {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function uniqPhones(values: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+
+  for (const raw of values) {
+    const value = String(raw || "").trim();
+    if (!value) continue;
+    const key = normalizePhoneNumber(value) || normalizeQueryText(value);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    next.push(value);
+  }
+
+  return next;
+}
+
+function parseImportedPhones(value?: string | null): string[] {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  return uniqPhones(
+    raw
+      .split(/[\n\r|;,]+/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+}
+
 function parseRowsMatrix(matrix: string[][]): ImportedLeadRow[] {
   if (matrix.length === 0) return [];
 
@@ -921,13 +964,17 @@ function parseRowsMatrix(matrix: string[][]): ImportedLeadRow[] {
       if (!hasHeader) {
         const company = String(cols[1] || "").trim();
         const sociosList = sanitizeImportedSocios([String(cols[0] || "").trim()], company);
-        const phoneGoogle = String(cols[2] || "").trim();
+        const phoneGoogle = parseImportedPhones(String(cols[2] || "").trim());
+        const phoneCnpj: string[] = [];
+        const phones = uniqPhones([...phoneGoogle, ...phoneCnpj]);
         return buildImportedLeadRow({
           name: String(cols[0] || "").trim(),
           socios: sociosList.join(", "),
           company,
-          phone: phoneGoogle,
+          phone: phones[0] || "",
+          phones,
           phoneGoogle,
+          phoneCnpj,
           email: String(cols[3] || "").trim(),
           source: String(cols[4] || "").trim(),
           owner: String(cols[5] || "").trim(),
@@ -947,15 +994,28 @@ function parseRowsMatrix(matrix: string[][]): ImportedLeadRow[] {
         company,
       );
       const socios = sociosList.join(", ");
-      const phoneGoogle = readImportColumn(cols, headerIndexByKey, ["telefone google", "telefone_google", "phone google", "telefone"], 2);
-      const phoneCnpj = readImportColumn(cols, headerIndexByKey, ["telefone cnpj", "telefone_cnpj", "phone cnpj"]);
-      const phone = phoneGoogle || phoneCnpj || readImportColumn(cols, headerIndexByKey, ["telefone", "phone"], 2);
+      const phoneGoogleRaw = readImportColumn(cols, headerIndexByKey, ["telefone google", "telefone_google", "phone google"]);
+      const phoneCnpjRaw = readImportColumn(cols, headerIndexByKey, ["telefone cnpj", "telefone_cnpj", "phone cnpj"]);
+      const genericPhoneRaw = readImportColumn(cols, headerIndexByKey, ["telefone", "phone"], 2);
+
+      const phoneGoogleParsed = parseImportedPhones(phoneGoogleRaw);
+      const phoneCnpj = parseImportedPhones(phoneCnpjRaw);
+      const genericPhones = parseImportedPhones(genericPhoneRaw);
+      const phoneGoogle =
+        phoneGoogleParsed.length > 0
+          ? phoneGoogleParsed
+          : phoneCnpj.length === 0
+            ? genericPhones
+            : [];
+      const phones = uniqPhones([...phoneGoogle, ...phoneCnpj, ...genericPhones]);
+      const phone = phones[0] || "";
 
       return buildImportedLeadRow({
         name: socios || readImportColumn(cols, headerIndexByKey, ["nome"], 0),
         socios,
         company,
         phone,
+        phones,
         phoneGoogle,
         phoneCnpj,
         email: readImportColumn(cols, headerIndexByKey, ["email", "e-mail"], 3),
@@ -978,7 +1038,16 @@ function parseRowsMatrix(matrix: string[][]): ImportedLeadRow[] {
         status: normalizeLeadStatus(readImportColumn(cols, headerIndexByKey, ["status"], 8) || "Novo"),
       });
     })
-    .filter((row) => row.name || row.company || row.phone || row.email || row.phoneGoogle || row.phoneCnpj);
+    .filter(
+      (row) =>
+        row.name ||
+        row.company ||
+        row.phone ||
+        row.email ||
+        row.phoneGoogle.length > 0 ||
+        row.phoneCnpj.length > 0 ||
+        row.phones.length > 0,
+    );
 }
 
 async function parseLeadFile(file: File): Promise<ImportedLeadRow[]> {
@@ -1013,19 +1082,23 @@ async function parseLeadFile(file: File): Promise<ImportedLeadRow[]> {
   throw new Error("UNSUPPORTED_FILE_TYPE");
 }
 
-function normalizePhone(value: string): string {
-  return value.replace(/\D/g, "");
+function normalizePhone(value?: string | null): string {
+  return String(value || "").replace(/\D/g, "");
 }
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function buildRowIdentity(row: Pick<ImportedLeadRow, "email" | "phone">): string {
-  const email = normalizeEmail(row.email);
+function buildRowIdentity(row: { email?: string | null; phone?: string | null; phones?: string[] | null }): string {
+  const email = normalizeEmail(String(row.email || ""));
   if (email) return `email:${email}`;
-  const phone = normalizePhone(row.phone);
-  if (phone) return `phone:${phone}`;
+  const candidatePhones =
+    Array.isArray(row.phones) && row.phones.length > 0 ? row.phones : [String(row.phone || "")];
+  for (const candidate of candidatePhones) {
+    const phone = normalizePhone(candidate);
+    if (phone) return `phone:${phone}`;
+  }
   return "";
 }
 
@@ -1456,8 +1529,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         normalizeQueryText(lead.company),
         normalizeQueryText(lead.phone),
         ...getLeadPhones(lead).map((phone) => normalizeQueryText(phone)),
-        normalizeQueryText(lead.telefone_google || ""),
-        normalizeQueryText(lead.telefone_cnpj || ""),
+        ...parseLeadPhoneColumnValue(lead.telefone_google).map((phone) => normalizeQueryText(phone)),
+        ...parseLeadPhoneColumnValue(lead.telefone_cnpj).map((phone) => normalizeQueryText(phone)),
         normalizeQueryText(lead.email),
         ...getLeadEmails(lead).map((email) => normalizeQueryText(email)),
         normalizeQueryText(lead.nome_fantasia || ""),
@@ -1887,7 +1960,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
 
     return importRows.map((row) => {
       if (!row.name.trim()) return { ...row, statusType: "invalida", statusLabel: "Invalida: nome obrigatorio" };
-      if (!row.phone.trim() && !row.email.trim()) {
+      if (row.phones.length === 0 && !row.email.trim()) {
         return { ...row, statusType: "invalida", statusLabel: "Invalida: telefone ou email obrigatorio" };
       }
 
@@ -2280,9 +2353,9 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           .filter(Boolean),
         row.company,
       );
-      const phoneGoogle = String(row.phoneGoogle || row.phone || "").trim();
-      const phoneCnpj = String(row.phoneCnpj || "").trim();
-      const phones = Array.from(new Set([phoneGoogle, phoneCnpj, row.phone].map((value) => String(value || "").trim()).filter(Boolean)));
+      const phoneGoogle = uniqPhones(row.phoneGoogle || []);
+      const phoneCnpj = uniqPhones(row.phoneCnpj || []);
+      const phones = uniqPhones([...(row.phones || []), ...phoneGoogle, ...phoneCnpj, String(row.phone || "").trim()]);
       const categoriasSecundarias = String(row.categoriasSecundarias || "")
         .split(/[|;,]/)
         .map((value) => value.trim())
@@ -2299,8 +2372,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         company: row.company || "-",
         phone: phones[0] || "",
         phones,
-        telefone_google: phoneGoogle || null,
-        telefone_cnpj: phoneCnpj || null,
+        telefone_google: phoneGoogle.length > 0 ? phoneGoogle : null,
+        telefone_cnpj: phoneCnpj.length > 0 ? phoneCnpj : null,
         email: row.email,
         site: String(row.site || "").trim() || null,
         rl_site: String(row.rlSite || "").trim() || null,

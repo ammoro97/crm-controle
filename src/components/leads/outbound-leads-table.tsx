@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Modal } from "@/components/ui/modal";
-import { getLeadPhoneItems, getLeadPhones } from "@/lib/lead-contact-utils";
+import { getLeadPhones } from "@/lib/lead-contact-utils";
 import { resolveLeadExpedienteStatusFromHorario } from "@/lib/lead-expediente";
 import { resolveResponsavelFromUser, resolveResponsavelFromUserAsync } from "@/lib/responsavel-resolver";
 import {
@@ -169,19 +169,42 @@ function getLeadSociosLabel(lead: Lead): string {
   return socios.length > 0 ? socios.join(", ") : "-";
 }
 
-function getLeadTelefoneGoogle(lead: Lead): string {
-  const explicit = normalizePhoneValue(lead.telefone_google);
-  if (explicit) return explicit;
-  const phones = getLeadPhones(lead);
-  return normalizePhoneValue(phones[0] || lead.phone || "");
+function uniqPhones(values: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const raw of values) {
+    const value = normalizePhoneValue(raw);
+    if (!value) continue;
+    const key = normalizePhoneDigits(value) || value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(value);
+  }
+  return next;
 }
 
-function getLeadTelefoneCnpj(lead: Lead): string {
-  const explicit = normalizePhoneValue(lead.telefone_cnpj);
-  if (explicit) return explicit;
-  const phones = getLeadPhones(lead);
-  const fallback = phones.find((phone) => !isSamePhoneValue(phone, getLeadTelefoneGoogle(lead))) || "";
-  return normalizePhoneValue(fallback);
+function parseLeadPhoneColumn(value?: string[] | string | null): string[] {
+  if (Array.isArray(value)) {
+    return uniqPhones(value.map((item) => String(item || "").trim()));
+  }
+
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+
+  return uniqPhones(
+    raw
+      .split(/[\n\r|;,]+/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+}
+
+function getLeadTelefoneGoogleList(lead: Lead): string[] {
+  return parseLeadPhoneColumn(lead.telefone_google);
+}
+
+function getLeadTelefoneCnpjList(lead: Lead): string[] {
+  return parseLeadPhoneColumn(lead.telefone_cnpj);
 }
 
 function getLeadRlSite(lead: Lead): string {
@@ -237,10 +260,6 @@ function isSamePhoneValue(left?: string | null, right?: string | null): boolean 
   const rightDigits = normalizePhoneDigits(right);
   if (leftDigits && rightDigits) return leftDigits === rightDigits;
   return normalizePhoneValue(left).toLowerCase() === normalizePhoneValue(right).toLowerCase();
-}
-
-function getDialablePhoneItemsForLead(lead: Lead) {
-  return getLeadPhoneItems(lead).filter((item) => isDialablePhone(item.value));
 }
 
 function formatNota(value?: number | string | null): string {
@@ -522,18 +541,6 @@ function extractDialCallId(payload: unknown): string | undefined {
   return walk(payload, 0);
 }
 
-function phoneQualityLabel(value?: string) {
-  if (value === "bom") return "Bom";
-  if (value === "ruim") return "Ruim";
-  return "Nao classificado";
-}
-
-function phoneQualityBadgeClass(value?: string) {
-  if (value === "bom") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
-  if (value === "ruim") return "border-rose-500/40 bg-rose-500/10 text-rose-300";
-  return "border-slate-600/80 bg-slate-700/40 text-slate-300";
-}
-
 const RESPONSAVEL_REQUIRED_MESSAGE =
   "Seu usuario ainda nao esta vinculado a um responsavel no CRM. Cadastre esse e-mail em Configuracoes > Responsaveis antes de realizar ligacoes.";
 const OUTBOUND_LEADS_PAGE_SIZE = 100;
@@ -564,6 +571,8 @@ export function OutboundLeadsTable({
   const [callFeedbackByLead, setCallFeedbackByLead] = useState<Record<string, CallFeedback>>({});
   const [responsavelMissingModalOpen, setResponsavelMissingModalOpen] = useState(false);
   const [phonePickerLead, setPhonePickerLead] = useState<Lead | null>(null);
+  const [phonePickerOptions, setPhonePickerOptions] = useState<string[]>([]);
+  const [phonePickerTitle, setPhonePickerTitle] = useState("Selecionar telefone");
   const [selectedDialPhone, setSelectedDialPhone] = useState("");
   // Referencia de tempo unificada — atualiza em intervalos e serve tanto para
   // expediente quanto para calculo de metricas (evita dois re-renders por ciclo)
@@ -587,8 +596,10 @@ export function OutboundLeadsTable({
       leads.map((lead) => ({
         lead,
         socios: getLeadSociosLabel(lead),
-        telefoneGoogle: getLeadTelefoneGoogle(lead),
-        telefoneCnpj: getLeadTelefoneCnpj(lead),
+        telefoneGoogleList: getLeadTelefoneGoogleList(lead),
+        telefoneCnpjList: getLeadTelefoneCnpjList(lead),
+        telefoneGoogleSort: getLeadTelefoneGoogleList(lead)[0] || "",
+        telefoneCnpjSort: getLeadTelefoneCnpjList(lead)[0] || "",
         rlSite: getLeadRlSite(lead),
         expediente: resolveLeadExpedienteStatusFromHorario(lead.horario_funcionamento, {
           referenceDate: tableReferenceDate,
@@ -622,8 +633,8 @@ export function OutboundLeadsTable({
         case "company":      cmp = (a.lead.company || "").localeCompare(b.lead.company || "", "pt-BR", { sensitivity: "base" }); break;
         case "socios":       cmp = (a.socios || "").localeCompare(b.socios || "", "pt-BR", { sensitivity: "base" }); break;
         case "owner":        cmp = (a.lead.owner || "").localeCompare(b.lead.owner || "", "pt-BR", { sensitivity: "base" }); break;
-        case "telefoneGoogle": cmp = sortByPhoneText(a.telefoneGoogle, b.telefoneGoogle); break;
-        case "telefoneCnpj": cmp = sortByPhoneText(a.telefoneCnpj, b.telefoneCnpj); break;
+        case "telefoneGoogle": cmp = sortByPhoneText(a.telefoneGoogleSort, b.telefoneGoogleSort); break;
+        case "telefoneCnpj": cmp = sortByPhoneText(a.telefoneCnpjSort, b.telefoneCnpjSort); break;
         case "expediente": {
           const order: Record<"Aberto" | "Fechado" | "Indefinido", number> = {
             Aberto: 0,
@@ -767,34 +778,22 @@ export function OutboundLeadsTable({
     }
   };
 
-  const requestDial = (lead: Lead, preferredPhone?: string) => {
-    const preferred = normalizePhoneValue(preferredPhone);
-    const dialablePhoneItems = getDialablePhoneItemsForLead(lead);
-    if (dialablePhoneItems.length === 0) {
-      if (isDialablePhone(preferred)) {
-        void callLead(lead, preferred);
-        return;
-      }
-      setCallFeedback(lead.id, { type: "error", message: "Lead sem telefone para discagem." });
+  const requestDial = (lead: Lead, columnPhones: string[], columnLabel: string) => {
+    const dialablePhones = uniqPhones(columnPhones).filter((phone) => isDialablePhone(phone));
+    if (dialablePhones.length === 0) {
+      setCallFeedback(lead.id, { type: "error", message: `Sem telefone valido em ${columnLabel}.` });
       return;
     }
 
-    const preferredValidPhone = preferred
-      ? dialablePhoneItems.find((item) => isSamePhoneValue(item.value, preferred))?.value
-      : "";
-
-    if (preferredValidPhone) {
-      void callLead(lead, preferredValidPhone);
-      return;
-    }
-
-    if (dialablePhoneItems.length === 1) {
-      void callLead(lead, dialablePhoneItems[0].value);
+    if (dialablePhones.length === 1) {
+      void callLead(lead, dialablePhones[0]);
       return;
     }
 
     setPhonePickerLead(lead);
-    setSelectedDialPhone(dialablePhoneItems[0].value);
+    setPhonePickerTitle(`Selecionar telefone (${columnLabel})`);
+    setPhonePickerOptions(dialablePhones);
+    setSelectedDialPhone(dialablePhones[0]);
   };
 
   useEffect(() => {
@@ -1031,16 +1030,16 @@ export function OutboundLeadsTable({
             </tr>
           </thead>
           <tbody>
-            {pagedRows.map(({ lead, socios, telefoneGoogle, telefoneCnpj, rlSite, expediente, metrics }) => {
+            {pagedRows.map(({ lead, socios, telefoneGoogleList, telefoneCnpjList, rlSite, expediente, metrics }) => {
               const hasBaseActivation =
                 mode === "callback"
                   ? metrics.callbackCalls > 0
                   : metrics.totalCalls > 0 || Boolean(String(lead.firstContactDate || "").trim());
 
-              const telefoneGoogleDisplay = normalizePhoneValue(telefoneGoogle) || "-";
-              const telefoneCnpjDisplay = normalizePhoneValue(telefoneCnpj) || "-";
-              const canDialGoogle = isDialablePhone(telefoneGoogleDisplay);
-              const canDialCnpj = isDialablePhone(telefoneCnpjDisplay);
+              const telefoneGoogleDisplay = telefoneGoogleList.length > 0 ? telefoneGoogleList : ["-"];
+              const telefoneCnpjDisplay = telefoneCnpjList.length > 0 ? telefoneCnpjList : ["-"];
+              const canDialGoogle = telefoneGoogleList.some((phone) => isDialablePhone(phone));
+              const canDialCnpj = telefoneCnpjList.some((phone) => isDialablePhone(phone));
 
               return (
                 <tr
@@ -1098,7 +1097,16 @@ export function OutboundLeadsTable({
                   </td>
                   <td className="px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <div className="flex w-[15rem] max-w-[15rem] items-center justify-between gap-2">
-                      <TruncatedCellText value={telefoneGoogleDisplay} fallback="-" widthClass="w-[9.5rem] max-w-[9.5rem]" />
+                      <div className="max-h-16 flex-1 space-y-1 overflow-y-auto pr-1">
+                        {telefoneGoogleDisplay.map((phone, index) => (
+                          <TruncatedCellText
+                            key={`${lead.id}-google-${phone}-${index}`}
+                            value={phone}
+                            fallback="-"
+                            widthClass="w-[9.5rem] max-w-[9.5rem]"
+                          />
+                        ))}
+                      </div>
                       <button
                         type="button"
                         className="min-w-[74px] rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1106,7 +1114,7 @@ export function OutboundLeadsTable({
                         onClick={(e) => {
                           e.stopPropagation();
                           if (!canDialGoogle) return;
-                          requestDial(lead, telefoneGoogleDisplay);
+                          requestDial(lead, telefoneGoogleList, "Telefone Google");
                         }}
                         title={!canDialGoogle ? "Telefone indisponivel para ligacao." : undefined}
                       >
@@ -1125,7 +1133,16 @@ export function OutboundLeadsTable({
                   </td>
                   <td className="px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <div className="flex w-[15rem] max-w-[15rem] items-center justify-between gap-2">
-                      <TruncatedCellText value={telefoneCnpjDisplay} fallback="-" widthClass="w-[9.5rem] max-w-[9.5rem]" />
+                      <div className="max-h-16 flex-1 space-y-1 overflow-y-auto pr-1">
+                        {telefoneCnpjDisplay.map((phone, index) => (
+                          <TruncatedCellText
+                            key={`${lead.id}-cnpj-${phone}-${index}`}
+                            value={phone}
+                            fallback="-"
+                            widthClass="w-[9.5rem] max-w-[9.5rem]"
+                          />
+                        ))}
+                      </div>
                       <button
                         type="button"
                         className="min-w-[74px] rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1133,7 +1150,7 @@ export function OutboundLeadsTable({
                         onClick={(e) => {
                           e.stopPropagation();
                           if (!canDialCnpj) return;
-                          requestDial(lead, telefoneCnpjDisplay);
+                          requestDial(lead, telefoneCnpjList, "Telefone CNPJ");
                         }}
                         title={!canDialCnpj ? "Telefone indisponivel para ligacao." : undefined}
                       >
@@ -1206,22 +1223,19 @@ export function OutboundLeadsTable({
       </Modal>
 
       <Modal
-        title="Selecionar telefone"
+        title={phonePickerTitle}
         open={Boolean(phonePickerLead)}
         onClose={() => {
           setPhonePickerLead(null);
+          setPhonePickerOptions([]);
+          setPhonePickerTitle("Selecionar telefone");
           setSelectedDialPhone("");
         }}
       >
         {phonePickerLead ? (
           <div className="space-y-3">
             {(() => {
-              const phoneItems = getDialablePhoneItemsForLead(phonePickerLead);
-              const fallbackPrimaryPhone = phoneItems[0]?.value || "";
-              const configuredPrimaryPhone = isDialablePhone(phonePickerLead.phone)
-                ? String(phonePickerLead.phone)
-                : fallbackPrimaryPhone;
-              const hasSelectedDialPhone = phoneItems.some((item) => isSamePhoneValue(item.value, selectedDialPhone));
+              const hasSelectedDialPhone = phonePickerOptions.some((item) => isSamePhoneValue(item, selectedDialPhone));
               return (
                 <>
             <p className="text-sm text-slate-200">
@@ -1234,42 +1248,25 @@ export function OutboundLeadsTable({
                 value={selectedDialPhone}
                 onChange={(e) => setSelectedDialPhone(e.target.value)}
               >
-                {phoneItems.length === 0 ? <option value="">Nenhum telefone valido</option> : null}
-                {phoneItems.map((item) => {
-                  const isPrimary = isSamePhoneValue(item.value, configuredPrimaryPhone);
-                  return (
-                    <option key={item.value} value={item.value}>
-                      {item.value} - {phoneQualityLabel(item.quality)}
-                      {isPrimary ? " - Principal" : ""}
-                    </option>
-                  );
-                })}
+                {phonePickerOptions.length === 0 ? <option value="">Nenhum telefone valido</option> : null}
+                {phonePickerOptions.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
               </select>
             </label>
             <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-border bg-slate-950/50 p-2">
-              {phoneItems.length === 0 ? (
+              {phonePickerOptions.length === 0 ? (
                 <p className="text-xs text-slate-400">Nenhum telefone valido para discagem neste lead.</p>
               ) : (
-                phoneItems.map((item) => {
-                  const isPrimary = isSamePhoneValue(item.value, configuredPrimaryPhone);
+                phonePickerOptions.map((item) => {
                   return (
                     <div
-                      key={`phone-quality-${item.value}`}
+                      key={`phone-picker-${item}`}
                       className="flex items-center justify-between gap-2 text-xs text-slate-200"
                     >
-                      <span className="font-mono">{item.value}</span>
-                      <div className="flex items-center gap-1.5">
-                        {isPrimary ? (
-                          <span className="rounded-full border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] text-sky-200">
-                            Principal
-                          </span>
-                        ) : null}
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] ${phoneQualityBadgeClass(item.quality)}`}
-                        >
-                          {phoneQualityLabel(item.quality)}
-                        </span>
-                      </div>
+                      <span className="font-mono">{item}</span>
                     </div>
                   );
                 })
@@ -1281,6 +1278,8 @@ export function OutboundLeadsTable({
                 className="btn-ghost h-9 px-3 py-1.5 text-xs"
                 onClick={() => {
                   setPhonePickerLead(null);
+                  setPhonePickerOptions([]);
+                  setPhonePickerTitle("Selecionar telefone");
                   setSelectedDialPhone("");
                 }}
               >
@@ -1290,11 +1289,13 @@ export function OutboundLeadsTable({
                 type="button"
                 className="btn-primary h-9 px-3 py-1.5 text-xs"
                 onClick={() => {
-                  const selectedPhone = phoneItems.find((item) => isSamePhoneValue(item.value, selectedDialPhone));
+                  const selectedPhone = phonePickerOptions.find((item) => isSamePhoneValue(item, selectedDialPhone));
                   if (!phonePickerLead || !selectedPhone) return;
                   const lead = phonePickerLead;
-                  const phone = selectedPhone.value;
+                  const phone = selectedPhone;
                   setPhonePickerLead(null);
+                  setPhonePickerOptions([]);
+                  setPhonePickerTitle("Selecionar telefone");
                   setSelectedDialPhone("");
                   void callLead(lead, phone);
                 }}

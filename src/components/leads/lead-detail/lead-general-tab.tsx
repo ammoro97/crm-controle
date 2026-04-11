@@ -50,94 +50,234 @@ function formatDateTimeBR(value?: string | null): string {
   return raw;
 }
 
-function resolveTelefoneGoogle(lead: Lead): string {
-  const explicit = String(lead.telefone_google || "").trim();
-  if (explicit) return explicit;
-
-  const phones = Array.isArray(lead.phones)
-    ? lead.phones.map((value) => String(value || "").trim()).filter(Boolean)
-    : [];
-  if (phones.length > 0) return phones[0];
-
-  const primary = String(lead.phone || "").trim();
-  return primary || "-";
+function splitMultiValueText(value: string): string[] {
+  return String(value || "")
+    .split(/[\n\r|;,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
-function resolveTelefoneCnpj(lead: Lead): string {
-  const explicit = String(lead.telefone_cnpj || "").trim();
-  if (explicit) return explicit;
-
-  const phones = Array.isArray(lead.phones)
-    ? lead.phones.map((value) => String(value || "").trim()).filter(Boolean)
-    : [];
-  if (phones.length > 1) return phones[1];
-
-  return "-";
+function normalizePhoneDigits(value?: string | null): string {
+  return String(value || "").replace(/\D/g, "");
 }
 
-function resolveCategoriasSecundarias(lead: Lead): string {
-  if (Array.isArray(lead.categorias_secundarias) && lead.categorias_secundarias.length > 0) {
-    return lead.categorias_secundarias.map((value) => String(value || "").trim()).filter(Boolean).join(", ") || "-";
+function uniqPhones(values: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+
+  for (const raw of values) {
+    const value = String(raw || "").trim();
+    if (!value) continue;
+    const key = normalizePhoneDigits(value) || value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(value);
   }
 
-  const raw = String(lead.categorias_secundarias || "").trim();
-  if (!raw) return "-";
+  return next;
+}
 
-  const values = raw
-    .split(/[|;,]/)
-    .map((value) => value.trim())
-    .filter(Boolean);
+function parsePhoneColumn(value?: string[] | string | null): string[] {
+  if (Array.isArray(value)) {
+    return uniqPhones(value.flatMap((item) => splitMultiValueText(String(item || ""))));
+  }
+  return uniqPhones(splitMultiValueText(String(value || "")));
+}
 
-  return values.length > 0 ? values.join(", ") : raw;
+function parseCategoriasSecundarias(value?: string[] | string | null): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => splitMultiValueText(String(item || "")));
+  }
+  return splitMultiValueText(String(value || ""));
+}
+
+function formatListForDisplay(values: string[]): string {
+  return values.length > 0 ? values.join("\n") : "-";
 }
 
 function SummaryField({
   label,
   value,
   fullWidth = false,
+  editable = false,
+  isEditing = false,
+  multiline = false,
+  inputType = "text",
+  onChange,
 }: {
   label: string;
   value: string;
   fullWidth?: boolean;
+  editable?: boolean;
+  isEditing?: boolean;
+  multiline?: boolean;
+  inputType?: "text" | "email";
+  onChange?: (value: string) => void;
 }) {
   return (
     <div className={`rounded-lg border border-border/80 bg-slate-950/40 px-3 py-2.5 ${fullWidth ? "md:col-span-2" : ""}`}>
       <p className="text-[11px] uppercase tracking-[0.09em] text-muted">{label}</p>
-      <p className="mt-1.5 whitespace-pre-line text-sm text-slate-100">{normalizeDisplay(value)}</p>
+      {editable && isEditing ? (
+        multiline ? (
+          <textarea
+            className="field mt-1.5 min-h-20 px-2.5 py-1.5 text-sm"
+            value={value}
+            onChange={(event) => onChange?.(event.target.value)}
+          />
+        ) : (
+          <input
+            className="field mt-1.5 h-9 px-2.5 py-1.5 text-sm"
+            type={inputType}
+            value={value}
+            onChange={(event) => onChange?.(event.target.value)}
+          />
+        )
+      ) : (
+        <p className="mt-1.5 whitespace-pre-line text-sm text-slate-100">{normalizeDisplay(value)}</p>
+      )}
     </div>
   );
 }
 
-export function LeadGeneralTab({ draftLead }: LeadGeneralTabProps) {
-  const telefoneGoogle = resolveTelefoneGoogle(draftLead);
-  const telefoneCnpj = resolveTelefoneCnpj(draftLead);
+export function LeadGeneralTab({ draftLead, isEditing, onDraftChange }: LeadGeneralTabProps) {
+  const telefoneGoogleList = parsePhoneColumn(draftLead.telefone_google);
+  const telefoneCnpjList = parsePhoneColumn(draftLead.telefone_cnpj);
+  const telefoneGoogleDisplay = formatListForDisplay(telefoneGoogleList);
+  const telefoneCnpjDisplay = formatListForDisplay(telefoneCnpjList);
   const nomeFantasia = String(draftLead.nome_fantasia || "").trim() || draftLead.company;
   const enderecoCompleto = String(draftLead.endereco_completo || "").trim() || draftLead.city;
   const categoriaPrincipal = String(draftLead.categoria_principal || "").trim() || draftLead.niche;
-  const categoriasSecundarias = resolveCategoriasSecundarias(draftLead);
+  const categoriasSecundariasList = parseCategoriasSecundarias(draftLead.categorias_secundarias);
+  const categoriasSecundariasDisplay = formatListForDisplay(categoriasSecundariasList);
+  const horarioFuncionamento = String(draftLead.horario_funcionamento || "").trim();
 
   return (
     <div className="space-y-4">
       <LeadSectionCard title="Identificacao">
         <div className="grid gap-2 md:grid-cols-2">
-          <SummaryField label="Email" value={draftLead.email} />
-          <SummaryField label="Site" value={String(draftLead.site || "")} />
+          <SummaryField
+            label="Email"
+            value={draftLead.email}
+            editable
+            isEditing={isEditing}
+            inputType="email"
+            onChange={(value) => onDraftChange({ ...draftLead, email: value })}
+          />
+          <SummaryField
+            label="Site"
+            value={String(draftLead.site || "")}
+            editable
+            isEditing={isEditing}
+            onChange={(value) => onDraftChange({ ...draftLead, site: value.trim() ? value.trim() : null })}
+          />
 
-          <SummaryField label="Telefone Google" value={telefoneGoogle} />
-          <SummaryField label="Telefone CNPJ" value={telefoneCnpj} />
+          <SummaryField
+            label="Telefone Google"
+            value={isEditing ? telefoneGoogleList.join("\n") : telefoneGoogleDisplay}
+            editable
+            isEditing={isEditing}
+            multiline
+            onChange={(value) => {
+              const nextGoogle = parsePhoneColumn(value);
+              const nextPhones = uniqPhones([...nextGoogle, ...telefoneCnpjList]);
+              onDraftChange({
+                ...draftLead,
+                telefone_google: nextGoogle.length > 0 ? nextGoogle : null,
+                phones: nextPhones,
+                phone: nextPhones[0] || "",
+              });
+            }}
+          />
+          <SummaryField
+            label="Telefone CNPJ"
+            value={isEditing ? telefoneCnpjList.join("\n") : telefoneCnpjDisplay}
+            editable
+            isEditing={isEditing}
+            multiline
+            onChange={(value) => {
+              const nextCnpj = parsePhoneColumn(value);
+              const nextPhones = uniqPhones([...telefoneGoogleList, ...nextCnpj]);
+              onDraftChange({
+                ...draftLead,
+                telefone_cnpj: nextCnpj.length > 0 ? nextCnpj : null,
+                phones: nextPhones,
+                phone: nextPhones[0] || "",
+              });
+            }}
+          />
 
           <SummaryField label="1o Contato" value={formatDateBR(draftLead.firstContactDate)} />
           <SummaryField label="Ultimo Contato" value={formatDateTimeBR(draftLead.lastInteraction)} />
 
           <SummaryField label="Cadastrado" value={formatDateBR(draftLead.entryDate)} />
-          <SummaryField label="Nome Fantasia" value={nomeFantasia} />
+          <SummaryField
+            label="Nome Fantasia"
+            value={nomeFantasia}
+            editable
+            isEditing={isEditing}
+            onChange={(value) =>
+              onDraftChange({
+                ...draftLead,
+                nome_fantasia: value.trim() ? value.trim() : null,
+              })
+            }
+          />
 
-          <SummaryField label="Endereco Completo" value={enderecoCompleto} fullWidth />
+          <SummaryField
+            label="Endereco Completo"
+            value={enderecoCompleto}
+            fullWidth
+            editable
+            isEditing={isEditing}
+            onChange={(value) =>
+              onDraftChange({
+                ...draftLead,
+                endereco_completo: value.trim() ? value.trim() : null,
+              })
+            }
+          />
 
-          <SummaryField label="Categoria Principal" value={categoriaPrincipal} />
-          <SummaryField label="Categorias Secundarias" value={categoriasSecundarias} />
+          <SummaryField
+            label="Categoria Principal"
+            value={categoriaPrincipal}
+            editable
+            isEditing={isEditing}
+            onChange={(value) =>
+              onDraftChange({
+                ...draftLead,
+                categoria_principal: value.trim() ? value.trim() : null,
+              })
+            }
+          />
+          <SummaryField
+            label="Categorias Secundarias"
+            value={isEditing ? categoriasSecundariasList.join("\n") : categoriasSecundariasDisplay}
+            editable
+            isEditing={isEditing}
+            multiline
+            onChange={(value) => {
+              const parsed = parseCategoriasSecundarias(value);
+              onDraftChange({
+                ...draftLead,
+                categorias_secundarias: parsed.length > 0 ? parsed : null,
+              });
+            }}
+          />
 
-          <SummaryField label="Horario de Funcionamento" value={String(draftLead.horario_funcionamento || "")} fullWidth />
+          <SummaryField
+            label="Horario de Funcionamento"
+            value={horarioFuncionamento}
+            fullWidth
+            editable
+            isEditing={isEditing}
+            multiline
+            onChange={(value) =>
+              onDraftChange({
+                ...draftLead,
+                horario_funcionamento: value.trim() ? value.trim() : null,
+              })
+            }
+          />
         </div>
       </LeadSectionCard>
     </div>

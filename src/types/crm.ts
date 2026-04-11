@@ -156,8 +156,8 @@ export type Lead = {
   horario_funcionamento?: string | null;
   expediente?: "Aberto" | "Fechado" | "Indefinido" | null;
   socios?: string[] | string | null;
-  telefone_google?: string | null;
-  telefone_cnpj?: string | null;
+  telefone_google?: string[] | string | null;
+  telefone_cnpj?: string[] | string | null;
   tempo_cnpj?: number | string | null;
   rl_site?: string | null;
   nome_fantasia?: string | null;

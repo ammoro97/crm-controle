@@ -35,6 +35,20 @@ function emailUniqKey(value: string) {
   return value.toLowerCase();
 }
 
+function splitMultiValueText(value: string): string[] {
+  return String(value || "")
+    .split(/[\n\r|;,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function parseLeadPhoneColumnValue(value?: string[] | string | null): string[] {
+  const rawValues = Array.isArray(value) ? value : [String(value || "")];
+  const exploded = rawValues.flatMap((item) => splitMultiValueText(String(item || "")));
+  const normalized = clean(exploded);
+  return uniqueBy(normalized, (item) => phoneUniqKey(item));
+}
+
 function normalizePhoneItems(items: LeadPhone[], fallbackQualityMap?: Map<string, LeadContactQuality | undefined>): LeadPhone[] {
   const normalized = items
     .map((item) => {
@@ -99,16 +113,26 @@ export function getLeadNames(lead: Lead): string[] {
 }
 
 export function getLeadPhoneItems(lead: Lead): LeadPhone[] {
+  const columnPhones = [
+    ...parseLeadPhoneColumnValue(lead.telefone_google),
+    ...parseLeadPhoneColumnValue(lead.telefone_cnpj),
+  ];
+  const columnPhoneItems = columnPhones.map((value) => ({ value }));
+
   if (Array.isArray(lead.phoneItems) && lead.phoneItems.length > 0) {
-    return normalizePhoneItems(lead.phoneItems);
+    return normalizePhoneItems([...lead.phoneItems, ...columnPhoneItems]);
   }
 
   const fromArray = Array.isArray(lead.phones) ? clean(lead.phones) : [];
-  if (fromArray.length > 0) {
-    return fromArray.map((value) => ({ value }));
+  if (fromArray.length > 0 || columnPhones.length > 0) {
+    return normalizePhoneItems([
+      ...fromArray.map((value) => ({ value })),
+      ...columnPhoneItems,
+    ]);
   }
 
-  return clean([lead.phone || ""]).map((value) => ({ value }));
+  const primaryItems = clean([lead.phone || ""]).map((value) => ({ value }));
+  return normalizePhoneItems([...primaryItems, ...columnPhoneItems]);
 }
 
 export function getLeadEmailItems(lead: Lead): LeadEmail[] {

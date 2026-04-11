@@ -39,10 +39,10 @@ type N8nLeadItem = {
   company?: string;
   empresa?: string;
   socios?: string | string[] | null;
-  phone?: string;
-  telefone?: string;
-  telefone_google?: string | null;
-  telefone_cnpj?: string | null;
+  phone?: string | string[] | null;
+  telefone?: string | string[] | null;
+  telefone_google?: string | string[] | null;
+  telefone_cnpj?: string | string[] | null;
   email?: string;
   city?: string;
   cidade?: string;
@@ -120,14 +120,35 @@ function getPayloadString(raw: N8nLeadItem, aliases: string[]): string {
 function getPayloadList(raw: N8nLeadItem, aliases: string[]): string[] {
   const value = getPayloadValue(raw, aliases);
   if (Array.isArray(value)) {
-    return value.map((item) => String(item || "").trim()).filter(Boolean);
+    return value
+      .flatMap((item) => String(item || "").split(/[\n\r|;,]+/))
+      .map((item) => item.trim())
+      .filter(Boolean);
   }
   const text = String(value || "").trim();
   if (!text) return [];
   return text
-    .split(/[|;,]/)
+    .split(/[\n\r|;,]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizePhoneDigits(value?: string | null): string {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function uniqPhones(values: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const raw of values) {
+    const value = String(raw || "").trim();
+    if (!value) continue;
+    const key = normalizePhoneDigits(value) || normalizePayloadKey(value);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    next.push(value);
+  }
+  return next;
 }
 
 function sanitizeSocios(rawSocios: string[], company?: string | null): string[] {
@@ -216,10 +237,16 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
   const name = responsavel || firstSocio || company;
   if (!name && !company) return null;
 
-  const telefoneGoogle = getPayloadString(raw, ["telefone_google", "telefone google", "phone_google"]);
-  const telefoneCnpj = getPayloadString(raw, ["telefone_cnpj", "telefone cnpj", "phone_cnpj"]);
-  const telefonePadrao = getPayloadString(raw, ["telefone", "phone", "celular", "whatsapp"]);
-  const allPhones = Array.from(new Set([telefoneGoogle, telefoneCnpj, telefonePadrao].filter(Boolean)));
+  const telefoneGoogleRaw = getPayloadList(raw, ["telefone_google", "telefone google", "phone_google"]);
+  const telefoneCnpj = uniqPhones(getPayloadList(raw, ["telefone_cnpj", "telefone cnpj", "phone_cnpj"]));
+  const telefonePadrao = uniqPhones(getPayloadList(raw, ["telefone", "phone", "celular", "whatsapp"]));
+  const telefoneGoogle =
+    telefoneGoogleRaw.length > 0
+      ? uniqPhones(telefoneGoogleRaw)
+      : telefoneCnpj.length === 0
+        ? telefonePadrao
+        : [];
+  const allPhones = uniqPhones([...telefoneGoogle, ...telefoneCnpj, ...telefonePadrao]);
   const primaryPhone = allPhones[0] || "";
 
   const email = getPayloadString(raw, ["email", "e-mail"]);
@@ -260,8 +287,8 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
     socios: socios.length > 0 ? socios : null,
     company,
     phone: primaryPhone,
-    telefone_google: telefoneGoogle || null,
-    telefone_cnpj: telefoneCnpj || null,
+    telefone_google: telefoneGoogle.length > 0 ? telefoneGoogle : null,
+    telefone_cnpj: telefoneCnpj.length > 0 ? telefoneCnpj : null,
     phones: allPhones,
     email,
     emails: [],
