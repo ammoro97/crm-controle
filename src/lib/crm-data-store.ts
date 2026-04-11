@@ -3,6 +3,7 @@
 import { normalizeMeetingsSnapshot } from "@/lib/agenda-events";
 import { Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
 import { applyServerWrapupsSnapshot, type PostCallWrapup } from "@/lib/post-call-flow";
+import { supabase } from "@/lib/supabase-client";
 
 type LeadArchiveEntry = { lead: Lead; meetings?: Meeting[]; finalizadoEm: string; motivo: string };
 
@@ -411,7 +412,7 @@ export function subscribeLeadFinalizationsSnapshot(listener: () => void) {
 // Background sync — cross-user realtime via polling + visibilitychange
 // ---------------------------------------------------------------------------
 
-const BACKGROUND_SYNC_INTERVAL_MS = 60_000;
+const BACKGROUND_SYNC_INTERVAL_MS = 300_000;
 const BACKGROUND_SYNC_MAX_BACKOFF_MS = 15 * 60_000;
 const BACKGROUND_SYNC_JITTER_MS = 12_000;
 const BACKGROUND_SYNC_LOCK_KEY = "crm:bg-sync:leader:v1";
@@ -543,6 +544,39 @@ function onVisibilityChange() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Realtime Broadcast — recebe eventos de outros usuários e sincroniza
+// imediatamente, sem esperar o próximo tick do polling periódico.
+// ---------------------------------------------------------------------------
+
+const REALTIME_CHANNEL_NAME = "crm-updates";
+const REALTIME_NUDGE_JITTER_MS = 800;
+
+let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+
+function startRealtimeSync() {
+  if (!isBrowser()) return;
+  if (realtimeChannel) return;
+
+  realtimeChannel = supabase.channel(REALTIME_CHANNEL_NAME);
+
+  realtimeChannel
+    .on("broadcast", { event: "leads_changed" }, () => {
+      // Outro usuário salvou algo. Se não há write local em andamento,
+      // aciona sync imediato com pequeno jitter para evitar thundering herd.
+      if (canBackgroundRehydrate()) {
+        scheduleBackgroundSyncTick(Math.floor(Math.random() * REALTIME_NUDGE_JITTER_MS));
+      }
+    })
+    .subscribe();
+}
+
+function stopRealtimeSync() {
+  if (!isBrowser() || !realtimeChannel) return;
+  void supabase.removeChannel(realtimeChannel);
+  realtimeChannel = null;
+}
+
 /**
  * Starts periodic background sync (60s interval + tab visibility).
  * Only re-hydrates when there are no pending local writes to avoid
@@ -558,6 +592,7 @@ export function startBackgroundSync() {
 
   document.addEventListener("visibilitychange", onVisibilityChange);
   scheduleBackgroundSyncTick(1_000 + nextJitterMs());
+  startRealtimeSync();
 }
 
 /**
@@ -574,4 +609,5 @@ export function stopBackgroundSync() {
   backgroundSyncBlockedUntil = 0;
   clearBackgroundSyncLockIfOwner();
   document.removeEventListener("visibilitychange", onVisibilityChange);
+  stopRealtimeSync();
 }

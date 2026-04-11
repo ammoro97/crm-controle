@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { unstable_cache, revalidateTag } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Lead, Meeting } from "@/types/crm";
 import { getSupabaseAdmin } from "./supabase-admin";
@@ -18,18 +19,10 @@ const CUSTOMERS_TABLE: LeadTableName = "crm_customers";
 const DELETE_BATCH_SIZE = 500;
 const READ_PAGE_SIZE = 1_000;
 const MAX_READ_PAGES = 200;
-const COLLECTION_CACHE_TTL_MS = 20_000;
 
-type CollectionCacheState = {
-  value: Lead[];
-  loadedAt: number;
-  inFlight: Promise<Lead[] | null> | null;
-};
-
-const collectionCacheByTable: Record<LeadTableName, CollectionCacheState> = {
-  crm_leads: { value: [], loadedAt: 0, inFlight: null },
-  crm_customers: { value: [], loadedAt: 0, inFlight: null },
-};
+const LEADS_CACHE_TAG = "crm-leads";
+const CUSTOMERS_CACHE_TAG = "crm-customers";
+const CACHE_REVALIDATE_SECONDS = 60;
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -40,27 +33,6 @@ function reportLeadTableError(context: string, details?: unknown) {
     // eslint-disable-next-line no-console
     console.error(`[LEAD_TABLE] ${context}`, details);
   }
-}
-
-function canonicalizeJson(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => canonicalizeJson(entry));
-  }
-  if (isObjectRecord(value)) {
-    const sortedEntries = Object.keys(value)
-      .sort((left, right) => left.localeCompare(right))
-      .map((key) => [key, canonicalizeJson(value[key])] as const);
-    return Object.fromEntries(sortedEntries);
-  }
-  return value;
-}
-
-function fingerprintJson(value: unknown): string {
-  return JSON.stringify(canonicalizeJson(value));
-}
-
-function fingerprintLead(lead: Lead): string {
-  return fingerprintJson(lead);
 }
 
 function buildFallbackLeadId(seed: unknown, index: number): string {
@@ -112,11 +84,7 @@ function cloneLeadArray(leads: Lead[]): Lead[] {
 }
 
 function invalidateCollectionCache(tableName: LeadTableName) {
-  collectionCacheByTable[tableName] = {
-    value: [],
-    loadedAt: 0,
-    inFlight: null,
-  };
+  revalidateTag(tableName === LEADS_TABLE ? LEADS_CACHE_TAG : CUSTOMERS_CACHE_TAG);
 }
 
 function parseLeadTableRows(value: unknown): LeadTableRow[] {
@@ -135,16 +103,6 @@ function parseLeadTableRows(value: unknown): LeadTableRow[] {
   return rows;
 }
 
-function parseLeadIdRows(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((entry) => {
-      if (!isObjectRecord(entry)) return "";
-      const leadId = entry.lead_id;
-      return typeof leadId === "string" ? leadId.trim() : "";
-    })
-    .filter(Boolean);
-}
 
 function toLeadsFromRows(rows: LeadTableRow[]): Lead[] {
   const leads = rows
@@ -158,26 +116,6 @@ function toLeadsFromRows(rows: LeadTableRow[]): Lead[] {
   return dedupeByLeadId(leads);
 }
 
-async function listLeadIds(admin: SupabaseClient, tableName: LeadTableName): Promise<string[] | null> {
-  const ids: string[] = [];
-  for (let page = 0; page < MAX_READ_PAGES; page += 1) {
-    const from = page * READ_PAGE_SIZE;
-    const to = from + READ_PAGE_SIZE - 1;
-    const { data, error } = await admin
-      .from(tableName)
-      .select("lead_id")
-      .range(from, to);
-    if (error) {
-      reportLeadTableError(`list ids error table=${tableName}`, error.message);
-      return null;
-    }
-    const pageIds = parseLeadIdRows(data as unknown);
-    if (pageIds.length === 0) break;
-    ids.push(...pageIds);
-    if (pageIds.length < READ_PAGE_SIZE) break;
-  }
-  return ids;
-}
 
 async function deleteLeadIds(admin: SupabaseClient, tableName: LeadTableName, ids: string[]) {
   if (ids.length === 0) return;
@@ -191,58 +129,25 @@ async function deleteLeadIds(admin: SupabaseClient, tableName: LeadTableName, id
   }
 }
 
-async function readLeadFingerprintsById(
-  admin: SupabaseClient,
-  tableName: LeadTableName,
-  ids: string[],
-): Promise<Map<string, string> | null> {
-  const fingerprints = new Map<string, string>();
-  for (let index = 0; index < ids.length; index += DELETE_BATCH_SIZE) {
-    const chunk = ids.slice(index, index + DELETE_BATCH_SIZE);
-    if (chunk.length === 0) continue;
-    const { data, error } = await admin
-      .from(tableName)
-      .select("lead_id,payload")
-      .in("lead_id", chunk);
-
-    if (error) {
-      reportLeadTableError(`read fingerprints error table=${tableName}`, error.message);
-      return null;
-    }
-
-    const rows = parseLeadTableRows(data as unknown);
-    for (const row of rows) {
-      fingerprints.set(row.lead_id, fingerprintJson(row.payload));
-    }
-  }
-  return fingerprints;
-}
-
 async function upsertLeadsIntoTable(admin: SupabaseClient, tableName: LeadTableName, leads: Lead[]): Promise<boolean> {
   const dedupedLeads = dedupeByLeadId(leads);
   if (dedupedLeads.length === 0) return true;
-  const existingFingerprints = await readLeadFingerprintsById(
-    admin,
-    tableName,
-    dedupedLeads.map((lead) => lead.id),
-  );
-  if (!existingFingerprints) return false;
 
+  const rpcName = tableName === LEADS_TABLE ? "upsert_leads_batch" : "upsert_customers_batch";
   const nowIso = new Date().toISOString();
-  const rowsToUpsert = dedupedLeads
-    .filter((lead) => existingFingerprints.get(lead.id) !== fingerprintLead(lead))
-    .map((lead) => ({
-      lead_id: lead.id,
-      payload: lead,
-      updated_at: nowIso,
-    }));
+  const rows = dedupedLeads.map((lead) => ({
+    lead_id: lead.id,
+    payload: lead,
+    updated_at: nowIso,
+  }));
 
-  if (rowsToUpsert.length === 0) return true;
-
-  const { error } = await admin.from(tableName).upsert(rowsToUpsert, { onConflict: "lead_id" });
-  if (error) {
-    reportLeadTableError(`upsert error table=${tableName}`, error.message);
-    return false;
+  for (let index = 0; index < rows.length; index += DELETE_BATCH_SIZE) {
+    const chunk = rows.slice(index, index + DELETE_BATCH_SIZE);
+    const { error } = await admin.rpc(rpcName, { rows: chunk });
+    if (error) {
+      reportLeadTableError(`upsert rpc error table=${tableName}`, error.message);
+      return false;
+    }
   }
   return true;
 }
@@ -301,32 +206,24 @@ async function writeToTable(tableName: LeadTableName, leads: Lead[]): Promise<bo
   return upsertLeadsIntoTable(admin, tableName, leads);
 }
 
+const readLeadsFromTableCached = unstable_cache(
+  () => readFromTable(LEADS_TABLE),
+  ["crm-leads-collection"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: [LEADS_CACHE_TAG] },
+);
+
+const readCustomersFromTableCached = unstable_cache(
+  () => readFromTable(CUSTOMERS_TABLE),
+  ["crm-customers-collection"],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: [CUSTOMERS_CACHE_TAG] },
+);
+
 async function readCollection(tableName: LeadTableName): Promise<Lead[]> {
-  const cacheState = collectionCacheByTable[tableName];
-  const cacheFresh = cacheState.loadedAt > 0 && Date.now() - cacheState.loadedAt <= COLLECTION_CACHE_TTL_MS;
-  if (cacheFresh) {
-    return cloneLeadArray(cacheState.value);
-  }
-
-  if (!cacheState.inFlight) {
-    cacheState.inFlight = readFromTable(tableName);
-  }
-
-  const tableLeads = await cacheState.inFlight.finally(() => {
-    cacheState.inFlight = null;
-  });
-
-  if (tableLeads && tableLeads.length >= 0) {
-    cacheState.value = cloneLeadArray(tableLeads);
-    cacheState.loadedAt = Date.now();
-    return cloneLeadArray(cacheState.value);
-  }
-
-  if (cacheState.loadedAt > 0) {
-    return cloneLeadArray(cacheState.value);
-  }
-
-  return [];
+  const leads =
+    tableName === LEADS_TABLE
+      ? await readLeadsFromTableCached()
+      : await readCustomersFromTableCached();
+  return cloneLeadArray(leads ?? []);
 }
 
 async function writeCollection(tableName: LeadTableName, leads: Lead[]) {
@@ -346,11 +243,7 @@ async function writeCollection(tableName: LeadTableName, leads: Lead[]) {
     throw new Error(`SUPABASE_REQUIRED_FOR_${tableName.toUpperCase()}_PERSISTENCE`);
   }
 
-  collectionCacheByTable[tableName] = {
-    value: cloneLeadArray(normalized),
-    loadedAt: Date.now(),
-    inFlight: null,
-  };
+  revalidateTag(tableName === LEADS_TABLE ? LEADS_CACHE_TAG : CUSTOMERS_CACHE_TAG);
 }
 
 export async function readLeadsCollection() {

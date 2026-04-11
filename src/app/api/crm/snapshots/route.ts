@@ -17,6 +17,7 @@ import {
 } from "@/lib/lead-owner-distribution";
 import { distributeLeadOwnersFromDatabase } from "@/lib/lead-owner-distribution-server";
 import { requireAuth } from "@/lib/require-auth";
+import { broadcastCrmUpdate } from "@/lib/server/broadcast-crm-update";
 import type { Lead, LeadFinalizationRecord, Meeting } from "@/types/crm";
 import type { PostCallWrapup } from "@/lib/post-call-flow";
 
@@ -35,12 +36,12 @@ const MEETINGS_FILE = "crm.agenda.meetings.v1.json";
 const LEAD_FINALIZATIONS_FILE = "crm.leads.finalizations.v1.json";
 const WRAPUPS_FILE = "crm.calls.wrapups.v1.json";
 
-const LEADS_PAGE_SIZE = 50;
+const LEADS_PAGE_SIZE = 200;
 const MAX_SNAPSHOT_ITEMS = 5000;
 const MAX_DELETED_IDS = 5000;
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_GET_PER_WINDOW = 400;
+const RATE_LIMIT_GET_PER_WINDOW = 30;
 const RATE_LIMIT_POST_PER_WINDOW = 200;
 
 type RateCounter = {
@@ -392,6 +393,11 @@ export async function POST(request: NextRequest) {
     }
 
     await Promise.all(writes);
+
+    // Notifica outros clientes conectados para sincronizarem imediatamente.
+    // Fire-and-forget: não bloqueia o response nem falha se Realtime indisponível.
+    void broadcastCrmUpdate("leads_changed", { changedBy: auth.userId });
+
     return NextResponse.json({ success: true });
   } catch (error) {
     if (error instanceof Error && error.message === "LEADS_EMPTY_SNAPSHOT_BLOCKED") {
