@@ -597,6 +597,33 @@ function isSameDashboardLayoutItems(a: DashboardWidgetLayoutItem[], b: Dashboard
   return true;
 }
 
+function normalizeAutomatedLeadSource(value?: string | null): string {
+  const raw = String(value || "").trim();
+  if (!raw) return raw;
+  const normalized = normalizeQueryText(raw);
+
+  if (
+    normalized === "apify" ||
+    normalized === "pela apify" ||
+    normalized === "por api" ||
+    normalized === "api" ||
+    normalized === "automacao por api" ||
+    normalized === "automacao pela apify"
+  ) {
+    return "APIFY";
+  }
+
+  if (
+    normalized === "cnpj" ||
+    normalized === "por cnpj" ||
+    normalized === "automacao por cnpj"
+  ) {
+    return "CNPJ";
+  }
+
+  return raw;
+}
+
 function normalizeLead(lead: Lead): Lead {
   const names = getLeadNames(lead);
   const contacts = getLeadContacts(lead);
@@ -622,6 +649,7 @@ function normalizeLead(lead: Lead): Lead {
     telefone_cnpj: telefoneCnpj.length > 0 ? telefoneCnpj : null,
     email: emails[0] || "",
     emails,
+    source: normalizeAutomatedLeadSource(lead.source),
     firstContactDate: lead.firstContactDate ?? "",
     observationLog: lead.observationLog ?? [],
     internalNotes: lead.internalNotes ?? [],
@@ -2924,11 +2952,11 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             ? "Automacao de Leads"
             : automationStep === "aguardando"
               ? "Processando..."
-              : automationStep === "sucesso"
-                ? "Leads Importados"
-                : automationTipo === "api"
-                  ? "Automacao por API"
-                  : "Automacao por CNPJ"
+                : automationStep === "sucesso"
+                  ? "Leads Importados"
+                  : automationTipo === "api"
+                    ? "Automacao pela APIFY"
+                    : "Automacao por CNPJ"
         }
         open={automationOpen}
         onClose={closeAutomation}
@@ -2974,7 +3002,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                     <path d="M3 7l4-4 4 4M7 3v10M13 7l4 4-4 4M17 11V7" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
-                <p className="font-semibold text-slate-100">Por API</p>
+                <p className="font-semibold text-slate-100">Pela APIFY</p>
                 <p className="mt-1 text-xs text-slate-400">Busca por nicho, localidade e volume de leads.</p>
               </button>
               <button

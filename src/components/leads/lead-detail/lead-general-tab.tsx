@@ -180,13 +180,6 @@ export function LeadGeneralTab({ draftLead, isEditing, onDraftChange }: LeadGene
             inputType="email"
             onChange={(value) => onDraftChange({ ...draftLead, email: value })}
           />
-          <SummaryField
-            label="Site"
-            value={String(draftLead.site || "")}
-            editable
-            isEditing={isEditing}
-            onChange={(value) => onDraftChange({ ...draftLead, site: value.trim() ? value.trim() : null })}
-          />
 
           <SummaryField
             label="Telefone Google"

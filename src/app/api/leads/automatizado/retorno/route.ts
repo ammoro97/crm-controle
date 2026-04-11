@@ -241,7 +241,6 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
   const site = getPayloadString(raw, ["site", "website", "url"]);
   const cidade = getPayloadString(raw, ["cidade", "city"]);
   const estado = getPayloadString(raw, ["estado", "uf"]);
-  const origemPayload = getPayloadString(raw, ["origem", "source"]);
   const dataCadastroRaw = getPayloadString(raw, ["dataCadastro", "data_cadastro", "data cadastro", "cadastrado"]);
   const nomeFantasia = getPayloadString(raw, ["nome_fantasia", "nome fantasia", "nomefantasia"]) || empresa;
   const enderecoCompleto = getPayloadString(raw, ["endereco_completo", "endereco completo", "endereco", "address"]);
@@ -267,7 +266,7 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
   const dateStr = normalizedDate || now.toISOString().slice(0, 10);
   const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
-  const sourceLabel = origemPayload || (tipoAutomacao === "api" ? "Automacao por API" : "Automacao por CNPJ");
+  const sourceLabel = tipoAutomacao === "api" ? "APIFY" : "CNPJ";
   const id = `L-AUTO-${now.getTime()}-${Math.random().toString(36).slice(2, 7)}`;
 
   return {

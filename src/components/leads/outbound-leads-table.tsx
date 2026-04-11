@@ -15,7 +15,7 @@ import {
   type PostCallWrapup,
 } from "@/lib/post-call-flow";
 import { CallLog, Lead } from "@/types/crm";
-import { TruncatedCellText } from "./table-cell-truncate";
+import { TruncatedCellLink, TruncatedCellText } from "./table-cell-truncate";
 
 type OutboundLeadsTableProps = {
   leads: Lead[];
@@ -31,6 +31,7 @@ type SortCol =
   | "owner"
   | "telefoneGoogle"
   | "telefoneCnpj"
+  | "site"
   | "expediente"
   | "nota"
   | "avaliacoes"
@@ -214,6 +215,52 @@ function getLeadTelefoneCnpjList(lead: Lead): string[] {
 function getLeadRlSite(lead: Lead): string {
   const raw = String(lead.rl_site || "").trim();
   return raw || "-";
+}
+
+function getLeadSite(lead: Lead): string {
+  const raw = String(lead.site || "").trim();
+  return raw || "-";
+}
+
+function resolveSiteHref(value?: string | null): string | null {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "-") return null;
+  const normalized = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeLeadSource(value?: string | null): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "-";
+  const normalized = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (
+    normalized === "apify" ||
+    normalized === "por api" ||
+    normalized === "pela apify" ||
+    normalized === "api" ||
+    normalized === "automacao por api" ||
+    normalized === "automacao pela apify"
+  ) {
+    return "APIFY";
+  }
+  if (
+    normalized === "cnpj" ||
+    normalized === "por cnpj" ||
+    normalized === "automacao por cnpj"
+  ) {
+    return "CNPJ";
+  }
+  return raw;
 }
 
 function formatTempoCnpj(value?: number | string | null): string {
@@ -604,7 +651,9 @@ export function OutboundLeadsTable({
         telefoneCnpjList: getLeadTelefoneCnpjList(lead),
         telefoneGoogleSort: getLeadTelefoneGoogleList(lead)[0] || "",
         telefoneCnpjSort: getLeadTelefoneCnpjList(lead)[0] || "",
+        site: getLeadSite(lead),
         rlSite: getLeadRlSite(lead),
+        source: normalizeLeadSource(lead.source),
         expediente: resolveLeadExpedienteStatusFromHorario(lead.horario_funcionamento, {
           referenceDate: tableReferenceDate,
         }),
@@ -639,6 +688,7 @@ export function OutboundLeadsTable({
         case "owner":        cmp = (a.lead.owner || "").localeCompare(b.lead.owner || "", "pt-BR", { sensitivity: "base" }); break;
         case "telefoneGoogle": cmp = sortByPhoneText(a.telefoneGoogleSort, b.telefoneGoogleSort); break;
         case "telefoneCnpj": cmp = sortByPhoneText(a.telefoneCnpjSort, b.telefoneCnpjSort); break;
+        case "site":         cmp = a.site.localeCompare(b.site, "pt-BR", { sensitivity: "base" }); break;
         case "expediente": {
           const order: Record<"Aberto" | "Fechado" | "Indefinido", number> = {
             Aberto: 0,
@@ -648,7 +698,7 @@ export function OutboundLeadsTable({
           cmp = order[a.expediente] - order[b.expediente];
           break;
         }
-        case "source":       cmp = (a.lead.source || "").localeCompare(b.lead.source || "", "pt-BR", { sensitivity: "base" }); break;
+        case "source":       cmp = a.source.localeCompare(b.source, "pt-BR", { sensitivity: "base" }); break;
         case "nota":         cmp = (Number(a.lead.nota) || 0) - (Number(b.lead.nota) || 0); break;
         case "avaliacoes":   cmp = (Number(a.lead.avaliacoes) || 0) - (Number(b.lead.avaliacoes) || 0); break;
         case "tempoCnpj":    cmp = sortValueTempoCnpj(a.lead.tempo_cnpj) - sortValueTempoCnpj(b.lead.tempo_cnpj); break;
@@ -1025,6 +1075,7 @@ export function OutboundLeadsTable({
               <SortHeader col="owner" label="Vendedor" width="w-[12rem]" active={sortCol === "owner"} dir={sortDir} onSort={handleSort} />
               <SortHeader col="telefoneGoogle" label="Telefone Google" width="w-[15rem]" active={sortCol === "telefoneGoogle"} dir={sortDir} onSort={handleSort} />
               <SortHeader col="telefoneCnpj" label="Telefone CNPJ" width="w-[15rem]" active={sortCol === "telefoneCnpj"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="site" label="Site" width="w-[15rem]" active={sortCol === "site"} dir={sortDir} onSort={handleSort} />
               <SortHeader col="expediente" label="Expediente" active={sortCol === "expediente"} dir={sortDir} onSort={handleSort} />
               <SortHeader col="nota" label="Nota" active={sortCol === "nota"} dir={sortDir} onSort={handleSort} />
               <SortHeader col="avaliacoes" label="Avaliacao" active={sortCol === "avaliacoes"} dir={sortDir} onSort={handleSort} />
@@ -1034,7 +1085,7 @@ export function OutboundLeadsTable({
             </tr>
           </thead>
           <tbody>
-            {pagedRows.map(({ lead, socios, telefoneGoogleList, telefoneCnpjList, rlSite, expediente, metrics }) => {
+            {pagedRows.map(({ lead, socios, telefoneGoogleList, telefoneCnpjList, site, rlSite, source, expediente, metrics }) => {
               const hasBaseActivation =
                 mode === "callback"
                   ? metrics.callbackCalls > 0
@@ -1177,6 +1228,16 @@ export function OutboundLeadsTable({
                     </div>
                   </td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellLink
+                      value={site}
+                      href={resolveSiteHref(site)}
+                      fallback="-"
+                      widthClass="w-[15rem] max-w-[15rem]"
+                      className="text-sky-300 underline-offset-2 hover:underline"
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <span
                       className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${expedienteStyle[expediente]}`}
                     >
@@ -1190,7 +1251,7 @@ export function OutboundLeadsTable({
                     <TruncatedCellText value={rlSite} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
                   </td>
                   <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                    <TruncatedCellText value={lead.source} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
+                    <TruncatedCellText value={source} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
                   </td>
                 </tr>
               );

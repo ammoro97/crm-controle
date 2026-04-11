@@ -254,7 +254,6 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
   const cidade = getPayloadString(raw, ["cidade", "city"]);
   const estado = getPayloadString(raw, ["estado", "uf"]);
   const dataCadastroRaw = getPayloadString(raw, ["dataCadastro", "data_cadastro", "data cadastro", "cadastrado"]);
-  const sourceRaw = getPayloadString(raw, ["origem", "source"]);
   const nomeFantasia = getPayloadString(raw, ["nome_fantasia", "nome fantasia", "nomefantasia"]) || company;
   const enderecoCompleto = getPayloadString(raw, ["endereco_completo", "endereco completo", "endereco", "address"]);
   const categoriaPrincipal =
@@ -277,7 +276,7 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
   const now = new Date();
   const dateStr = normalizeDateInput(dataCadastroRaw) || now.toISOString().slice(0, 10);
   const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  const sourceLabel = sourceRaw || (tipoAutomacao === "api" ? "Automacao por API" : "Automacao por CNPJ");
+  const sourceLabel = tipoAutomacao === "api" ? "APIFY" : "CNPJ";
   const id = `L-AUTO-${now.getTime()}-${Math.random().toString(36).slice(2, 7)}`;
 
   return {
