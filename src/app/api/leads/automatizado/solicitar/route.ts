@@ -36,6 +36,7 @@ export type SolicitacaoPayload = SolicitacaoApiPayload | SolicitacaoCnpjPayload;
 type N8nLeadItem = {
   name?: string;
   nome?: string;
+  nome_google?: string | null;
   company?: string;
   empresa?: string;
   socios?: string | string[] | null;
@@ -56,9 +57,11 @@ type N8nLeadItem = {
   tempo_cnpj?: number | string | null;
   rl_site?: string | null;
   nome_fantasia?: string | null;
+  endereco_completo_sem_cidade_estado?: string | null;
   endereco_completo?: string | null;
   categoria_principal?: string | null;
   categorias_secundarias?: string | string[] | null;
+  anos_abertura?: number | string | null;
   niche?: string;
   nicho?: string;
   [key: string]: unknown;
@@ -211,6 +214,21 @@ function buildCityField(cidade?: string | null, estado?: string | null): string 
   return c || s || "";
 }
 
+function buildEnderecoCompleto(
+  enderecoBase?: string | null,
+  cidade?: string | null,
+  estado?: string | null,
+): string {
+  const endereco = String(enderecoBase || "").trim();
+  const c = String(cidade || "").trim();
+  const s = String(estado || "").trim();
+  if (!endereco) return "";
+  if (c && s) return `${endereco}, ${c} - ${s}`;
+  if (c) return `${endereco}, ${c}`;
+  if (s) return `${endereco}, ${s}`;
+  return endereco;
+}
+
 function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lead | null {
   const sociosRaw = getPayloadList(raw, [
     "socios",
@@ -225,6 +243,8 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
   const company = getPayloadString(raw, [
     "empresa",
     "company",
+    "nome_google",
+    "nome google",
     "nome_fantasia",
     "nome fantasia",
     "razao_social",
@@ -255,7 +275,15 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
   const estado = getPayloadString(raw, ["estado", "uf"]);
   const dataCadastroRaw = getPayloadString(raw, ["dataCadastro", "data_cadastro", "data cadastro", "cadastrado"]);
   const nomeFantasia = getPayloadString(raw, ["nome_fantasia", "nome fantasia", "nomefantasia"]) || company;
-  const enderecoCompleto = getPayloadString(raw, ["endereco_completo", "endereco completo", "endereco", "address"]);
+  const enderecoCompletoRaw = getPayloadString(raw, [
+    "endereco_completo",
+    "endereco completo",
+    "endereco_completo_sem_cidade_estado",
+    "endereco completo sem cidade estado",
+    "endereco",
+    "address",
+  ]);
+  const enderecoCompleto = buildEnderecoCompleto(enderecoCompletoRaw, cidade, estado);
   const categoriaPrincipal =
     getPayloadString(raw, ["categoria_principal", "categoria principal", "categoria", "niche", "nicho"]);
   const categoriasSecundarias = getPayloadList(raw, [
@@ -265,7 +293,17 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
     "categorias",
   ]);
   const rlSite = getPayloadString(raw, ["rl_site", "rl site", "responsavel_legal_site", "responsavel legal site"]);
-  const tempoCnpj = normalizeNumberLike(getPayloadValue(raw, ["tempo_cnpj", "tempo cnpj", "tempo de cnpj", "anos_cnpj", "anos"]));
+  const tempoCnpj = normalizeNumberLike(
+    getPayloadValue(raw, [
+      "tempo_cnpj",
+      "tempo cnpj",
+      "tempo de cnpj",
+      "anos_cnpj",
+      "anos_abertura",
+      "anos abertura",
+      "anos",
+    ]),
+  );
   const nota = normalizeNumberLike(getPayloadValue(raw, ["nota", "rating", "nota_media"]));
   const avaliacoes = normalizeNumberLike(getPayloadValue(raw, ["avaliacoes", "avaliacao", "reviews"]));
   const horarioFuncionamento = normalizeHorarioFuncionamento(

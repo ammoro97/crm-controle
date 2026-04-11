@@ -15,6 +15,7 @@ import { Lead } from "@/types/crm";
 export type OutboundLeadPayload = {
   empresa?: string | null;
   nome?: string | null;       // alias para empresa quando nao ha responsavel separado
+  nome_google?: string | null;
   responsavel?: string | null;
   socios?: string | string[] | null;
   telefone?: string | string[] | null;
@@ -25,9 +26,11 @@ export type OutboundLeadPayload = {
   tempo_cnpj?: number | string | null;
   rl_site?: string | null;
   nome_fantasia?: string | null;
+  endereco_completo_sem_cidade_estado?: string | null;
   endereco_completo?: string | null;
   categoria_principal?: string | null;
   categorias_secundarias?: string | string[] | null;
+  anos_abertura?: number | string | null;
   expediente?: "Aberto" | "Fechado" | "Indefinido" | string | null;
   nota?: number | string | null;
   avaliacoes?: number | string | null;
@@ -141,6 +144,38 @@ function getPayloadList(raw: OutboundLeadPayload, aliases: string[]): string[] {
     .filter(Boolean);
 }
 
+function inferTipoAutomacaoFromLeads(rawLeads: OutboundLeadPayload[]): "api" | "cnpj" {
+  const cnpjHintAliases = [
+    "telefone_cnpj",
+    "telefone cnpj",
+    "anos_abertura",
+    "anos abertura",
+    "tempo_cnpj",
+    "tempo cnpj",
+    "rl_site",
+    "rl site",
+    "nome_fantasia",
+    "nome fantasia",
+    "endereco_completo_sem_cidade_estado",
+    "endereco completo sem cidade estado",
+    "categoria_principal",
+    "categorias_secundarias",
+    "cnae",
+  ];
+
+  for (const item of rawLeads) {
+    if (!item || typeof item !== "object") continue;
+    const origem = String(getPayloadValue(item, ["origem", "source"]) || "")
+      .trim()
+      .toLowerCase();
+    if (origem === "cnpj") return "cnpj";
+    if (cnpjHintAliases.some((alias) => hasMeaningfulValue(getPayloadValue(item, [alias])))) {
+      return "cnpj";
+    }
+  }
+  return "api";
+}
+
 function normalizePhoneDigits(value?: string | null): string {
   return String(value || "").replace(/\D/g, "");
 }
@@ -199,6 +234,21 @@ function buildCityField(cidade?: string | null, estado?: string | null): string 
   return c || s || "";
 }
 
+function buildEnderecoCompleto(
+  enderecoBase?: string | null,
+  cidade?: string | null,
+  estado?: string | null,
+): string {
+  const endereco = String(enderecoBase || "").trim();
+  const c = String(cidade || "").trim();
+  const s = String(estado || "").trim();
+  if (!endereco) return "";
+  if (c && s) return `${endereco}, ${c} - ${s}`;
+  if (c) return `${endereco}, ${c}`;
+  if (s) return `${endereco}, ${s}`;
+  return endereco;
+}
+
 function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnpj"): Lead | null {
   const sociosRaw = getPayloadList(raw, [
     "socios",
@@ -213,6 +263,8 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
   const empresa = getPayloadString(raw, [
     "empresa",
     "company",
+    "nome_google",
+    "nome google",
     "nome_fantasia",
     "nome fantasia",
     "razao_social",
@@ -243,7 +295,15 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
   const estado = getPayloadString(raw, ["estado", "uf"]);
   const dataCadastroRaw = getPayloadString(raw, ["dataCadastro", "data_cadastro", "data cadastro", "cadastrado"]);
   const nomeFantasia = getPayloadString(raw, ["nome_fantasia", "nome fantasia", "nomefantasia"]) || empresa;
-  const enderecoCompleto = getPayloadString(raw, ["endereco_completo", "endereco completo", "endereco", "address"]);
+  const enderecoCompletoRaw = getPayloadString(raw, [
+    "endereco_completo",
+    "endereco completo",
+    "endereco_completo_sem_cidade_estado",
+    "endereco completo sem cidade estado",
+    "endereco",
+    "address",
+  ]);
+  const enderecoCompleto = buildEnderecoCompleto(enderecoCompletoRaw, cidade, estado);
   const categoriaPrincipal =
     getPayloadString(raw, ["categoria_principal", "categoria principal", "categoria", "niche", "nicho"]);
   const categoriasSecundarias = getPayloadList(raw, [
@@ -255,7 +315,17 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
   const rlSite = getPayloadString(raw, ["rl_site", "rl site", "responsavel_legal_site", "responsavel legal site"]);
   const nota = normalizeNumberLike(getPayloadValue(raw, ["nota", "rating", "nota_media"]));
   const avaliacoes = normalizeNumberLike(getPayloadValue(raw, ["avaliacoes", "avaliacao", "reviews"]));
-  const tempoCnpj = normalizeNumberLike(getPayloadValue(raw, ["tempo_cnpj", "tempo cnpj", "tempo de cnpj", "anos_cnpj", "anos"]));
+  const tempoCnpj = normalizeNumberLike(
+    getPayloadValue(raw, [
+      "tempo_cnpj",
+      "tempo cnpj",
+      "tempo de cnpj",
+      "anos_cnpj",
+      "anos_abertura",
+      "anos abertura",
+      "anos",
+    ]),
+  );
   const horarioFuncionamento = normalizeHorarioFuncionamento(
     getPayloadValue(raw, ["horario_funcionamento", "horario de funcionamento", "horario", "funcionamento"]),
   );
@@ -376,15 +446,21 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     if (Array.isArray(raw)) {
       rawLeads = raw as OutboundLeadPayload[];
+      tipoAutomacao = inferTipoAutomacaoFromLeads(rawLeads);
     } else {
       const body = raw as RetornoBody;
-      tipoAutomacao = body.tipoAutomacao === "cnpj" ? "cnpj" : "api";
       requestId = String(body.requestId || requestId);
       rawLeads = Array.isArray(body.leads)
         ? body.leads
         : Array.isArray(body.data)
           ? body.data
           : [];
+      tipoAutomacao =
+        body.tipoAutomacao === "cnpj"
+          ? "cnpj"
+          : body.tipoAutomacao === "api"
+            ? "api"
+            : inferTipoAutomacaoFromLeads(rawLeads);
     }
 
     const leads: Lead[] = rawLeads
