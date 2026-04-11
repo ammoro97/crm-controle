@@ -200,7 +200,11 @@ function parseLeadPhoneColumn(value?: string[] | string | null): string[] {
 }
 
 function getLeadTelefoneGoogleList(lead: Lead): string[] {
-  return parseLeadPhoneColumn(lead.telefone_google);
+  const explicitGoogle = parseLeadPhoneColumn(lead.telefone_google);
+  if (explicitGoogle.length > 0) return explicitGoogle;
+  const explicitCnpj = parseLeadPhoneColumn(lead.telefone_cnpj);
+  if (explicitCnpj.length > 0) return [];
+  return uniqPhones(getLeadPhones(lead));
 }
 
 function getLeadTelefoneCnpjList(lead: Lead): string[] {

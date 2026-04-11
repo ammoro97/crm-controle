@@ -84,6 +84,15 @@ function parsePhoneColumn(value?: string[] | string | null): string[] {
   return uniqPhones(splitMultiValueText(String(value || "")));
 }
 
+function resolveLegacyPhones(lead: Lead): string[] {
+  const fromArray = Array.isArray(lead.phones) ? lead.phones : [];
+  const merged = [
+    ...fromArray.flatMap((item) => splitMultiValueText(String(item || ""))),
+    ...splitMultiValueText(String(lead.phone || "")),
+  ];
+  return uniqPhones(merged);
+}
+
 function parseCategoriasSecundarias(value?: string[] | string | null): string[] {
   if (Array.isArray(value)) {
     return value.flatMap((item) => splitMultiValueText(String(item || "")));
@@ -140,8 +149,16 @@ function SummaryField({
 }
 
 export function LeadGeneralTab({ draftLead, isEditing, onDraftChange }: LeadGeneralTabProps) {
-  const telefoneGoogleList = parsePhoneColumn(draftLead.telefone_google);
-  const telefoneCnpjList = parsePhoneColumn(draftLead.telefone_cnpj);
+  const explicitTelefoneGoogleList = parsePhoneColumn(draftLead.telefone_google);
+  const explicitTelefoneCnpjList = parsePhoneColumn(draftLead.telefone_cnpj);
+  const legacyPhones = resolveLegacyPhones(draftLead);
+  const telefoneGoogleList =
+    explicitTelefoneGoogleList.length > 0
+      ? explicitTelefoneGoogleList
+      : explicitTelefoneCnpjList.length === 0
+        ? legacyPhones
+        : [];
+  const telefoneCnpjList = explicitTelefoneCnpjList;
   const telefoneGoogleDisplay = formatListForDisplay(telefoneGoogleList);
   const telefoneCnpjDisplay = formatListForDisplay(telefoneCnpjList);
   const nomeFantasia = String(draftLead.nome_fantasia || "").trim() || draftLead.company;
@@ -196,7 +213,7 @@ export function LeadGeneralTab({ draftLead, isEditing, onDraftChange }: LeadGene
             multiline
             onChange={(value) => {
               const nextCnpj = parsePhoneColumn(value);
-              const nextPhones = uniqPhones([...telefoneGoogleList, ...nextCnpj]);
+              const nextPhones = uniqPhones([...explicitTelefoneGoogleList, ...nextCnpj]);
               onDraftChange({
                 ...draftLead,
                 telefone_cnpj: nextCnpj.length > 0 ? nextCnpj : null,

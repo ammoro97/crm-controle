@@ -600,9 +600,16 @@ function isSameDashboardLayoutItems(a: DashboardWidgetLayoutItem[], b: Dashboard
 function normalizeLead(lead: Lead): Lead {
   const names = getLeadNames(lead);
   const contacts = getLeadContacts(lead);
-  const phones = uniqPhones(getLeadPhones(lead));
+  const legacyPhones = uniqPhones(getLeadPhones(lead));
   const telefoneGoogle = parseLeadPhoneColumnValue(lead.telefone_google);
   const telefoneCnpj = parseLeadPhoneColumnValue(lead.telefone_cnpj);
+  const resolvedTelefoneGoogle =
+    telefoneGoogle.length > 0
+      ? telefoneGoogle
+      : telefoneCnpj.length === 0
+        ? legacyPhones
+        : [];
+  const phones = uniqPhones([...legacyPhones, ...resolvedTelefoneGoogle, ...telefoneCnpj]);
   const emails = getLeadEmails(lead);
   return {
     ...lead,
@@ -611,7 +618,7 @@ function normalizeLead(lead: Lead): Lead {
     contacts,
     phone: phones[0] || "",
     phones,
-    telefone_google: telefoneGoogle.length > 0 ? telefoneGoogle : null,
+    telefone_google: resolvedTelefoneGoogle.length > 0 ? resolvedTelefoneGoogle : null,
     telefone_cnpj: telefoneCnpj.length > 0 ? telefoneCnpj : null,
     email: emails[0] || "",
     emails,
