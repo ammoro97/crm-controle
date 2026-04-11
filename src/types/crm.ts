@@ -155,6 +155,15 @@ export type Lead = {
   avaliacoes?: number | string | null;
   horario_funcionamento?: string | null;
   expediente?: "Aberto" | "Fechado" | "Indefinido" | null;
+  socios?: string[] | string | null;
+  telefone_google?: string | null;
+  telefone_cnpj?: string | null;
+  tempo_cnpj?: number | string | null;
+  rl_site?: string | null;
+  nome_fantasia?: string | null;
+  endereco_completo?: string | null;
+  categoria_principal?: string | null;
+  categorias_secundarias?: string[] | string | null;
   finalizedAt?: string | null;
   finalizedBy?: string | null;
   finalizationReason?: LeadFinalizationReason | null;

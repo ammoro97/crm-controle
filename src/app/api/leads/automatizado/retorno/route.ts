@@ -16,9 +16,18 @@ export type OutboundLeadPayload = {
   empresa?: string | null;
   nome?: string | null;       // alias para empresa quando nao ha responsavel separado
   responsavel?: string | null;
+  socios?: string | string[] | null;
   telefone?: string | null;
+  telefone_google?: string | null;
+  telefone_cnpj?: string | null;
   email?: string | null;
   site?: string | null;
+  tempo_cnpj?: number | string | null;
+  rl_site?: string | null;
+  nome_fantasia?: string | null;
+  endereco_completo?: string | null;
+  categoria_principal?: string | null;
+  categorias_secundarias?: string | string[] | null;
   expediente?: "Aberto" | "Fechado" | "Indefinido" | string | null;
   nota?: number | string | null;
   avaliacoes?: number | string | null;
@@ -77,6 +86,74 @@ function normalizeHorarioFuncionamento(value: unknown): string | null {
   return null;
 }
 
+function normalizePayloadKey(value: string): string {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function hasMeaningfulValue(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+function getPayloadValue(raw: OutboundLeadPayload, aliases: string[]): unknown {
+  for (const alias of aliases) {
+    const direct = raw[alias];
+    if (hasMeaningfulValue(direct)) return direct;
+  }
+
+  const normalizedAliases = new Set(aliases.map((alias) => normalizePayloadKey(alias)));
+  for (const [key, value] of Object.entries(raw)) {
+    if (!normalizedAliases.has(normalizePayloadKey(key))) continue;
+    if (!hasMeaningfulValue(value)) continue;
+    return value;
+  }
+  return undefined;
+}
+
+function getPayloadString(raw: OutboundLeadPayload, aliases: string[]): string {
+  const value = getPayloadValue(raw, aliases);
+  if (Array.isArray(value)) {
+    const first = value.map((item) => String(item || "").trim()).find(Boolean);
+    return first || "";
+  }
+  return String(value || "").trim();
+}
+
+function getPayloadList(raw: OutboundLeadPayload, aliases: string[]): string[] {
+  const value = getPayloadValue(raw, aliases);
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  const text = String(value || "").trim();
+  if (!text) return [];
+  return text
+    .split(/[|;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeNumberLike(value: unknown): number | string | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value ?? "").trim();
+  return text ? text : null;
+}
+
+function normalizeDateInput(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  const brMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (brMatch) return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+  return raw.slice(0, 10);
+}
+
 function buildCityField(cidade?: string | null, estado?: string | null): string {
   const c = String(cidade || "").trim();
   const s = String(estado || "").trim();
@@ -85,39 +162,89 @@ function buildCityField(cidade?: string | null, estado?: string | null): string 
 }
 
 function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnpj"): Lead | null {
-  // empresa: campo direto > company > nome (quando nao ha responsavel separado)
-  const empresa = String(raw.empresa || raw.company || raw.nome || "").trim();
-  // responsavel: campo direto > name (quando nome nao foi usado como empresa)
-  const responsavel = String(raw.responsavel || raw.name || "").trim();
-  if (!empresa && !responsavel) return null;
+  const socios = getPayloadList(raw, [
+    "socios",
+    "socio",
+    "responsaveis",
+    "responsavel",
+    "responsavel_principal",
+    "nome_responsavel",
+    "nome_contato",
+    "contato",
+    "nome",
+  ]);
+  const empresa = getPayloadString(raw, [
+    "empresa",
+    "company",
+    "nome_fantasia",
+    "nome fantasia",
+    "razao_social",
+    "razao social",
+    "nome",
+  ]);
+  const responsavel = getPayloadString(raw, ["responsavel", "name", "nome_responsavel", "contato"]);
+  const firstSocio = socios[0] || "";
+  const leadDisplayName = responsavel || firstSocio || empresa;
+  if (!empresa && !leadDisplayName) return null;
+
+  const telefoneGoogle = getPayloadString(raw, ["telefone_google", "telefone google", "phone_google"]);
+  const telefoneCnpj = getPayloadString(raw, ["telefone_cnpj", "telefone cnpj", "phone_cnpj"]);
+  const telefonePadrao = getPayloadString(raw, ["telefone", "phone", "celular", "whatsapp"]);
+  const allPhones = Array.from(new Set([telefoneGoogle, telefoneCnpj, telefonePadrao].filter(Boolean)));
+  const primaryPhone = allPhones[0] || "";
+
+  const email = getPayloadString(raw, ["email", "e-mail"]);
+  const site = getPayloadString(raw, ["site", "website", "url"]);
+  const cidade = getPayloadString(raw, ["cidade", "city"]);
+  const estado = getPayloadString(raw, ["estado", "uf"]);
+  const origemPayload = getPayloadString(raw, ["origem", "source"]);
+  const dataCadastroRaw = getPayloadString(raw, ["dataCadastro", "data_cadastro", "data cadastro", "cadastrado"]);
+  const nomeFantasia = getPayloadString(raw, ["nome_fantasia", "nome fantasia", "nomefantasia"]) || empresa;
+  const enderecoCompleto = getPayloadString(raw, ["endereco_completo", "endereco completo", "endereco", "address"]);
+  const categoriaPrincipal =
+    getPayloadString(raw, ["categoria_principal", "categoria principal", "categoria", "niche", "nicho"]);
+  const categoriasSecundarias = getPayloadList(raw, [
+    "categorias_secundarias",
+    "categorias secundarias",
+    "categoria_secundaria",
+    "categorias",
+  ]);
+  const rlSite = getPayloadString(raw, ["rl_site", "rl site", "responsavel_legal_site", "responsavel legal site"]);
+  const nota = normalizeNumberLike(getPayloadValue(raw, ["nota", "rating", "nota_media"]));
+  const avaliacoes = normalizeNumberLike(getPayloadValue(raw, ["avaliacoes", "avaliacao", "reviews"]));
+  const tempoCnpj = normalizeNumberLike(getPayloadValue(raw, ["tempo_cnpj", "tempo cnpj", "tempo de cnpj", "anos_cnpj", "anos"]));
+  const horarioFuncionamento = normalizeHorarioFuncionamento(
+    getPayloadValue(raw, ["horario_funcionamento", "horario de funcionamento", "horario", "funcionamento"]),
+  );
+  const nicho = getPayloadString(raw, ["niche", "nicho"]) || categoriaPrincipal;
 
   const now = new Date();
-  const dateStr = raw.dataCadastro
-    ? String(raw.dataCadastro).trim().slice(0, 10)
-    : now.toISOString().slice(0, 10);
+  const normalizedDate = normalizeDateInput(dataCadastroRaw);
+  const dateStr = normalizedDate || now.toISOString().slice(0, 10);
   const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
-  const origem = String(raw.origem || "").trim();
-  const sourceLabel = origem || (tipoAutomacao === "api" ? "Automacao por API" : "Automacao por CNPJ");
+  const sourceLabel = origemPayload || (tipoAutomacao === "api" ? "Automacao por API" : "Automacao por CNPJ");
   const id = `L-AUTO-${now.getTime()}-${Math.random().toString(36).slice(2, 7)}`;
-  const horarioFuncionamento = normalizeHorarioFuncionamento(raw.horario_funcionamento);
 
   return {
     id,
-    name: responsavel || empresa,
-    names: responsavel ? [responsavel] : [],
+    name: leadDisplayName,
+    names: socios.length > 0 ? socios : (leadDisplayName && leadDisplayName !== empresa ? [leadDisplayName] : []),
+    socios: socios.length > 0 ? socios : null,
     company: empresa,
-    phone: String(raw.telefone || raw.phone || "").trim(),
-    phones: [],
-    email: String(raw.email || "").trim(),
+    phone: primaryPhone,
+    telefone_google: telefoneGoogle || null,
+    telefone_cnpj: telefoneCnpj || null,
+    phones: allPhones,
+    email,
     emails: [],
     status: "Novo",
     source: sourceLabel,
     owner: "",
     notes: "",
     channel: "outbound",
-    city: buildCityField(raw.cidade || raw.city, raw.estado),
-    niche: String(raw.niche || raw.nicho || "").trim(),
+    city: buildCityField(cidade, estado),
+    niche: nicho,
     entryDate: dateStr,
     firstContactDate: "",
     lastInteraction: "",
@@ -137,9 +264,15 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
     ],
     internalNotes: [],
     observationLog: [],
-    site: raw.site ? String(raw.site).trim() : null,
-    nota: raw.nota != null ? raw.nota : null,
-    avaliacoes: raw.avaliacoes != null ? raw.avaliacoes : null,
+    site: site || null,
+    nome_fantasia: nomeFantasia || null,
+    endereco_completo: enderecoCompleto || null,
+    categoria_principal: categoriaPrincipal || null,
+    categorias_secundarias: categoriasSecundarias.length > 0 ? categoriasSecundarias : null,
+    rl_site: rlSite || null,
+    tempo_cnpj: tempoCnpj,
+    nota,
+    avaliacoes,
     horario_funcionamento: horarioFuncionamento,
     expediente: resolveLeadExpedienteStatusFromHorario(horarioFuncionamento),
     outboundQualification: {

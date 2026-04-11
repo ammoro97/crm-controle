@@ -15,7 +15,7 @@ import {
   type PostCallWrapup,
 } from "@/lib/post-call-flow";
 import { CallLog, Lead } from "@/types/crm";
-import { TruncatedCellLink, TruncatedCellText } from "./table-cell-truncate";
+import { TruncatedCellText } from "./table-cell-truncate";
 
 type OutboundLeadsTableProps = {
   leads: Lead[];
@@ -26,10 +26,19 @@ type OutboundLeadsTableProps = {
 };
 
 type SortCol =
-  | "company" | "name" | "owner" | "entryDate" | "firstContactDate"
-  | "lastInteraction" | "nota" | "avaliacoes" | "city" | "state"
-  | "source" | "totalCalls" | "totalFollowUps" | "conversionDate"
-  | "acionadoBase" | "retornos";
+  | "company"
+  | "socios"
+  | "owner"
+  | "telefoneGoogle"
+  | "telefoneCnpj"
+  | "expediente"
+  | "nota"
+  | "avaliacoes"
+  | "tempoCnpj"
+  | "rlSite"
+  | "source"
+  | "acionadoBase"
+  | "retornos";
 
 type SortDir = "asc" | "desc";
 
@@ -111,50 +120,74 @@ const expedienteStyle: Record<"Aberto" | "Fechado" | "Indefinido", string> = {
   Indefinido: "bg-slate-500/20 text-slate-400 border-slate-400/40",
 };
 
-function parseCityState(city: string): { city: string; state: string } {
-  if (!city.trim()) return { city: "-", state: "-" };
-  const normalized = city.replace(/\s+/g, " ").trim();
-  if (normalized.includes(">")) {
-    const [cityName, state] = normalized.split(">").map((p) => p.trim());
-    return { city: cityName || "-", state: state || "-" };
+function getLeadSociosList(lead: Lead): string[] {
+  if (Array.isArray(lead.socios) && lead.socios.length > 0) {
+    return lead.socios.map((value) => String(value || "").trim()).filter(Boolean);
   }
-  if (normalized.includes("-")) {
-    const [cityName, state] = normalized.split("-").map((p) => p.trim());
-    return { city: cityName || "-", state: state || "-" };
+
+  const rawSocios = String(lead.socios || "").trim();
+  if (rawSocios) {
+    return rawSocios
+      .split(/[|;,]/)
+      .map((value) => value.trim())
+      .filter(Boolean);
   }
-  return { city: normalized, state: "-" };
+
+  const fallback = String(lead.name || "").trim();
+  return fallback ? [fallback] : [];
 }
 
-function formatDateBR(value?: string | null): string {
-  if (!value) return "-";
-  const [year = "", month = "", day = ""] = value.split("-");
-  if (!year || !month || !day) return "-";
-  return `${day}/${month}/${year}`;
+function getLeadSociosLabel(lead: Lead): string {
+  const socios = getLeadSociosList(lead);
+  return socios.length > 0 ? socios.join(", ") : "-";
 }
 
-function formatLastInteraction(value?: string | null): string {
-  const raw = String(value || "").trim();
-  if (!raw) return "-";
+function getLeadTelefoneGoogle(lead: Lead): string {
+  const explicit = normalizePhoneValue(lead.telefone_google);
+  if (explicit) return explicit;
+  const phones = getLeadPhones(lead);
+  return normalizePhoneValue(phones[0] || lead.phone || "");
+}
 
-  const normalized = raw.replace(" ", "T");
-  const parsed = new Date(normalized);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toLocaleString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
+function getLeadTelefoneCnpj(lead: Lead): string {
+  const explicit = normalizePhoneValue(lead.telefone_cnpj);
+  if (explicit) return explicit;
+  const phones = getLeadPhones(lead);
+  const fallback = phones.find((phone) => !isSamePhoneValue(phone, getLeadTelefoneGoogle(lead))) || "";
+  return normalizePhoneValue(fallback);
+}
 
-  const dateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}:\d{2}))?$/);
-  if (dateMatch) {
-    const [, year, month, day, time] = dateMatch;
-    return time ? `${day}/${month}/${year} ${time}` : `${day}/${month}/${year}`;
-  }
+function getLeadRlSite(lead: Lead): string {
+  const raw = String(lead.rl_site || "").trim();
+  return raw || "-";
+}
 
-  return raw;
+function formatTempoCnpj(value?: number | string | null): string {
+  if (value == null || value === "") return "-";
+  if (typeof value === "number") return Number.isFinite(value) ? `${value}` : "-";
+  const text = String(value).trim();
+  return text || "-";
+}
+
+function sortValueTempoCnpj(value?: number | string | null): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value ?? "").trim().replace(",", ".");
+  const parsed = Number.parseFloat(text);
+  if (Number.isFinite(parsed)) return parsed;
+  const digits = text.replace(/[^\d.-]/g, "");
+  const fallback = Number.parseFloat(digits);
+  return Number.isFinite(fallback) ? fallback : Number.NEGATIVE_INFINITY;
+}
+
+function formatSortablePhone(value?: string | null): string {
+  const normalized = normalizePhoneValue(value);
+  if (!normalized) return "";
+  const digits = normalizePhoneDigits(normalized);
+  return digits || normalized.toLowerCase();
+}
+
+function sortByPhoneText(left?: string | null, right?: string | null): number {
+  return formatSortablePhone(left).localeCompare(formatSortablePhone(right), "pt-BR", { sensitivity: "base" });
 }
 
 function normalizePhoneValue(value?: string | null): string {
@@ -526,7 +559,10 @@ export function OutboundLeadsTable({
     () =>
       leads.map((lead) => ({
         lead,
-        location: parseCityState(lead.city),
+        socios: getLeadSociosLabel(lead),
+        telefoneGoogle: getLeadTelefoneGoogle(lead),
+        telefoneCnpj: getLeadTelefoneCnpj(lead),
+        rlSite: getLeadRlSite(lead),
         expediente: resolveLeadExpedienteStatusFromHorario(lead.horario_funcionamento, {
           referenceDate: tableReferenceDate,
         }),
@@ -557,19 +593,24 @@ export function OutboundLeadsTable({
       let cmp = 0;
       switch (sortCol) {
         case "company":      cmp = (a.lead.company || "").localeCompare(b.lead.company || "", "pt-BR", { sensitivity: "base" }); break;
-        case "name":         cmp = (a.lead.name || "").localeCompare(b.lead.name || "", "pt-BR", { sensitivity: "base" }); break;
+        case "socios":       cmp = (a.socios || "").localeCompare(b.socios || "", "pt-BR", { sensitivity: "base" }); break;
         case "owner":        cmp = (a.lead.owner || "").localeCompare(b.lead.owner || "", "pt-BR", { sensitivity: "base" }); break;
-        case "city":         cmp = (a.location.city || "").localeCompare(b.location.city || "", "pt-BR", { sensitivity: "base" }); break;
-        case "state":        cmp = (a.location.state || "").localeCompare(b.location.state || "", "pt-BR", { sensitivity: "base" }); break;
+        case "telefoneGoogle": cmp = sortByPhoneText(a.telefoneGoogle, b.telefoneGoogle); break;
+        case "telefoneCnpj": cmp = sortByPhoneText(a.telefoneCnpj, b.telefoneCnpj); break;
+        case "expediente": {
+          const order: Record<"Aberto" | "Fechado" | "Indefinido", number> = {
+            Aberto: 0,
+            Fechado: 1,
+            Indefinido: 2,
+          };
+          cmp = order[a.expediente] - order[b.expediente];
+          break;
+        }
         case "source":       cmp = (a.lead.source || "").localeCompare(b.lead.source || "", "pt-BR", { sensitivity: "base" }); break;
-        case "entryDate":    cmp = (a.lead.entryDate || "").localeCompare(b.lead.entryDate || ""); break;
-        case "firstContactDate": cmp = (a.lead.firstContactDate || "").localeCompare(b.lead.firstContactDate || ""); break;
-        case "lastInteraction":  cmp = (a.lead.lastInteraction || "").localeCompare(b.lead.lastInteraction || ""); break;
-        case "conversionDate":   cmp = (a.metrics.conversionDate || "").localeCompare(b.metrics.conversionDate || ""); break;
         case "nota":         cmp = (Number(a.lead.nota) || 0) - (Number(b.lead.nota) || 0); break;
         case "avaliacoes":   cmp = (Number(a.lead.avaliacoes) || 0) - (Number(b.lead.avaliacoes) || 0); break;
-        case "totalCalls":   cmp = a.metrics.totalCalls - b.metrics.totalCalls; break;
-        case "totalFollowUps": cmp = a.metrics.totalFollowUps - b.metrics.totalFollowUps; break;
+        case "tempoCnpj":    cmp = sortValueTempoCnpj(a.lead.tempo_cnpj) - sortValueTempoCnpj(b.lead.tempo_cnpj); break;
+        case "rlSite":       cmp = a.rlSite.localeCompare(b.rlSite, "pt-BR", { sensitivity: "base" }); break;
         case "acionadoBase": {
           const getVal = (row: typeof a) => {
             const v =
@@ -700,9 +741,23 @@ export function OutboundLeadsTable({
   };
 
   const requestDial = (lead: Lead, preferredPhone?: string) => {
+    const preferred = normalizePhoneValue(preferredPhone);
     const dialablePhoneItems = getDialablePhoneItemsForLead(lead);
     if (dialablePhoneItems.length === 0) {
+      if (isDialablePhone(preferred)) {
+        void callLead(lead, preferred);
+        return;
+      }
       setCallFeedback(lead.id, { type: "error", message: "Lead sem telefone para discagem." });
+      return;
+    }
+
+    const preferredValidPhone = preferred
+      ? dialablePhoneItems.find((item) => isSamePhoneValue(item.value, preferred))?.value
+      : "";
+
+    if (preferredValidPhone) {
+      void callLead(lead, preferredValidPhone);
       return;
     }
 
@@ -711,11 +766,8 @@ export function OutboundLeadsTable({
       return;
     }
 
-    const preferredValidPhone = preferredPhone
-      ? dialablePhoneItems.find((item) => isSamePhoneValue(item.value, preferredPhone))?.value
-      : "";
     setPhonePickerLead(lead);
-    setSelectedDialPhone(preferredValidPhone || dialablePhoneItems[0].value);
+    setSelectedDialPhone(dialablePhoneItems[0].value);
   };
 
   useEffect(() => {
@@ -920,7 +972,7 @@ export function OutboundLeadsTable({
         onMouseDown={handleMouseDown}
         className={`overflow-x-auto ${isDragging ? "cursor-grabbing select-none" : "cursor-grab"}`}
       >
-        <table ref={tableRef} className="w-full min-w-[3000px] text-left">
+        <table ref={tableRef} className="w-full min-w-[2200px] text-left">
           <thead className="border-b border-border bg-slate-900/60 text-[11px] uppercase tracking-[0.08em] text-muted">
             <tr>
               <th className="w-9 px-3 py-2.5 xl:px-3.5 2xl:py-2">
@@ -933,197 +985,151 @@ export function OutboundLeadsTable({
                   aria-label="Selecionar todos"
                 />
               </th>
-              <th className="w-[6rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Ações</th>
-              <SortHeader col="acionadoBase" label="Acionado Base" active={sortCol === "acionadoBase"} dir={sortDir} onSort={handleSort} />
+              <th className="w-[6rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Acoes</th>
+              <SortHeader col="acionadoBase" label="Acionado" active={sortCol === "acionadoBase"} dir={sortDir} onSort={handleSort} />
               {mode === "callback" ? (
                 <SortHeader col="retornos" label="Retornos" active={sortCol === "retornos"} dir={sortDir} onSort={handleSort} />
               ) : null}
-              <SortHeader col="company"        label="Empresa"           width="w-[14rem]"  active={sortCol === "company"}        dir={sortDir} onSort={handleSort} />
-              <SortHeader col="name"           label="Responsavel"       width="w-[12rem]"  active={sortCol === "name"}           dir={sortDir} onSort={handleSort} />
-              <SortHeader col="owner"          label="Vendedor"          width="w-[12rem]"  active={sortCol === "owner"}          dir={sortDir} onSort={handleSort} />
-              <th className="w-[19rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Telefone</th>
-              <th className="w-[14rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Email</th>
-              <th className="w-[16rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Site</th>
-              <th className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Expediente</th>
-              <SortHeader col="entryDate"      label="Data Cadastro"                        active={sortCol === "entryDate"}      dir={sortDir} onSort={handleSort} />
-              <SortHeader col="firstContactDate" label="1o Contato"                         active={sortCol === "firstContactDate"} dir={sortDir} onSort={handleSort} />
-              <SortHeader col="lastInteraction" label="Ultimo Contato"                      active={sortCol === "lastInteraction"} dir={sortDir} onSort={handleSort} />
-              <SortHeader col="nota"           label="Nota"                                 active={sortCol === "nota"}           dir={sortDir} onSort={handleSort} />
-              <SortHeader col="avaliacoes"     label="Avaliacoes"                           active={sortCol === "avaliacoes"}     dir={sortDir} onSort={handleSort} />
-              <SortHeader col="city"           label="Cidade"                               active={sortCol === "city"}           dir={sortDir} onSort={handleSort} />
-              <SortHeader col="state"          label="Estado"                               active={sortCol === "state"}          dir={sortDir} onSort={handleSort} />
-              <SortHeader col="source"         label="Origem"            width="w-[12rem]"  active={sortCol === "source"}         dir={sortDir} onSort={handleSort} />
-              <SortHeader col="totalCalls"     label="Total de Ligacoes" width="w-[9rem]"   active={sortCol === "totalCalls"}     dir={sortDir} onSort={handleSort} />
-              <SortHeader col="totalFollowUps" label="Total de Follow-ups" width="w-[10rem]" active={sortCol === "totalFollowUps"} dir={sortDir} onSort={handleSort} />
-              <th className="w-[9rem] whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">Call Agendada</th>
-              <SortHeader col="conversionDate" label="Data de Conversao" width="w-[10rem]" active={sortCol === "conversionDate"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="company" label="Empresa" width="w-[14rem]" active={sortCol === "company"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="socios" label="Socios" width="w-[14rem]" active={sortCol === "socios"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="owner" label="Vendedor" width="w-[12rem]" active={sortCol === "owner"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="telefoneGoogle" label="Telefone Google" width="w-[15rem]" active={sortCol === "telefoneGoogle"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="telefoneCnpj" label="Telefone CNPJ" width="w-[15rem]" active={sortCol === "telefoneCnpj"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="expediente" label="Expediente" active={sortCol === "expediente"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="nota" label="Nota" active={sortCol === "nota"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="avaliacoes" label="Avaliacao" active={sortCol === "avaliacoes"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="tempoCnpj" label="Tempo CNPJ" active={sortCol === "tempoCnpj"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="rlSite" label="RL Site" width="w-[14rem]" active={sortCol === "rlSite"} dir={sortDir} onSort={handleSort} />
+              <SortHeader col="source" label="Origem" width="w-[12rem]" active={sortCol === "source"} dir={sortDir} onSort={handleSort} />
             </tr>
           </thead>
           <tbody>
-            {pagedRows.map(({ lead, location, expediente, metrics }) => {
-              const phones = getLeadPhones(lead);
+            {pagedRows.map(({ lead, socios, telefoneGoogle, telefoneCnpj, rlSite, expediente, metrics }) => {
               const hasBaseActivation =
                 mode === "callback"
                   ? metrics.callbackCalls > 0
                   : metrics.totalCalls > 0 || Boolean(String(lead.firstContactDate || "").trim());
+
+              const telefoneGoogleDisplay = normalizePhoneValue(telefoneGoogle) || "-";
+              const telefoneCnpjDisplay = normalizePhoneValue(telefoneCnpj) || "-";
+              const canDialGoogle = isDialablePhone(telefoneGoogleDisplay);
+              const canDialCnpj = isDialablePhone(telefoneCnpjDisplay);
+
               return (
                 <tr
-                key={lead.id}
-                onClick={() => {
-                  if (suppressClickRef.current) return;
-                  onSelectLead(lead);
-                }}
-                className="cursor-pointer border-b border-border/70 text-[13px] text-slate-200 transition-all duration-150 hover:bg-sky-900/35 hover:shadow-[inset_0_0_0_1px_rgba(56,189,248,0.28)] xl:text-sm"
-              >
-                <td className="w-9 px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(lead.id)}
-                    onChange={() => toggleSelect(lead.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="h-3.5 w-3.5 cursor-pointer accent-sky-500"
-                    aria-label={`Selecionar ${lead.company || lead.name}`}
-                  />
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <button
-                    type="button"
-                    className="rounded-md border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[11px] text-sky-300 transition hover:bg-sky-500/20"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onEditLead(lead);
-                    }}
-                  >
-                    Editar
-                  </button>
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <span
-                    className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                      hasBaseActivation
-                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                        : "border-slate-600/80 bg-slate-700/40 text-slate-300"
-                    }`}
-                  >
-                    {hasBaseActivation ? "Sim" : "Nao"}
-                  </span>
-                </td>
-                {mode === "callback" ? (
-                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{metrics.callbackCalls}</td>
-                ) : null}
-                <td className="whitespace-nowrap px-3 py-2.5 font-medium xl:px-3.5 2xl:py-2">
-                  <TruncatedCellText value={lead.company} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <TruncatedCellText
-                    value={lead.name !== lead.company ? lead.name : ""}
-                    widthClass="w-[12rem] max-w-[12rem]"
-                  />
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <TruncatedCellText value={lead.owner} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
-                </td>
-                <td className="px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <div className="w-[19rem] max-w-[19rem] space-y-1.5">
-                    {(phones.length > 0 ? phones : [""]).map((phone, index) => {
-                      const displayPhone = normalizePhoneValue(phone) || "-";
-                      const canDialPhone = isDialablePhone(phone);
-                      return (
-                        <div
-                          key={`${lead.id}-phone-${displayPhone}-${index}`}
-                          className="flex items-center justify-between gap-2"
-                        >
-                          <TruncatedCellText value={displayPhone} widthClass="w-[11.5rem] max-w-[11.5rem]" />
-                          <button
-                            type="button"
-                            className="min-w-[74px] rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                            disabled={callingLeadId === lead.id || !canDialPhone}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!canDialPhone) return;
-                              requestDial(lead, phone);
-                            }}
-                            title={!canDialPhone ? "Telefone indisponivel para ligacao." : undefined}
-                          >
-                            {callingLeadId === lead.id ? "Ligando..." : "Ligar"}
-                          </button>
-                        </div>
-                      );
-                    })}
+                  key={lead.id}
+                  onClick={() => {
+                    if (suppressClickRef.current) return;
+                    onSelectLead(lead);
+                  }}
+                  className="cursor-pointer border-b border-border/70 text-[13px] text-slate-200 transition-all duration-150 hover:bg-sky-900/35 hover:shadow-[inset_0_0_0_1px_rgba(56,189,248,0.28)] xl:text-sm"
+                >
+                  <td className="w-9 px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(lead.id)}
+                      onChange={() => toggleSelect(lead.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="h-3.5 w-3.5 cursor-pointer accent-sky-500"
+                      aria-label={`Selecionar ${lead.company || lead.name}`}
+                    />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <button
+                      type="button"
+                      className="rounded-md border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[11px] text-sky-300 transition hover:bg-sky-500/20"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditLead(lead);
+                      }}
+                    >
+                      Editar
+                    </button>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <span
+                      className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                        hasBaseActivation
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                          : "border-slate-600/80 bg-slate-700/40 text-slate-300"
+                      }`}
+                    >
+                      {hasBaseActivation ? "Sim" : "Nao"}
+                    </span>
+                  </td>
+                  {mode === "callback" ? (
+                    <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{metrics.callbackCalls}</td>
+                  ) : null}
+                  <td className="whitespace-nowrap px-3 py-2.5 font-medium xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText value={lead.company} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText value={socios} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText value={lead.owner} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
+                  </td>
+                  <td className="px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <div className="flex w-[15rem] max-w-[15rem] items-center justify-between gap-2">
+                      <TruncatedCellText value={telefoneGoogleDisplay} fallback="-" widthClass="w-[9.5rem] max-w-[9.5rem]" />
+                      <button
+                        type="button"
+                        className="min-w-[74px] rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={callingLeadId === lead.id || !canDialGoogle}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!canDialGoogle) return;
+                          requestDial(lead, telefoneGoogleDisplay);
+                        }}
+                        title={!canDialGoogle ? "Telefone indisponivel para ligacao." : undefined}
+                      >
+                        {callingLeadId === lead.id ? "Ligando..." : "Ligar"}
+                      </button>
+                    </div>
                     {callFeedbackByLead[lead.id] ? (
                       <p
-                        className={`text-[11px] ${
+                        className={`mt-1 text-[11px] ${
                           callFeedbackByLead[lead.id].type === "success" ? "text-emerald-300" : "text-rose-300"
                         }`}
                       >
                         {callFeedbackByLead[lead.id].message}
                       </p>
                     ) : null}
-                  </div>
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <TruncatedCellText value={lead.email} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  {lead.site ? (
-                    <TruncatedCellLink
-                      value={lead.site}
-                      href={lead.site.startsWith("http") ? lead.site : `https://${lead.site}`}
-                      onClick={(e) => e.stopPropagation()}
-                      widthClass="w-[16rem] max-w-[16rem]"
-                      className="text-sky-400 underline underline-offset-2 transition hover:text-sky-300"
-                    />
-                  ) : (
-                    <TruncatedCellText value="" fallback="-" widthClass="w-[16rem] max-w-[16rem]" />
-                  )}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <span
-                    className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${expedienteStyle[expediente]}`}
-                  >
-                    {expediente}
-                  </span>
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  {formatDateBR(lead.entryDate)}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  {formatDateBR(lead.firstContactDate || null)}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <TruncatedCellText
-                    value={formatLastInteraction(lead.lastInteraction)}
-                    fallback="-"
-                    widthClass="w-[11rem] max-w-[11rem]"
-                  />
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  {formatNota(lead.nota)}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  {formatAvaliacoes(lead.avaliacoes)}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.city}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{location.state}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <TruncatedCellText value={lead.source} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{metrics.totalCalls}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{metrics.totalFollowUps}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  <span
-                    className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                      metrics.hasScheduledCall
-                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                        : "border-slate-600/80 bg-slate-700/40 text-slate-300"
-                    }`}
-                  >
-                    {metrics.hasScheduledCall ? "Sim" : "Nao"}
-                  </span>
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
-                  {metrics.conversionDate ? formatDateBR(metrics.conversionDate) : "-"}
-                </td>
+                  </td>
+                  <td className="px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <div className="flex w-[15rem] max-w-[15rem] items-center justify-between gap-2">
+                      <TruncatedCellText value={telefoneCnpjDisplay} fallback="-" widthClass="w-[9.5rem] max-w-[9.5rem]" />
+                      <button
+                        type="button"
+                        className="min-w-[74px] rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={callingLeadId === lead.id || !canDialCnpj}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!canDialCnpj) return;
+                          requestDial(lead, telefoneCnpjDisplay);
+                        }}
+                        title={!canDialCnpj ? "Telefone indisponivel para ligacao." : undefined}
+                      >
+                        {callingLeadId === lead.id ? "Ligando..." : "Ligar"}
+                      </button>
+                    </div>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <span
+                      className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${expedienteStyle[expediente]}`}
+                    >
+                      {expediente}
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{formatNota(lead.nota)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{formatAvaliacoes(lead.avaliacoes)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">{formatTempoCnpj(lead.tempo_cnpj)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText value={rlSite} fallback="-" widthClass="w-[14rem] max-w-[14rem]" />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 xl:px-3.5 2xl:py-2">
+                    <TruncatedCellText value={lead.source} fallback="-" widthClass="w-[12rem] max-w-[12rem]" />
+                  </td>
                 </tr>
               );
             })}

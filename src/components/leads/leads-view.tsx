@@ -56,9 +56,20 @@ type LeadsViewProps = {
 
 type ImportedLeadRow = {
   name: string;
+  socios: string;
   company: string;
   phone: string;
+  phoneGoogle: string;
+  phoneCnpj: string;
   email: string;
+  site: string;
+  rlSite: string;
+  tempoCnpj: string;
+  nomeFantasia: string;
+  enderecoCompleto: string;
+  horarioFuncionamento: string;
+  categoriaPrincipal: string;
+  categoriasSecundarias: string;
   source: string;
   owner: string;
   city: string;
@@ -819,30 +830,123 @@ function getFileExtension(fileName: string): string {
   return parts.length > 1 ? `.${parts[parts.length - 1]}` : "";
 }
 
+function readImportColumn(
+  cols: string[],
+  headerIndexByKey: Map<string, number>,
+  aliases: string[],
+  fallbackIndex?: number,
+): string {
+  for (const alias of aliases) {
+    const key = normalizeQueryText(alias);
+    const index = headerIndexByKey.get(key);
+    if (index == null) continue;
+    const value = String(cols[index] || "").trim();
+    if (value) return value;
+  }
+  if (fallbackIndex == null) return "";
+  return String(cols[fallbackIndex] || "").trim();
+}
+
+function buildImportedLeadRow(overrides: Partial<ImportedLeadRow>): ImportedLeadRow {
+  return {
+    name: "",
+    socios: "",
+    company: "",
+    phone: "",
+    phoneGoogle: "",
+    phoneCnpj: "",
+    email: "",
+    site: "",
+    rlSite: "",
+    tempoCnpj: "",
+    nomeFantasia: "",
+    enderecoCompleto: "",
+    horarioFuncionamento: "",
+    categoriaPrincipal: "",
+    categoriasSecundarias: "",
+    source: "",
+    owner: "",
+    city: "",
+    niche: "",
+    status: "Novo",
+    ...overrides,
+  };
+}
+
 function parseRowsMatrix(matrix: string[][]): ImportedLeadRow[] {
   if (matrix.length === 0) return [];
 
   const firstLine = matrix[0].map((value) => normalizeQueryText(value));
   const hasHeader =
     firstLine.includes("nome") ||
+    firstLine.includes("socios") ||
+    firstLine.includes("socio") ||
+    firstLine.includes("responsavel") ||
     firstLine.includes("empresa") ||
     firstLine.includes("telefone") ||
+    firstLine.includes("telefone google") ||
+    firstLine.includes("telefone cnpj") ||
     firstLine.includes("email");
   const dataRows = hasHeader ? matrix.slice(1) : matrix;
+  const headerIndexByKey = new Map<string, number>();
+  if (hasHeader) {
+    matrix[0].forEach((value, index) => {
+      headerIndexByKey.set(normalizeQueryText(value), index);
+    });
+  }
 
   return dataRows
-    .map((cols) => ({
-      name: cols[0] || "",
-      company: cols[1] || "",
-      phone: cols[2] || "",
-      email: cols[3] || "",
-      source: cols[4] || "",
-      owner: cols[5] || "",
-      city: cols[6] || "",
-      niche: cols[7] || "",
-      status: normalizeLeadStatus(cols[8] || "Novo"),
-    }))
-    .filter((row) => row.name || row.company || row.phone || row.email);
+    .map((cols) => {
+      if (!hasHeader) {
+        const phoneGoogle = String(cols[2] || "").trim();
+        return buildImportedLeadRow({
+          name: String(cols[0] || "").trim(),
+          socios: String(cols[0] || "").trim(),
+          company: String(cols[1] || "").trim(),
+          phone: phoneGoogle,
+          phoneGoogle,
+          email: String(cols[3] || "").trim(),
+          source: String(cols[4] || "").trim(),
+          owner: String(cols[5] || "").trim(),
+          city: String(cols[6] || "").trim(),
+          niche: String(cols[7] || "").trim(),
+          status: normalizeLeadStatus(cols[8] || "Novo"),
+        });
+      }
+
+      const socios = readImportColumn(cols, headerIndexByKey, ["socios", "socio", "responsavel", "nome", "contato"], 0);
+      const phoneGoogle = readImportColumn(cols, headerIndexByKey, ["telefone google", "telefone_google", "phone google", "telefone"], 2);
+      const phoneCnpj = readImportColumn(cols, headerIndexByKey, ["telefone cnpj", "telefone_cnpj", "phone cnpj"]);
+      const phone = phoneGoogle || phoneCnpj || readImportColumn(cols, headerIndexByKey, ["telefone", "phone"], 2);
+
+      return buildImportedLeadRow({
+        name: socios || readImportColumn(cols, headerIndexByKey, ["nome"], 0),
+        socios,
+        company: readImportColumn(cols, headerIndexByKey, ["empresa", "company"], 1),
+        phone,
+        phoneGoogle,
+        phoneCnpj,
+        email: readImportColumn(cols, headerIndexByKey, ["email", "e-mail"], 3),
+        site: readImportColumn(cols, headerIndexByKey, ["site", "website", "url"]),
+        rlSite: readImportColumn(cols, headerIndexByKey, ["rl site", "rl_site", "responsavel legal site"]),
+        tempoCnpj: readImportColumn(cols, headerIndexByKey, ["tempo cnpj", "tempo_cnpj", "tempo de cnpj"]),
+        nomeFantasia: readImportColumn(cols, headerIndexByKey, ["nome fantasia", "nome_fantasia"]),
+        enderecoCompleto: readImportColumn(cols, headerIndexByKey, ["endereco completo", "endereco_completo", "endereco"]),
+        horarioFuncionamento: readImportColumn(cols, headerIndexByKey, ["horario de funcionamento", "horario_funcionamento"]),
+        categoriaPrincipal: readImportColumn(cols, headerIndexByKey, ["categoria principal", "categoria_principal", "categoria", "nicho", "niche"], 7),
+        categoriasSecundarias: readImportColumn(
+          cols,
+          headerIndexByKey,
+          ["categorias secundarias", "categorias_secundarias", "categoria secundaria", "categorias"],
+        ),
+        source: readImportColumn(cols, headerIndexByKey, ["origem", "source"], 4),
+        owner: readImportColumn(cols, headerIndexByKey, ["vendedor", "owner"], 5),
+        city: readImportColumn(cols, headerIndexByKey, ["cidade", "city"], 6),
+        niche: readImportColumn(cols, headerIndexByKey, ["nicho", "niche"], 7),
+        status: normalizeLeadStatus(readImportColumn(cols, headerIndexByKey, ["status"], 8) || "Novo"),
+      });
+    })
+    .filter((row) => row.name || row.company || row.phone || row.email || row.phoneGoogle || row.phoneCnpj);
 }
 
 async function parseLeadFile(file: File): Promise<ImportedLeadRow[]> {
@@ -1320,8 +1424,19 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
         normalizeQueryText(lead.company),
         normalizeQueryText(lead.phone),
         ...getLeadPhones(lead).map((phone) => normalizeQueryText(phone)),
+        normalizeQueryText(lead.telefone_google || ""),
+        normalizeQueryText(lead.telefone_cnpj || ""),
         normalizeQueryText(lead.email),
         ...getLeadEmails(lead).map((email) => normalizeQueryText(email)),
+        normalizeQueryText(lead.nome_fantasia || ""),
+        normalizeQueryText(lead.endereco_completo || ""),
+        normalizeQueryText(lead.categoria_principal || ""),
+        normalizeQueryText(
+          Array.isArray(lead.categorias_secundarias)
+            ? lead.categorias_secundarias.join(" ")
+            : String(lead.categorias_secundarias || ""),
+        ),
+        normalizeQueryText(lead.rl_site || ""),
       ];
       return haystack.some((value) => value.includes(normalizedSearch));
     });
@@ -2126,17 +2241,44 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     const importedBase = validRows.map((row, index) => {
       const id = `L-IMP-${Date.now()}-${index + 1}`;
       const base = createEmptyLead(importDestination);
+      const socios = String(row.socios || row.name || "")
+        .split(/[|;,]/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const phoneGoogle = String(row.phoneGoogle || row.phone || "").trim();
+      const phoneCnpj = String(row.phoneCnpj || "").trim();
+      const phones = Array.from(new Set([phoneGoogle, phoneCnpj, row.phone].map((value) => String(value || "").trim()).filter(Boolean)));
+      const categoriasSecundarias = String(row.categoriasSecundarias || "")
+        .split(/[|;,]/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const nomeFantasia = String(row.nomeFantasia || "").trim() || row.company || "-";
+      const categoriaPrincipal = String(row.categoriaPrincipal || "").trim() || row.niche;
+      const tempoCnpj = String(row.tempoCnpj || "").trim();
       return {
         ...base,
         id,
-        name: row.name || "Lead importado",
+        name: socios[0] || row.name || "Lead importado",
+        names: socios.length > 0 ? socios : [row.name || "Lead importado"],
+        socios: socios.length > 0 ? socios : null,
         company: row.company || "-",
-        phone: row.phone,
+        phone: phones[0] || "",
+        phones,
+        telefone_google: phoneGoogle || null,
+        telefone_cnpj: phoneCnpj || null,
         email: row.email,
+        site: String(row.site || "").trim() || null,
+        rl_site: String(row.rlSite || "").trim() || null,
+        tempo_cnpj: tempoCnpj || null,
+        nome_fantasia: nomeFantasia || null,
+        endereco_completo: String(row.enderecoCompleto || "").trim() || null,
+        horario_funcionamento: String(row.horarioFuncionamento || "").trim() || null,
+        categoria_principal: categoriaPrincipal || null,
+        categorias_secundarias: categoriasSecundarias.length > 0 ? categoriasSecundarias : null,
         source: row.source || "Importacao",
         owner: "",
         city: row.city,
-        niche: row.niche,
+        niche: categoriaPrincipal || row.niche,
         status: row.status,
         channel: importDestination,
         firstContactDate: "",
