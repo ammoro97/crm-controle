@@ -5,6 +5,7 @@ import { CALL_ANALYSIS_SECRET_HEADER } from "@/types/call-analysis";
 import { Lead } from "@/types/crm";
 import { readLeadsCollection } from "@/lib/leads-customers-store";
 import { resolveLeadExpedienteStatusFromHorario } from "@/lib/lead-expediente";
+import { acquireAutomatedImportLock, releaseAutomatedImportLock } from "@/lib/leads-automatizado-store";
 import {
   LEAD_OWNER_DISTRIBUTION_NO_ELIGIBLE,
   LeadOwnerDistributionError,
@@ -78,6 +79,7 @@ export type SolicitacaoResponse = {
   leads?: Lead[];
   count?: number;
   pending?: boolean;
+  requestId?: string;
   message?: string;
 };
 
@@ -402,6 +404,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   const auth = await requireAuth();
   if (!auth.authenticated) return auth.response;
 
+  let lockAcquired = false;
+  let keepLockActive = false;
+
   try {
     const body = (await request.json()) as SolicitacaoPayload;
 
@@ -450,7 +455,21 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const payload = { event: CRM_EVENT_OUTBOUND, ...body };
+    const lockResult = await acquireAutomatedImportLock(body.tipoAutomacao);
+    if (!lockResult.acquired) {
+      const tipoAtivo = lockResult.active.tipoAutomacao === "cnpj" ? "CNPJ" : "APIFY";
+      return NextResponse.json<SolicitacaoResponse>(
+        {
+          success: false,
+          message: `Ja existe uma importacao automatizada em andamento (${tipoAtivo}). Aguarde a conclusao para iniciar outra.`,
+        },
+        { status: 409 },
+      );
+    }
+    lockAcquired = true;
+
+    const requestId = lockResult.entry.requestId;
+    const payload = { event: CRM_EVENT_OUTBOUND, requestId, ...body };
 
     const n8nResponse = await fetch(config.url, {
       method: config.method,
@@ -470,7 +489,16 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const n8nData = (await n8nResponse.json()) as N8nRetornoBody | N8nLeadItem[];
+    let n8nData: N8nRetornoBody | N8nLeadItem[] = [];
+    try {
+      const rawText = await n8nResponse.text();
+      if (rawText.trim()) {
+        n8nData = JSON.parse(rawText) as N8nRetornoBody | N8nLeadItem[];
+      }
+    } catch (parseError) {
+      console.warn("[SOLICITAR] resposta n8n nao-JSON, seguindo como pending");
+    }
+
     console.log("[SOLICITAR] n8n_response_raw", JSON.stringify(n8nData).slice(0, 500));
 
     const rawLeads: N8nLeadItem[] = Array.isArray(n8nData)
@@ -501,6 +529,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       empresas: leads.map((l) => l.company),
     });
 
+    const isPending = leads.length === 0;
+    keepLockActive = isPending;
+
     // Se n8n respondeu com leads sincronamente, retorna direto.
     // Se retornou vazio (respond immediately / async), sinaliza pending
     // para o frontend aguardar o callback via /retorno + /pendentes.
@@ -508,7 +539,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       success: true,
       leads,
       count: leads.length,
-      pending: leads.length === 0,
+      pending: isPending,
+      requestId,
     });
   } catch (error) {
     if (
@@ -533,5 +565,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       { success: false, message: "Nao foi possivel processar a solicitacao." },
       { status: 500 },
     );
+  } finally {
+    if (lockAcquired && !keepLockActive) {
+      await releaseAutomatedImportLock();
+    }
   }
 }

@@ -42,6 +42,12 @@ function isMissingAuthUserIdColumn(error: { code?: string; message?: string } | 
   return code === "42703" || message.includes("auth_user_id");
 }
 
+function isInvalidUuidInputError(error: { code?: string; message?: string } | null | undefined): boolean {
+  const code = normalizeText(error?.code);
+  const message = normalizeText(error?.message).toLowerCase();
+  return code === "22P02" || message.includes("invalid input syntax for type uuid");
+}
+
 function toResponsavelRow(raw: Record<string, unknown>): ResponsavelRow | null {
   const id = normalizeText(raw.id);
   const nome = normalizeText(raw.nome);
@@ -126,6 +132,9 @@ export async function resolveResponsavelByAuthUser(
 ): Promise<ResolvedResponsavelByAuth> {
   const authUserId = normalizeText(input.authUserId);
   const authEmail = normalizeEmail(input.authEmail);
+  const authUserByEmail = authEmail ? await findAuthUserByEmail(authEmail) : null;
+  const authUserIdFromEmail = normalizeText(authUserByEmail?.id);
+  const authUserIdCandidates = new Set<string>([authUserId, authUserIdFromEmail].filter(Boolean));
 
   if (!authUserId) {
     throw new ResponsavelByAuthError(401, "RESPONSAVEL_AUTH_USER_MISSING", "Usuario autenticado nao encontrado.");
@@ -139,7 +148,7 @@ export async function resolveResponsavelByAuthUser(
   const { rows, hasAuthUserIdColumn } = await queryResponsaveis();
 
   if (hasAuthUserIdColumn) {
-    const byAuth = rows.filter((row) => normalizeText(row.auth_user_id) === authUserId);
+    const byAuth = rows.filter((row) => authUserIdCandidates.has(normalizeText(row.auth_user_id)));
     if (byAuth.length > 1) {
       throw new ResponsavelByAuthError(
         409,
@@ -149,11 +158,12 @@ export async function resolveResponsavelByAuthUser(
     }
     if (byAuth.length === 1) {
       const row = byAuth[0];
+      const rowAuthUserId = normalizeText(row.auth_user_id) || null;
       return {
         id: row.id,
         nome: row.nome,
         emailLogin: row.email || null,
-        authUserId,
+        authUserId: rowAuthUserId,
         linkStatus: "linked",
       };
     }
@@ -185,7 +195,7 @@ export async function resolveResponsavelByAuthUser(
 
   const matched = byEmail[0];
   const linkedAuthUserId = normalizeText(matched.auth_user_id);
-  if (linkedAuthUserId && linkedAuthUserId !== authUserId) {
+  if (linkedAuthUserId && !authUserIdCandidates.has(linkedAuthUserId)) {
     throw new ResponsavelByAuthError(
       409,
       "RESPONSAVEL_AUTH_LINKED_TO_OTHER_USER",
@@ -193,10 +203,13 @@ export async function resolveResponsavelByAuthUser(
     );
   }
 
+  let resolvedAuthUserId: string | null = linkedAuthUserId || null;
+
   if (hasAuthUserIdColumn && !linkedAuthUserId) {
+    const authUserIdToPersist = authUserIdFromEmail || authUserId;
     const { error } = await admin
       .from(RESPONSAVEIS_TABLE)
-      .update({ auth_user_id: authUserId })
+      .update({ auth_user_id: authUserIdToPersist })
       .eq("id", matched.id)
       .is("auth_user_id", null);
 
@@ -209,11 +222,20 @@ export async function resolveResponsavelByAuthUser(
           "Conflito ao vincular Responsavel ao usuario autenticado.",
         );
       }
-      throw new ResponsavelByAuthError(
-        500,
-        "RESPONSAVEL_AUTH_LINK_UPDATE_FAILED",
-        error.message || "Nao foi possivel vincular usuario autenticado ao Responsavel.",
-      );
+      if (isInvalidUuidInputError(error)) {
+        // Compatibilidade: alguns ambientes possuem auth_user_id como UUID
+        // enquanto o auth local usa IDs no formato USR-*. Nesses casos,
+        // seguimos via fallback por e-mail sem bloquear o fluxo de ligação.
+        resolvedAuthUserId = null;
+      } else {
+        throw new ResponsavelByAuthError(
+          500,
+          "RESPONSAVEL_AUTH_LINK_UPDATE_FAILED",
+          error.message || "Nao foi possivel vincular usuario autenticado ao Responsavel.",
+        );
+      }
+    } else {
+      resolvedAuthUserId = authUserIdToPersist;
     }
   }
 
@@ -221,8 +243,8 @@ export async function resolveResponsavelByAuthUser(
     id: matched.id,
     nome: matched.nome,
     emailLogin: matched.email || null,
-    authUserId: hasAuthUserIdColumn ? authUserId : null,
-    linkStatus: "email_fallback",
+    authUserId: hasAuthUserIdColumn ? resolvedAuthUserId : null,
+    linkStatus: resolvedAuthUserId ? "linked" : "email_fallback",
   };
 }
 

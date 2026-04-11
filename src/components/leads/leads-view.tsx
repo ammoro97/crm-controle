@@ -174,7 +174,19 @@ type AutomationApiResponse = {
   leads?: Lead[];
   count?: number;
   pending?: boolean;
+  requestId?: string;
   message?: string;
+};
+
+type AutomationStatusApiResponse = {
+  success?: boolean;
+  active?: boolean;
+  importacao?: {
+    requestId?: string;
+    tipoAutomacao?: "api" | "cnpj";
+    createdAt?: string;
+    updatedAt?: string;
+  };
 };
 
 type DashboardWidgetId =
@@ -1225,6 +1237,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const [isSubmittingAutomation, setIsSubmittingAutomation] = useState(false);
   const [automationError, setAutomationError] = useState("");
   const [automationLeadsCount, setAutomationLeadsCount] = useState(0);
+  const [automationInProgress, setAutomationInProgress] = useState(false);
+  const [automationInProgressTipo, setAutomationInProgressTipo] = useState<AutomationTipo | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isParsingImportFile, setIsParsingImportFile] = useState(false);
   const [importFileName, setImportFileName] = useState("");
@@ -2230,8 +2244,8 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   }, [responsaveis]);
 
   const resetAutomation = () => {
-    setAutomationStep("tipo");
-    setAutomationTipo(null);
+    setAutomationStep(automationInProgress ? "aguardando" : "tipo");
+    setAutomationTipo(automationInProgress ? automationInProgressTipo : null);
     setFormApi({ totalLeads: "", nicho: "", estado: "", cidade: "" });
     setFormCnpj({ cnae: "", cidade: "", estado: "", anos: "", quantidade: "" });
     setIsSubmittingAutomation(false);
@@ -2247,6 +2261,12 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   const handleSubmitAutomation = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!automationTipo) return;
+    if (automationInProgress) {
+      const tipoLabel = automationInProgressTipo === "cnpj" ? "CNPJ" : "APIFY";
+      setAutomationError(`Ja existe uma importacao automatizada em andamento (${tipoLabel}). Aguarde a conclusao.`);
+      setAutomationStep("aguardando");
+      return;
+    }
 
     setIsSubmittingAutomation(true);
     setAutomationError("");
@@ -2280,6 +2300,10 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
       const data = (await response.json()) as AutomationApiResponse;
 
       if (!response.ok || !data.success) {
+        if (response.status === 409) {
+          setAutomationInProgress(true);
+          setAutomationStep("aguardando");
+        }
         setAutomationError(data.message || "Erro ao processar automacao. Tente novamente.");
         return;
       }
@@ -2296,11 +2320,17 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
           return merged.nextLeads;
         });
         setAutomationLeadsCount(returnedLeads.length);
+        setAutomationInProgress(false);
+        setAutomationInProgressTipo(null);
         setAutomationStep("sucesso");
       } else if (data.pending) {
         // n8n processa async - aguarda callback via /retorno + polling /pendentes
+        setAutomationInProgress(true);
+        setAutomationInProgressTipo(automationTipo);
         setAutomationStep("aguardando");
       } else {
+        setAutomationInProgress(false);
+        setAutomationInProgressTipo(null);
         setAutomationError("Nenhum lead foi retornado pela automacao. Verifique os parametros e tente novamente.");
       }
     } catch (error) {
@@ -2483,11 +2513,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
   useEffect(() => {
     if (automationStep !== "aguardando") return;
 
-    let attempts = 0;
-    const MAX_ATTEMPTS = 24; // 2 minutos a cada 5s
-
     const intervalId = setInterval(async () => {
-      attempts++;
       try {
         const response = await fetch("/api/leads/automatizado/pendentes", {
           method: "GET",
@@ -2504,22 +2530,76 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             return merged.nextLeads;
           });
           setAutomationLeadsCount(data.leads.length);
+          setAutomationInProgress(false);
+          setAutomationInProgressTipo(null);
           setAutomationStep("sucesso");
           return;
         }
       } catch (error) {
         // Ignora falhas de poll
       }
-      if (attempts >= MAX_ATTEMPTS) {
-        setAutomationError(
-          "Tempo limite excedido. Verifique se o n8n processou a solicitacao e tente novamente.",
-        );
-        setAutomationStep("formulario");
+
+      try {
+        const statusResponse = await fetch("/api/leads/automatizado/status", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const statusData = (await statusResponse.json()) as AutomationStatusApiResponse;
+        if (statusResponse.ok && statusData.success && !statusData.active) {
+          setAutomationInProgress(false);
+          setAutomationInProgressTipo(null);
+          setAutomationError("A importacao foi concluida sem retorno de novos leads.");
+          setAutomationStep("formulario");
+        }
+      } catch (error) {
+        // Ignora falhas de status
       }
     }, 5000);
 
     return () => clearInterval(intervalId);
   }, [automationStep, mergeIncomingAutomatedLeads]);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+
+    const syncStatus = async () => {
+      try {
+        const response = await fetch("/api/leads/automatizado/status", {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const data = (await response.json()) as AutomationStatusApiResponse;
+        if (!active || !response.ok || !data.success) return;
+
+        const isActive = Boolean(data.active);
+        const tipoAtivo = data.importacao?.tipoAutomacao === "cnpj" ? "cnpj" : data.importacao?.tipoAutomacao === "api" ? "api" : null;
+        setAutomationInProgress(isActive);
+        setAutomationInProgressTipo(isActive ? tipoAtivo : null);
+      } catch (error) {
+        // Ignora falhas de status
+      }
+    };
+
+    void syncStatus();
+    const intervalId = setInterval(() => {
+      void syncStatus();
+    }, 15000);
+
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!automationOpen) return;
+    if (automationInProgress && automationStep !== "aguardando" && automationStep !== "sucesso") {
+      setAutomationStep("aguardando");
+    }
+  }, [automationInProgress, automationOpen, automationStep]);
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -2643,14 +2723,17 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                     Manual
                   </button>
                   <div className="mx-3 h-px bg-border" />
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800"
-                    onClick={() => {
-                      setAddMenuOpen(false);
-                      setAutomationOpen(true);
-                    }}
-                  >
+              <button
+                type="button"
+                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-slate-200 transition hover:bg-slate-800"
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  if (automationInProgress) {
+                    setAutomationStep("aguardando");
+                  }
+                  setAutomationOpen(true);
+                }}
+              >
                     <svg
                       viewBox="0 0 16 16"
                       fill="none"
@@ -2977,7 +3060,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
             <div>
               <p className="text-base font-semibold text-slate-100">Buscando leads...</p>
               <p className="mt-1 text-sm text-slate-400">
-                O n8n esta processando a solicitacao. Isso pode levar alguns instantes.
+                O n8n esta processando a solicitacao. Essa etapa pode levar minutos ou horas, conforme o volume.
               </p>
             </div>
             <button type="button" className="btn-ghost h-9 px-4 text-sm" onClick={closeAutomation}>
@@ -3194,7 +3277,7 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
                 Voltar
               </button>
               <button type="submit" className="btn-primary h-9 px-4 text-sm" disabled={isSubmittingAutomation}>
-                {isSubmittingAutomation ? "Enviando..." : "Enviar"}
+                {isSubmittingAutomation ? "Enviando..." : automationInProgress ? "Importacao em andamento" : "Enviar"}
               </button>
             </div>
           </form>

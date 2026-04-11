@@ -9,6 +9,7 @@ import { distributeLeadOwnersFromDatabase } from "@/lib/lead-owner-distribution-
 import { resolveLeadExpedienteStatusFromHorario } from "@/lib/lead-expediente";
 import { readLeadsCollection } from "@/lib/leads-customers-store";
 import { getWebhookOutConfig } from "@/lib/webhook-out-config-store";
+import { releaseAutomatedImportLock } from "@/lib/leads-automatizado-store";
 import { CALL_ANALYSIS_SECRET_HEADER } from "@/types/call-analysis";
 import { Lead } from "@/types/crm";
 
@@ -421,6 +422,7 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  let shouldReleaseAutomationLock = false;
   try {
     const config = await getWebhookOutConfig();
     const expectedSecret = String(process.env.LEADS_AUTOMATIZADO_WEBHOOK_SECRET || config.secret || "").trim();
@@ -438,6 +440,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const raw = await request.json();
+    shouldReleaseAutomationLock = true;
 
     // Aceita corpo como array direto [ {...}, {...} ] ou como objeto { leads: [...] }
     let tipoAutomacao: "api" | "cnpj" = "api";
@@ -511,6 +514,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       { success: false, message: "Nao foi possivel processar o retorno." },
       { status: 500 },
     );
+  } finally {
+    if (shouldReleaseAutomationLock) {
+      await releaseAutomatedImportLock();
+    }
   }
 }
 
