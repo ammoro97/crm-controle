@@ -1101,15 +1101,22 @@ export function OutboundLeadsTable({
                   </td>
                   <td className="px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <div className="flex w-[15rem] max-w-[15rem] items-center justify-between gap-2">
-                      <div className="max-h-16 flex-1 space-y-1 overflow-y-auto pr-1">
+                      <div className="min-w-0 flex-1 overflow-x-auto pb-1 pr-1">
+                        <div className="flex min-w-max items-center gap-1.5">
                         {telefoneGoogleDisplay.map((phone, index) => (
-                          <TruncatedCellText
+                          <span
                             key={`${lead.id}-google-${phone}-${index}`}
-                            value={phone}
-                            fallback="-"
-                            widthClass="w-[9.5rem] max-w-[9.5rem]"
-                          />
+                            className={`inline-flex h-7 items-center rounded-md border px-2 text-[11px] ${
+                              phone === "-"
+                                ? "border-border/80 bg-slate-900/50 text-slate-400"
+                                : "border-slate-700/90 bg-slate-900/70 text-slate-100"
+                            }`}
+                            title={phone}
+                          >
+                            {phone}
+                          </span>
                         ))}
+                        </div>
                       </div>
                       <button
                         type="button"
@@ -1137,15 +1144,22 @@ export function OutboundLeadsTable({
                   </td>
                   <td className="px-3 py-2.5 xl:px-3.5 2xl:py-2">
                     <div className="flex w-[15rem] max-w-[15rem] items-center justify-between gap-2">
-                      <div className="max-h-16 flex-1 space-y-1 overflow-y-auto pr-1">
+                      <div className="min-w-0 flex-1 overflow-x-auto pb-1 pr-1">
+                        <div className="flex min-w-max items-center gap-1.5">
                         {telefoneCnpjDisplay.map((phone, index) => (
-                          <TruncatedCellText
+                          <span
                             key={`${lead.id}-cnpj-${phone}-${index}`}
-                            value={phone}
-                            fallback="-"
-                            widthClass="w-[9.5rem] max-w-[9.5rem]"
-                          />
+                            className={`inline-flex h-7 items-center rounded-md border px-2 text-[11px] ${
+                              phone === "-"
+                                ? "border-border/80 bg-slate-900/50 text-slate-400"
+                                : "border-slate-700/90 bg-slate-900/70 text-slate-100"
+                            }`}
+                            title={phone}
+                          >
+                            {phone}
+                          </span>
                         ))}
+                        </div>
                       </div>
                       <button
                         type="button"
