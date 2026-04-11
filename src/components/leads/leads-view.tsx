@@ -873,6 +873,27 @@ function buildImportedLeadRow(overrides: Partial<ImportedLeadRow>): ImportedLead
   };
 }
 
+function normalizeImportedSocioKey(value: string): string {
+  return normalizeQueryText(value).replace(/\s+/g, " ").trim();
+}
+
+function sanitizeImportedSocios(values: string[], company?: string): string[] {
+  const companyKey = normalizeImportedSocioKey(String(company || ""));
+  const seen = new Set<string>();
+  const next: string[] = [];
+
+  for (const value of values) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) continue;
+    const key = normalizeImportedSocioKey(trimmed);
+    if (!key || key === companyKey || seen.has(key)) continue;
+    seen.add(key);
+    next.push(trimmed);
+  }
+
+  return next;
+}
+
 function parseRowsMatrix(matrix: string[][]): ImportedLeadRow[] {
   if (matrix.length === 0) return [];
 
@@ -898,11 +919,13 @@ function parseRowsMatrix(matrix: string[][]): ImportedLeadRow[] {
   return dataRows
     .map((cols) => {
       if (!hasHeader) {
+        const company = String(cols[1] || "").trim();
+        const sociosList = sanitizeImportedSocios([String(cols[0] || "").trim()], company);
         const phoneGoogle = String(cols[2] || "").trim();
         return buildImportedLeadRow({
           name: String(cols[0] || "").trim(),
-          socios: String(cols[0] || "").trim(),
-          company: String(cols[1] || "").trim(),
+          socios: sociosList.join(", "),
+          company,
           phone: phoneGoogle,
           phoneGoogle,
           email: String(cols[3] || "").trim(),
@@ -914,7 +937,16 @@ function parseRowsMatrix(matrix: string[][]): ImportedLeadRow[] {
         });
       }
 
-      const socios = readImportColumn(cols, headerIndexByKey, ["socios", "socio", "responsavel", "nome", "contato"], 0);
+      const company = readImportColumn(cols, headerIndexByKey, ["empresa", "company"], 1);
+      const sociosRaw = readImportColumn(cols, headerIndexByKey, ["socios", "socio", "responsavel", "contato"], 0);
+      const sociosList = sanitizeImportedSocios(
+        sociosRaw
+          .split(/[|;,]/)
+          .map((value) => value.trim())
+          .filter(Boolean),
+        company,
+      );
+      const socios = sociosList.join(", ");
       const phoneGoogle = readImportColumn(cols, headerIndexByKey, ["telefone google", "telefone_google", "phone google", "telefone"], 2);
       const phoneCnpj = readImportColumn(cols, headerIndexByKey, ["telefone cnpj", "telefone_cnpj", "phone cnpj"]);
       const phone = phoneGoogle || phoneCnpj || readImportColumn(cols, headerIndexByKey, ["telefone", "phone"], 2);
@@ -922,7 +954,7 @@ function parseRowsMatrix(matrix: string[][]): ImportedLeadRow[] {
       return buildImportedLeadRow({
         name: socios || readImportColumn(cols, headerIndexByKey, ["nome"], 0),
         socios,
-        company: readImportColumn(cols, headerIndexByKey, ["empresa", "company"], 1),
+        company,
         phone,
         phoneGoogle,
         phoneCnpj,
@@ -2241,10 +2273,13 @@ export function LeadsView({ title, filter }: LeadsViewProps) {
     const importedBase = validRows.map((row, index) => {
       const id = `L-IMP-${Date.now()}-${index + 1}`;
       const base = createEmptyLead(importDestination);
-      const socios = String(row.socios || row.name || "")
-        .split(/[|;,]/)
-        .map((value) => value.trim())
-        .filter(Boolean);
+      const socios = sanitizeImportedSocios(
+        String(row.socios || row.name || "")
+          .split(/[|;,]/)
+          .map((value) => value.trim())
+          .filter(Boolean),
+        row.company,
+      );
       const phoneGoogle = String(row.phoneGoogle || row.phone || "").trim();
       const phoneCnpj = String(row.phoneCnpj || "").trim();
       const phones = Array.from(new Set([phoneGoogle, phoneCnpj, row.phone].map((value) => String(value || "").trim()).filter(Boolean)));

@@ -138,6 +138,23 @@ function getPayloadList(raw: OutboundLeadPayload, aliases: string[]): string[] {
     .filter(Boolean);
 }
 
+function sanitizeSocios(rawSocios: string[], company?: string | null): string[] {
+  const companyKey = normalizePayloadKey(String(company || ""));
+  const seen = new Set<string>();
+  const next: string[] = [];
+
+  for (const value of rawSocios) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) continue;
+    const key = normalizePayloadKey(trimmed);
+    if (!key || key === companyKey || seen.has(key)) continue;
+    seen.add(key);
+    next.push(trimmed);
+  }
+
+  return next;
+}
+
 function normalizeNumberLike(value: unknown): number | string | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   const text = String(value ?? "").trim();
@@ -162,7 +179,7 @@ function buildCityField(cidade?: string | null, estado?: string | null): string 
 }
 
 function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnpj"): Lead | null {
-  const socios = getPayloadList(raw, [
+  const sociosRaw = getPayloadList(raw, [
     "socios",
     "socio",
     "responsaveis",
@@ -171,7 +188,6 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
     "nome_responsavel",
     "nome_contato",
     "contato",
-    "nome",
   ]);
   const empresa = getPayloadString(raw, [
     "empresa",
@@ -182,6 +198,7 @@ function buildOutboundLead(raw: OutboundLeadPayload, tipoAutomacao: "api" | "cnp
     "razao social",
     "nome",
   ]);
+  const socios = sanitizeSocios(sociosRaw, empresa);
   const responsavel = getPayloadString(raw, ["responsavel", "name", "nome_responsavel", "contato"]);
   const firstSocio = socios[0] || "";
   const leadDisplayName = responsavel || firstSocio || empresa;

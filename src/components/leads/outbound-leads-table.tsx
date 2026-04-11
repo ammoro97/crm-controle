@@ -120,21 +120,48 @@ const expedienteStyle: Record<"Aberto" | "Fechado" | "Indefinido", string> = {
   Indefinido: "bg-slate-500/20 text-slate-400 border-slate-400/40",
 };
 
+function normalizeSocioKey(value?: string | null): string {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function uniqSocios(values: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const value of values) {
+    const normalized = normalizeSocioKey(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    next.push(String(value || "").trim());
+  }
+  return next;
+}
+
 function getLeadSociosList(lead: Lead): string[] {
-  if (Array.isArray(lead.socios) && lead.socios.length > 0) {
-    return lead.socios.map((value) => String(value || "").trim()).filter(Boolean);
-  }
+  const fromSocios = Array.isArray(lead.socios)
+    ? lead.socios.map((value) => String(value || "").trim()).filter(Boolean)
+    : String(lead.socios || "")
+        .split(/[|;,]/)
+        .map((value) => value.trim())
+        .filter(Boolean);
 
-  const rawSocios = String(lead.socios || "").trim();
-  if (rawSocios) {
-    return rawSocios
-      .split(/[|;,]/)
-      .map((value) => value.trim())
-      .filter(Boolean);
-  }
+  const fromNames = Array.isArray(lead.names)
+    ? lead.names.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
 
-  const fallback = String(lead.name || "").trim();
-  return fallback ? [fallback] : [];
+  const legacyName = String(lead.name || "").trim();
+  const merged = uniqSocios([
+    ...fromSocios,
+    ...fromNames,
+    ...(legacyName ? [legacyName] : []),
+  ]);
+
+  const companyKey = normalizeSocioKey(lead.company);
+  return merged.filter((value) => normalizeSocioKey(value) !== companyKey);
 }
 
 function getLeadSociosLabel(lead: Lead): string {

@@ -130,6 +130,23 @@ function getPayloadList(raw: N8nLeadItem, aliases: string[]): string[] {
     .filter(Boolean);
 }
 
+function sanitizeSocios(rawSocios: string[], company?: string | null): string[] {
+  const companyKey = normalizePayloadKey(String(company || ""));
+  const seen = new Set<string>();
+  const next: string[] = [];
+
+  for (const value of rawSocios) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) continue;
+    const key = normalizePayloadKey(trimmed);
+    if (!key || key === companyKey || seen.has(key)) continue;
+    seen.add(key);
+    next.push(trimmed);
+  }
+
+  return next;
+}
+
 function normalizeDateInput(value: string): string {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -174,7 +191,7 @@ function buildCityField(cidade?: string | null, estado?: string | null): string 
 }
 
 function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lead | null {
-  const socios = getPayloadList(raw, [
+  const sociosRaw = getPayloadList(raw, [
     "socios",
     "socio",
     "responsaveis",
@@ -183,7 +200,6 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
     "nome_responsavel",
     "nome_contato",
     "contato",
-    "nome",
   ]);
   const company = getPayloadString(raw, [
     "empresa",
@@ -194,6 +210,7 @@ function buildOutboundLead(raw: N8nLeadItem, tipoAutomacao: "api" | "cnpj"): Lea
     "razao social",
     "nome",
   ]);
+  const socios = sanitizeSocios(sociosRaw, company);
   const responsavel = getPayloadString(raw, ["responsavel", "name", "nome_responsavel", "contato"]);
   const firstSocio = socios[0] || "";
   const name = responsavel || firstSocio || company;
